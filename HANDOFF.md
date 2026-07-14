@@ -114,7 +114,8 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | 항목 | 상태 |
 |------|------|
 | macOS Xcode 풀 설치 + `xcode-select --switch` + `xcodebuild -runFirstLaunch` | ❌ 2026-07-13 확인: Xcode 제거됨 (`xcode-select -p` 가 CommandLineTools). macOS 재빌드 전 Xcodes.app 으로 재설치 필요 |
-| 하루 앱 `/Applications/haru.app` 설치 (2026-07-09 release 빌드, 서명 검증 OK) | ✅ 2026-07-13 설치·실행 확인 |
+| 하루 앱 `/Applications/haru.app` 설치 | ✅ 2026-07-14 GitHub Actions 클라우드 빌드로 재설치·실행 확인 |
+| **macOS 클라우드 빌드 파이프라인** (`.github/workflows/build-macos.yml`, 브랜치 `ci/macos-cloud-build`) | ✅ 로컬 Xcode·Apple ID 불필요. 재빌드: 해당 브랜치에 push (또는 main 병합 후 `gh workflow run build-macos`) → artifact `haru-macos` 다운로드 → `ditto -x -k` 해제 → `xattr -cr haru.app` (격리 해제 필수) → `/Applications` 복사. Supabase 키는 repo secret `ENV_LOCAL_B64` (base64 된 .env.local) |
 | CocoaPods (`brew install cocoapods`) | ✅ |
 | `make setup` (pub get + pod install) | ✅ |
 | Supabase 프로젝트 + schema `solo_todo` + `todos` 테이블 + RLS + index + publication | ✅ SQL 실행 완료 |
