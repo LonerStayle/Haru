@@ -1,0 +1,44 @@
+name: build-macos
+
+# macOS 릴리즈 .app 클라우드 빌드 — 로컬에 Xcode 가 없을 때 사용.
+# 실행: gh workflow run build-macos  →  artifact "haru-macos" 다운로드.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/macos-cloud-build]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.6
+          channel: stable
+          cache: true
+
+      # .env.local 은 gitignore 대상이라 secret(base64 한 덩어리)에서 복원
+      - name: Restore .env.local
+        env:
+          ENV_LOCAL_B64: ${{ secrets.ENV_LOCAL_B64 }}
+        run: echo "$ENV_LOCAL_B64" | base64 --decode > .env.local
+
+      - run: flutter pub get
+
+      # 동적 카테고리 IconData(codepoint) 가 non-const 라 --no-tree-shake-icons 필수
+      - name: Build macOS release
+        run: flutter build macos --release --no-tree-shake-icons --dart-define-from-file=.env.local
+
+      # upload-artifact 는 심링크를 보존하지 않으므로 ditto 로 먼저 zip
+      - name: Zip app bundle
+        run: ditto -c -k --keepParent build/macos/Build/Products/Release/haru.app haru-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haru-macos
+          path: haru-macos.zip
+          if-no-files-found: error

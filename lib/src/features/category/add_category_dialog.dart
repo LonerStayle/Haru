@@ -395,6 +395,7 @@ class _IconPalette extends StatelessWidget {
                 ),
               ),
               child: Icon(
+                // ignore: non_const_argument_for_const_parameter
                 IconData(cp, fontFamily: 'MaterialIcons'),
                 color: cp == selected ? selectedColor : scheme.onSurface,
                 size: 20,
