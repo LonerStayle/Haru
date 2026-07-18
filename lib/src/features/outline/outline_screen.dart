@@ -856,67 +856,86 @@ class _NoteCategorySection extends ConsumerWidget {
 }
 
 /// 단일 메모 카드 — 제목 + (있으면) 본문 미리보기. 체크 토글 없음.
-class _NoteCard extends StatelessWidget {
+///
+/// 탭 시 편집/상세 시트(AddTodoSheet)를 연다 — 체크리스트 탭의 leaf 와 동일 패턴.
+/// (메모 탭 note 는 `!hasTaskDescendant` = 하위 task 없는 순수 메모이므로 leaf 취급.)
+class _NoteCard extends ConsumerWidget {
   const _NoteCard({required this.note});
 
   final Todo note;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final desc = note.description;
+
+    // 체크리스트 leaf 의 openEdit 과 동일 — edit 모드 시트로 전체 메모를 조회/편집.
+    Future<void> openEdit() => AddTodoSheet.show(
+      context,
+      initialCategory: note.category,
+      initialTodo: note,
+      onSubmit: (_) {},
+      onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+    );
+
     // §13 — TodoTile note 와 동일한 NoteVisual 토큰을 공유해 시각 언어 통일.
     // 틴트 배경 + 좌측 accent 보더 + 카테고리색 글리프 + non-italic 제목.
     // (메모 탭은 전체가 메모라 per-card "메모" 라벨은 맥락상 중복 → 생략.)
-    return Container(
-      key: ValueKey('outline-note-${note.id}'),
-      margin: const EdgeInsets.symmetric(
+    return Padding(
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTokens.space4,
         vertical: AppTokens.space4,
       ),
-      padding: const EdgeInsets.all(AppTokens.space12),
-      decoration: BoxDecoration(
-        color: NoteVisual.tint(note.category, theme.brightness),
+      child: InkWell(
+        onTap: openEdit,
         borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        border: Border(
-          left: BorderSide(
-            color: NoteVisual.accent(note.category),
-            width: NoteVisual.accentWidth,
-          ),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.sticky_note_2_outlined,
-            size: 16,
-            color: NoteVisual.accent(note.category),
-          ),
-          const SizedBox(width: AppTokens.space8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  note.title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (desc != null && desc.trim().isNotEmpty) ...[
-                  const SizedBox(height: AppTokens.space4),
-                  Text(
-                    desc,
-                    style: theme.textTheme.bodySmall,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
+        child: Container(
+          key: ValueKey('outline-note-${note.id}'),
+          padding: const EdgeInsets.all(AppTokens.space12),
+          decoration: BoxDecoration(
+            color: NoteVisual.tint(note.category, theme.brightness),
+            borderRadius: BorderRadius.circular(AppTokens.radiusM),
+            border: Border(
+              left: BorderSide(
+                color: NoteVisual.accent(note.category),
+                width: NoteVisual.accentWidth,
+              ),
             ),
           ),
-        ],
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.sticky_note_2_outlined,
+                size: 16,
+                color: NoteVisual.accent(note.category),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      note.title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (desc != null && desc.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppTokens.space4),
+                      Text(
+                        desc,
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -358,6 +358,29 @@ void main() {
       expect(find.byKey(const ValueKey('outline-check-t')), findsNothing);
     });
 
+    testWidgets('메모 카드 탭 → 편집/상세 시트(AddTodoSheet) 노출', (tester) async {
+      final note = make(
+        id: 'n1',
+        title: '메모1',
+        type: TodoType.note,
+        description: '메모 본문',
+      );
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [note],
+        },
+        allTodos: [note],
+      );
+
+      await openNotesTab(tester);
+
+      // 탭 → 편집/상세 바텀시트(AddTodoSheet) 노출 (체크리스트 leaf 와 동일 패턴).
+      await tester.tap(find.byKey(const ValueKey('outline-note-n1')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
+    });
+
     testWidgets('_NoteCard 가 NoteVisual 토큰으로 통일 (틴트+accent, non-italic)', (
       tester,
     ) async {
