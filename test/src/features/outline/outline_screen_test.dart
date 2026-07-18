@@ -295,6 +295,12 @@ void main() {
         reason: '상세 화면 진입',
       );
       expect(find.text('캔버스 첨부 오류'), findsOneWidget);
+      // child2 는 완료라 상세 화면(드릴 리스트)에서도 기본 접힘.
+      expect(find.text('narrative 에러'), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+      // 상세 화면 완료 접기 행 펼치면 노출.
+      await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
+      await tester.pump();
       expect(find.text('narrative 에러'), findsOneWidget);
     });
 
