@@ -16,8 +16,10 @@ help:
 	@echo "  make setup        deps 받기 + (macOS) pod install"
 	@echo "  make codegen      freezed / json / drift codegen"
 	@echo ""
-	@echo "  make run          macOS 데스크탑 실행 (env 자동)"
-	@echo "  make run-android  Android 첫 device 자동 선택 실행"
+	@echo "  make run             macOS 데스크탑 실행 (env 자동)"
+	@echo "  make devices         연결된 기기 목록 (설치 전 확인용)"
+	@echo "  make run-android     Android 폰에 debug 로 즉시 실행 (케이블 연결, 확인용 최속)"
+	@echo "  make install-android Android 폰에 release APK 설치 (케이블 뽑아도 남음)"
 	@echo ""
 	@echo "  make build-macos  release .app 산출 (build/macos/.../haru.app)"
 	@echo "  make build-apk    release .apk 산출 (build/app/outputs/flutter-apk/)"
@@ -76,6 +78,22 @@ run-android:
 	fi; \
 	echo "→ device: $$DEV"; \
 	flutter run -d $$DEV $(DART_DEFINE)
+
+.PHONY: devices
+devices:
+	flutter devices
+
+# 폰에 release APK 를 설치 (케이블 뽑아도 남음). build-apk 로 env 를 구운 APK 를 그대로 push.
+# 사전 준비: 안드로이드 폰 USB 연결 + '개발자 옵션 → USB 디버깅' ON → `make devices` 로 확인.
+.PHONY: install-android
+install-android: build-apk
+	@DEV=$$(flutter devices --machine 2>/dev/null | awk -F'"' '/"id":/{id=$$4} /targetPlatform/ && /android/{print id; exit}'); \
+	if [ -z "$$DEV" ]; then \
+		echo "❌ 연결된 Android 기기 없음. USB 디버깅 켜고 연결 후 make devices 로 확인"; \
+		exit 1; \
+	fi; \
+	echo "→ install to $$DEV"; \
+	flutter install -d $$DEV --use-application-binary=build/app/outputs/flutter-apk/app-release.apk
 
 # ────────────────────────────────────────────────────────────────────────────
 # Build (release)
