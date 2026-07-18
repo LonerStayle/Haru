@@ -43,6 +43,8 @@ abstract class Category with _$Category {
   Color get color => Color(colorValue);
 
   /// 시각화용 [IconData]. Material Icons 폰트 family 고정.
+  /// 동적 codepoint 라 non-const — 빌드는 --no-tree-shake-icons 전제.
+  // ignore: non_const_argument_for_const_parameter
   IconData get icon => IconData(iconCodePoint, fontFamily: 'MaterialIcons');
 
   /// 키보드 단축 (`1`~`5`) 으로 카테고리 전환할 때 쓰는 위치 (1-based).

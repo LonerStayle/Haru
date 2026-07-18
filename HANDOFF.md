@@ -187,7 +187,7 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 
 ## 6. 함정 / 주의사항
 
-- **cwd**: Bash 호출이 종종 옛 폴더로 reset. **항상 절대경로** `/Users/goldenplanet/jinsup_ralph_mobile/haru` 사용.
+- **cwd**: Bash 호출이 종종 옛 폴더로 reset. **항상 절대경로** `/Users/seobi/jinsup_ralph_mobile/haru` 사용.
 - **Drift DateTime**: `storeDateTimeAsText: true` — ISO 8601 text 로 저장. SQL 비교 시 string 사전순.
 - **Supabase schema**: `solo_todo.todos` (public 아님). 코드는 `client.schema('solo_todo').from('todos')`. SQL 도 `solo_todo.*`.
 - **LWW**: 동률 stomp 회피 위해 `>` strict (>=) X.
