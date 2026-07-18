@@ -14,6 +14,7 @@ _Category _$CategoryFromJson(Map<String, dynamic> json) => _Category(
   sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
   isBuiltin: json['isBuiltin'] as bool? ?? false,
   groupId: json['groupId'] as String? ?? null,
+  archived: json['archived'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$CategoryToJson(_Category instance) => <String, dynamic>{
@@ -24,4 +25,5 @@ Map<String, dynamic> _$CategoryToJson(_Category instance) => <String, dynamic>{
   'sortOrder': instance.sortOrder,
   'isBuiltin': instance.isBuiltin,
   'groupId': instance.groupId,
+  'archived': instance.archived,
 };

@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../../ui/widgets/undo_snackbar.dart';
 import '../category/add_group_dialog.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
@@ -75,6 +76,12 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
               onTap: () => Navigator.of(ctx).pop('edit'),
             ),
             ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: const Text('보관'),
+              subtitle: const Text('카테고리·할 일까지 함께 숨겨요'),
+              onTap: () => Navigator.of(ctx).pop('archive'),
+            ),
+            ListTile(
               leading: Icon(
                 Icons.delete_outline,
                 color: Theme.of(ctx).colorScheme.error,
@@ -89,9 +96,34 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
     if (!mounted) return;
     if (action == 'edit') {
       await _editGroup(group);
+    } else if (action == 'archive') {
+      await _archiveGroup(group);
     } else if (action == 'delete') {
       await _deleteGroup(group);
     }
+  }
+
+  /// 그룹 보관 — 소속 카테고리·할 일까지 cascade 로 숨긴다. 되돌리기 스낵바 제공.
+  Future<void> _archiveGroup(Group group) async {
+    await ref.read(groupsControllerProvider).archive(group.id);
+    if (!mounted) return;
+    showUndoSnackbar(
+      context,
+      message: "'${group.label}' 그룹을 보관했어요. (카테고리·할 일 포함)",
+      onUndo: () => ref.read(groupsControllerProvider).unarchive(group.id),
+    );
+  }
+
+  /// 카테고리 보관 — 활성 화면에서 숨긴다 (할 일 포함). 되돌리기 스낵바 제공.
+  Future<void> _archiveCategory(Category category) async {
+    await ref.read(categoriesControllerProvider).archive(category.id);
+    if (!mounted) return;
+    showUndoSnackbar(
+      context,
+      message: '${category.label} 카테고리를 보관했어요.',
+      onUndo: () =>
+          ref.read(categoriesControllerProvider).unarchive(category.id),
+    );
   }
 
   /// 카테고리 삭제 — confirm → controller. blocked(할 일 ≥1) 면 안내 dialog.
@@ -312,6 +344,12 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
               onTap: () => Navigator.of(ctx).pop('move'),
             ),
             ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: const Text('보관'),
+              subtitle: const Text('할 일과 함께 숨겨요'),
+              onTap: () => Navigator.of(ctx).pop('archive'),
+            ),
+            ListTile(
               leading: Icon(
                 Icons.delete_outline,
                 color: Theme.of(ctx).colorScheme.error,
@@ -326,6 +364,8 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
     if (!mounted) return;
     if (action == 'move') {
       await _moveCategory(category, groups);
+    } else if (action == 'archive') {
+      await _archiveCategory(category);
     } else if (action == 'delete') {
       await _deleteCategory(category);
     }
@@ -337,8 +377,10 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
     final scheme = theme.colorScheme;
 
     final categories =
-        ref.watch(categoriesProvider).asData?.value ?? Category.builtinSeeds;
-    final groups = ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+        ref.watch(activeCategoriesProvider).asData?.value ??
+        Category.builtinSeeds;
+    final groups =
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
 
     // 카테고리를 groupId 별로 분류.
     final ungrouped = <Category>[];

@@ -1166,6 +1166,21 @@ class $CategoriesTable extends Categories
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _archivedMeta = const VerificationMeta(
+    'archived',
+  );
+  @override
+  late final GeneratedColumn<bool> archived = GeneratedColumn<bool>(
+    'archived',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("archived" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1176,6 +1191,7 @@ class $CategoriesTable extends Categories
     isBuiltin,
     createdAt,
     groupId,
+    archived,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1247,6 +1263,12 @@ class $CategoriesTable extends Categories
         groupId.isAcceptableOrUnknown(data['group_id']!, _groupIdMeta),
       );
     }
+    if (data.containsKey('archived')) {
+      context.handle(
+        _archivedMeta,
+        archived.isAcceptableOrUnknown(data['archived']!, _archivedMeta),
+      );
+    }
     return context;
   }
 
@@ -1288,6 +1310,10 @@ class $CategoriesTable extends Categories
         DriftSqlType.string,
         data['${effectivePrefix}group_id'],
       ),
+      archived: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}archived'],
+      )!,
     );
   }
 
@@ -1306,6 +1332,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
   final bool isBuiltin;
   final DateTime createdAt;
   final String? groupId;
+  final bool archived;
   const CategoryRow({
     required this.id,
     required this.label,
@@ -1315,6 +1342,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
     required this.isBuiltin,
     required this.createdAt,
     this.groupId,
+    required this.archived,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1329,6 +1357,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
     if (!nullToAbsent || groupId != null) {
       map['group_id'] = Variable<String>(groupId);
     }
+    map['archived'] = Variable<bool>(archived);
     return map;
   }
 
@@ -1344,6 +1373,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
       groupId: groupId == null && nullToAbsent
           ? const Value.absent()
           : Value(groupId),
+      archived: Value(archived),
     );
   }
 
@@ -1361,6 +1391,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
       isBuiltin: serializer.fromJson<bool>(json['isBuiltin']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       groupId: serializer.fromJson<String?>(json['groupId']),
+      archived: serializer.fromJson<bool>(json['archived']),
     );
   }
   @override
@@ -1375,6 +1406,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
       'isBuiltin': serializer.toJson<bool>(isBuiltin),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'groupId': serializer.toJson<String?>(groupId),
+      'archived': serializer.toJson<bool>(archived),
     };
   }
 
@@ -1387,6 +1419,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
     bool? isBuiltin,
     DateTime? createdAt,
     Value<String?> groupId = const Value.absent(),
+    bool? archived,
   }) => CategoryRow(
     id: id ?? this.id,
     label: label ?? this.label,
@@ -1396,6 +1429,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
     isBuiltin: isBuiltin ?? this.isBuiltin,
     createdAt: createdAt ?? this.createdAt,
     groupId: groupId.present ? groupId.value : this.groupId,
+    archived: archived ?? this.archived,
   );
   CategoryRow copyWithCompanion(CategoriesCompanion data) {
     return CategoryRow(
@@ -1411,6 +1445,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
       isBuiltin: data.isBuiltin.present ? data.isBuiltin.value : this.isBuiltin,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       groupId: data.groupId.present ? data.groupId.value : this.groupId,
+      archived: data.archived.present ? data.archived.value : this.archived,
     );
   }
 
@@ -1424,7 +1459,8 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
           ..write('sortOrder: $sortOrder, ')
           ..write('isBuiltin: $isBuiltin, ')
           ..write('createdAt: $createdAt, ')
-          ..write('groupId: $groupId')
+          ..write('groupId: $groupId, ')
+          ..write('archived: $archived')
           ..write(')'))
         .toString();
   }
@@ -1439,6 +1475,7 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
     isBuiltin,
     createdAt,
     groupId,
+    archived,
   );
   @override
   bool operator ==(Object other) =>
@@ -1451,7 +1488,8 @@ class CategoryRow extends DataClass implements Insertable<CategoryRow> {
           other.sortOrder == this.sortOrder &&
           other.isBuiltin == this.isBuiltin &&
           other.createdAt == this.createdAt &&
-          other.groupId == this.groupId);
+          other.groupId == this.groupId &&
+          other.archived == this.archived);
 }
 
 class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
@@ -1463,6 +1501,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
   final Value<bool> isBuiltin;
   final Value<DateTime> createdAt;
   final Value<String?> groupId;
+  final Value<bool> archived;
   final Value<int> rowid;
   const CategoriesCompanion({
     this.id = const Value.absent(),
@@ -1473,6 +1512,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
     this.isBuiltin = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.groupId = const Value.absent(),
+    this.archived = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   CategoriesCompanion.insert({
@@ -1484,6 +1524,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
     this.isBuiltin = const Value.absent(),
     required DateTime createdAt,
     this.groupId = const Value.absent(),
+    this.archived = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        label = Value(label),
@@ -1499,6 +1540,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
     Expression<bool>? isBuiltin,
     Expression<DateTime>? createdAt,
     Expression<String>? groupId,
+    Expression<bool>? archived,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1510,6 +1552,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
       if (isBuiltin != null) 'is_builtin': isBuiltin,
       if (createdAt != null) 'created_at': createdAt,
       if (groupId != null) 'group_id': groupId,
+      if (archived != null) 'archived': archived,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1523,6 +1566,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
     Value<bool>? isBuiltin,
     Value<DateTime>? createdAt,
     Value<String?>? groupId,
+    Value<bool>? archived,
     Value<int>? rowid,
   }) {
     return CategoriesCompanion(
@@ -1534,6 +1578,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
       isBuiltin: isBuiltin ?? this.isBuiltin,
       createdAt: createdAt ?? this.createdAt,
       groupId: groupId ?? this.groupId,
+      archived: archived ?? this.archived,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1565,6 +1610,9 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
     if (groupId.present) {
       map['group_id'] = Variable<String>(groupId.value);
     }
+    if (archived.present) {
+      map['archived'] = Variable<bool>(archived.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1582,6 +1630,7 @@ class CategoriesCompanion extends UpdateCompanion<CategoryRow> {
           ..write('isBuiltin: $isBuiltin, ')
           ..write('createdAt: $createdAt, ')
           ..write('groupId: $groupId, ')
+          ..write('archived: $archived, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1660,6 +1709,21 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, GroupRow> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _archivedMeta = const VerificationMeta(
+    'archived',
+  );
+  @override
+  late final GeneratedColumn<bool> archived = GeneratedColumn<bool>(
+    'archived',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("archived" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -1668,6 +1732,7 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, GroupRow> {
     sortOrder,
     isBuiltin,
     createdAt,
+    archived,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1722,6 +1787,12 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, GroupRow> {
     } else if (isInserting) {
       context.missing(_createdAtMeta);
     }
+    if (data.containsKey('archived')) {
+      context.handle(
+        _archivedMeta,
+        archived.isAcceptableOrUnknown(data['archived']!, _archivedMeta),
+      );
+    }
     return context;
   }
 
@@ -1755,6 +1826,10 @@ class $GroupsTable extends Groups with TableInfo<$GroupsTable, GroupRow> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
       )!,
+      archived: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}archived'],
+      )!,
     );
   }
 
@@ -1771,6 +1846,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
   final int sortOrder;
   final bool isBuiltin;
   final DateTime createdAt;
+  final bool archived;
   const GroupRow({
     required this.id,
     required this.label,
@@ -1778,6 +1854,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
     required this.sortOrder,
     required this.isBuiltin,
     required this.createdAt,
+    required this.archived,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1788,6 +1865,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
     map['sort_order'] = Variable<int>(sortOrder);
     map['is_builtin'] = Variable<bool>(isBuiltin);
     map['created_at'] = Variable<DateTime>(createdAt);
+    map['archived'] = Variable<bool>(archived);
     return map;
   }
 
@@ -1799,6 +1877,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
       sortOrder: Value(sortOrder),
       isBuiltin: Value(isBuiltin),
       createdAt: Value(createdAt),
+      archived: Value(archived),
     );
   }
 
@@ -1814,6 +1893,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
       isBuiltin: serializer.fromJson<bool>(json['isBuiltin']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      archived: serializer.fromJson<bool>(json['archived']),
     );
   }
   @override
@@ -1826,6 +1906,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
       'sortOrder': serializer.toJson<int>(sortOrder),
       'isBuiltin': serializer.toJson<bool>(isBuiltin),
       'createdAt': serializer.toJson<DateTime>(createdAt),
+      'archived': serializer.toJson<bool>(archived),
     };
   }
 
@@ -1836,6 +1917,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
     int? sortOrder,
     bool? isBuiltin,
     DateTime? createdAt,
+    bool? archived,
   }) => GroupRow(
     id: id ?? this.id,
     label: label ?? this.label,
@@ -1843,6 +1925,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
     sortOrder: sortOrder ?? this.sortOrder,
     isBuiltin: isBuiltin ?? this.isBuiltin,
     createdAt: createdAt ?? this.createdAt,
+    archived: archived ?? this.archived,
   );
   GroupRow copyWithCompanion(GroupsCompanion data) {
     return GroupRow(
@@ -1854,6 +1937,7 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
       isBuiltin: data.isBuiltin.present ? data.isBuiltin.value : this.isBuiltin,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      archived: data.archived.present ? data.archived.value : this.archived,
     );
   }
 
@@ -1865,14 +1949,22 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
           ..write('colorValue: $colorValue, ')
           ..write('sortOrder: $sortOrder, ')
           ..write('isBuiltin: $isBuiltin, ')
-          ..write('createdAt: $createdAt')
+          ..write('createdAt: $createdAt, ')
+          ..write('archived: $archived')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, label, colorValue, sortOrder, isBuiltin, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    label,
+    colorValue,
+    sortOrder,
+    isBuiltin,
+    createdAt,
+    archived,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -1882,7 +1974,8 @@ class GroupRow extends DataClass implements Insertable<GroupRow> {
           other.colorValue == this.colorValue &&
           other.sortOrder == this.sortOrder &&
           other.isBuiltin == this.isBuiltin &&
-          other.createdAt == this.createdAt);
+          other.createdAt == this.createdAt &&
+          other.archived == this.archived);
 }
 
 class GroupsCompanion extends UpdateCompanion<GroupRow> {
@@ -1892,6 +1985,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
   final Value<int> sortOrder;
   final Value<bool> isBuiltin;
   final Value<DateTime> createdAt;
+  final Value<bool> archived;
   final Value<int> rowid;
   const GroupsCompanion({
     this.id = const Value.absent(),
@@ -1900,6 +1994,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
     this.sortOrder = const Value.absent(),
     this.isBuiltin = const Value.absent(),
     this.createdAt = const Value.absent(),
+    this.archived = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   GroupsCompanion.insert({
@@ -1909,6 +2004,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
     this.sortOrder = const Value.absent(),
     this.isBuiltin = const Value.absent(),
     required DateTime createdAt,
+    this.archived = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        label = Value(label),
@@ -1921,6 +2017,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
     Expression<int>? sortOrder,
     Expression<bool>? isBuiltin,
     Expression<DateTime>? createdAt,
+    Expression<bool>? archived,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1930,6 +2027,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
       if (sortOrder != null) 'sort_order': sortOrder,
       if (isBuiltin != null) 'is_builtin': isBuiltin,
       if (createdAt != null) 'created_at': createdAt,
+      if (archived != null) 'archived': archived,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1941,6 +2039,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
     Value<int>? sortOrder,
     Value<bool>? isBuiltin,
     Value<DateTime>? createdAt,
+    Value<bool>? archived,
     Value<int>? rowid,
   }) {
     return GroupsCompanion(
@@ -1950,6 +2049,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
       sortOrder: sortOrder ?? this.sortOrder,
       isBuiltin: isBuiltin ?? this.isBuiltin,
       createdAt: createdAt ?? this.createdAt,
+      archived: archived ?? this.archived,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1975,6 +2075,9 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
+    if (archived.present) {
+      map['archived'] = Variable<bool>(archived.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1990,6 +2093,7 @@ class GroupsCompanion extends UpdateCompanion<GroupRow> {
           ..write('sortOrder: $sortOrder, ')
           ..write('isBuiltin: $isBuiltin, ')
           ..write('createdAt: $createdAt, ')
+          ..write('archived: $archived, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -2853,6 +2957,7 @@ typedef $$CategoriesTableCreateCompanionBuilder =
       Value<bool> isBuiltin,
       required DateTime createdAt,
       Value<String?> groupId,
+      Value<bool> archived,
       Value<int> rowid,
     });
 typedef $$CategoriesTableUpdateCompanionBuilder =
@@ -2865,6 +2970,7 @@ typedef $$CategoriesTableUpdateCompanionBuilder =
       Value<bool> isBuiltin,
       Value<DateTime> createdAt,
       Value<String?> groupId,
+      Value<bool> archived,
       Value<int> rowid,
     });
 
@@ -2914,6 +3020,11 @@ class $$CategoriesTableFilterComposer
 
   ColumnFilters<String> get groupId => $composableBuilder(
     column: $table.groupId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get archived => $composableBuilder(
+    column: $table.archived,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2966,6 +3077,11 @@ class $$CategoriesTableOrderingComposer
     column: $table.groupId,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get archived => $composableBuilder(
+    column: $table.archived,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$CategoriesTableAnnotationComposer
@@ -3004,6 +3120,9 @@ class $$CategoriesTableAnnotationComposer
 
   GeneratedColumn<String> get groupId =>
       $composableBuilder(column: $table.groupId, builder: (column) => column);
+
+  GeneratedColumn<bool> get archived =>
+      $composableBuilder(column: $table.archived, builder: (column) => column);
 }
 
 class $$CategoriesTableTableManager
@@ -3045,6 +3164,7 @@ class $$CategoriesTableTableManager
                 Value<bool> isBuiltin = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<String?> groupId = const Value.absent(),
+                Value<bool> archived = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoriesCompanion(
                 id: id,
@@ -3055,6 +3175,7 @@ class $$CategoriesTableTableManager
                 isBuiltin: isBuiltin,
                 createdAt: createdAt,
                 groupId: groupId,
+                archived: archived,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3067,6 +3188,7 @@ class $$CategoriesTableTableManager
                 Value<bool> isBuiltin = const Value.absent(),
                 required DateTime createdAt,
                 Value<String?> groupId = const Value.absent(),
+                Value<bool> archived = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => CategoriesCompanion.insert(
                 id: id,
@@ -3077,6 +3199,7 @@ class $$CategoriesTableTableManager
                 isBuiltin: isBuiltin,
                 createdAt: createdAt,
                 groupId: groupId,
+                archived: archived,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -3112,6 +3235,7 @@ typedef $$GroupsTableCreateCompanionBuilder =
       Value<int> sortOrder,
       Value<bool> isBuiltin,
       required DateTime createdAt,
+      Value<bool> archived,
       Value<int> rowid,
     });
 typedef $$GroupsTableUpdateCompanionBuilder =
@@ -3122,6 +3246,7 @@ typedef $$GroupsTableUpdateCompanionBuilder =
       Value<int> sortOrder,
       Value<bool> isBuiltin,
       Value<DateTime> createdAt,
+      Value<bool> archived,
       Value<int> rowid,
     });
 
@@ -3161,6 +3286,11 @@ class $$GroupsTableFilterComposer
 
   ColumnFilters<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get archived => $composableBuilder(
+    column: $table.archived,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3203,6 +3333,11 @@ class $$GroupsTableOrderingComposer
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get archived => $composableBuilder(
+    column: $table.archived,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$GroupsTableAnnotationComposer
@@ -3233,6 +3368,9 @@ class $$GroupsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get archived =>
+      $composableBuilder(column: $table.archived, builder: (column) => column);
 }
 
 class $$GroupsTableTableManager
@@ -3269,6 +3407,7 @@ class $$GroupsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<bool> isBuiltin = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
+                Value<bool> archived = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GroupsCompanion(
                 id: id,
@@ -3277,6 +3416,7 @@ class $$GroupsTableTableManager
                 sortOrder: sortOrder,
                 isBuiltin: isBuiltin,
                 createdAt: createdAt,
+                archived: archived,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -3287,6 +3427,7 @@ class $$GroupsTableTableManager
                 Value<int> sortOrder = const Value.absent(),
                 Value<bool> isBuiltin = const Value.absent(),
                 required DateTime createdAt,
+                Value<bool> archived = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => GroupsCompanion.insert(
                 id: id,
@@ -3295,6 +3436,7 @@ class $$GroupsTableTableManager
                 sortOrder: sortOrder,
                 isBuiltin: isBuiltin,
                 createdAt: createdAt,
+                archived: archived,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

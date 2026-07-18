@@ -17,8 +17,9 @@ help:
 	@echo "  make codegen      freezed / json / drift codegen"
 	@echo ""
 	@echo "  make run             macOS 데스크탑 실행 (env 자동)"
+	@echo "  make emulator        Android 에뮬레이터 부팅 (첫 AVD 자동 선택)"
 	@echo "  make devices         연결된 기기 목록 (설치 전 확인용)"
-	@echo "  make run-android     Android 폰에 debug 로 즉시 실행 (케이블 연결, 확인용 최속)"
+	@echo "  make run-android     Android 기기/에뮬레이터에 debug 즉시 실행 (자동 선택)"
 	@echo "  make install-android Android 폰에 release APK 설치 (케이블 뽑아도 남음)"
 	@echo ""
 	@echo "  make build-macos  release .app 산출 (build/macos/.../haru.app)"
@@ -69,11 +70,21 @@ codegen-watch:
 run:
 	flutter run -d macos $(DART_DEFINE)
 
+.PHONY: emulator
+emulator:
+	@AVD=$$(flutter emulators 2>/dev/null | awk -F'•' '/android/{gsub(/ /,"",$$1); print $$1; exit}'); \
+	if [ -z "$$AVD" ]; then \
+		echo "❌ Android 에뮬레이터 없음. 'flutter emulators --create' 로 생성"; \
+		exit 1; \
+	fi; \
+	echo "→ 부팅: $$AVD (홈 화면 뜨면 'make run-android')"; \
+	flutter emulators --launch $$AVD
+
 .PHONY: run-android
 run-android:
 	@DEV=$$(flutter devices --machine 2>/dev/null | awk -F'"' '/"id":/{id=$$4} /targetPlatform/ && /android/{print id; exit}'); \
 	if [ -z "$$DEV" ]; then \
-		echo "❌ 연결된 Android 기기 없음. flutter devices 로 확인"; \
+		echo "❌ 연결된 Android 기기 없음. 'make emulator' 로 에뮬레이터를 먼저 켜세요"; \
 		exit 1; \
 	fi; \
 	echo "→ device: $$DEV"; \

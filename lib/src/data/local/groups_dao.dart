@@ -52,6 +52,7 @@ class GroupsDao extends DatabaseAccessor<AppDatabase> with _$GroupsDaoMixin {
         sortOrder: Value(group.sortOrder),
         isBuiltin: Value(group.isBuiltin),
         createdAt: createdAt ?? DateTime.now().toUtc(),
+        archived: Value(group.archived),
       ),
     );
   }
@@ -79,6 +80,7 @@ class GroupsDao extends DatabaseAccessor<AppDatabase> with _$GroupsDaoMixin {
             sortOrder: r.sortOrder,
             isBuiltin: r.isBuiltin,
             groupId: null,
+            archived: r.archived,
           ),
         )
         .toList();
@@ -101,6 +103,7 @@ class GroupsDao extends DatabaseAccessor<AppDatabase> with _$GroupsDaoMixin {
       colorValue: row.colorValue,
       sortOrder: row.sortOrder,
       isBuiltin: row.isBuiltin,
+      archived: row.archived,
     );
   }
 }

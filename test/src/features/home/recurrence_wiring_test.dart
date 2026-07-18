@@ -8,15 +8,21 @@ import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/recurrence.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
 
-ProviderContainer _container(AppDatabase db, DateTime Function() now) =>
-    ProviderContainer(
-      overrides: [
-        appDatabaseProvider.overrideWithValue(db),
-        nowProvider.overrideWithValue(now),
-      ],
-    );
+ProviderContainer _container(
+  AppDatabase db,
+  DateTime Function() now,
+) => ProviderContainer(
+  overrides: [
+    appDatabaseProvider.overrideWithValue(db),
+    nowProvider.overrideWithValue(now),
+    // dedupedTodayProvider 가 보관 필터를 위해 categoriesProvider 를 참조 —
+    // fakeAsync 정착을 위해 즉시 emit 하는 Stream.value 로 대체.
+    categoriesProvider.overrideWith((_) => Stream.value(Category.builtinSeeds)),
+  ],
+);
 
 Todo _master({
   required String id,

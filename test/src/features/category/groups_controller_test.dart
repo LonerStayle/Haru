@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/data/local/app_database.dart';
+import 'package:solo_todo/src/data/local/local_categories_repository.dart';
 import 'package:solo_todo/src/data/local/local_groups_repository.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
@@ -17,7 +18,10 @@ void main() {
 
     setUp(() {
       db = AppDatabase.memory();
-      controller = GroupsController(LocalGroupsRepository(db.groupsDao));
+      controller = GroupsController(
+        LocalGroupsRepository(db.groupsDao),
+        LocalCategoriesRepository(db.categoriesDao),
+      );
     });
 
     tearDown(() async {

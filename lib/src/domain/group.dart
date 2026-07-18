@@ -16,6 +16,10 @@ part 'group.g.dart';
 /// - [colorValue] — `Color.value` 정수 표현 (예: `0xFF2A66FF`).
 /// - [sortOrder] — sidebar 정렬 키 (작은 값 먼저). 기본 0.
 /// - [isBuiltin] — 향후 builtin 분기 대비 플래그. 현재 모든 그룹 false.
+/// - [archived] — 보관 여부. true 면 사이드바에서 숨겨진다. 그룹 보관 시 소속
+///   카테고리도 함께 보관(cascade)되므로, 보관된 그룹의 할 일까지 전부 숨는다.
+///   데이터는 보존되고 설정 > 보관함에서 복원(그룹+카테고리 함께). 역호환: 기존
+///   row 에 archived 가 없으면 false 로 디코드된다.
 ///
 /// 아이콘은 그룹 레벨에서는 두지 않는다 (사이드바 헤더는 색 dot + label 로 충분).
 @freezed
@@ -28,6 +32,7 @@ abstract class Group with _$Group {
     required int colorValue,
     @Default(0) int sortOrder,
     @Default(false) bool isBuiltin,
+    @Default(false) bool archived,
   }) = _Group;
 
   factory Group.fromJson(Map<String, dynamic> json) => _$GroupFromJson(json);
