@@ -8,6 +8,7 @@ import '../../domain/todo.dart';
 import '../../data/providers.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../add_todo/add_todo_sheet.dart';
+import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
@@ -24,15 +25,22 @@ class TimelineScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final allTodos =
         ref.watch(allTodosProvider).asData?.value ?? const <Todo>[];
-    final groups = ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+    final groups =
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
     final now = ref.watch(nowProvider)();
     final groupLabelOf = {for (final g in groups) g.id: g.label};
+    // 보관된 카테고리의 할 일은 타임라인에서 숨긴다 (보관 없음/로딩 = 필터 미적용).
+    final archivedIds = ref.watch(archivedCategoryIdsProvider);
 
-    // 날짜 지정 + 미완료 task 만.
+    // 날짜 지정 + 미완료 task 만 (+ 보관 카테고리 제외).
     final dated =
         allTodos
             .where(
-              (t) => t.type == TodoType.task && t.dueAt != null && !t.isDone,
+              (t) =>
+                  t.type == TodoType.task &&
+                  t.dueAt != null &&
+                  !t.isDone &&
+                  !archivedIds.contains(t.category.id),
             )
             .toList()
           ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));

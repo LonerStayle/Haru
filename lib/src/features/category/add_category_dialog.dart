@@ -191,7 +191,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
               const SizedBox(height: AppTokens.space8),
               _GroupPicker(
                 selectedGroupId: _selectedGroupId,
-                groups: ref.watch(groupsProvider).asData?.value ?? const [],
+                groups:
+                    ref.watch(activeGroupsProvider).asData?.value ?? const [],
                 onSelect: (id) => setState(() => _selectedGroupId = id),
               ),
             ],

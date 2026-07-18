@@ -12,6 +12,7 @@ _Group _$GroupFromJson(Map<String, dynamic> json) => _Group(
   colorValue: (json['colorValue'] as num).toInt(),
   sortOrder: (json['sortOrder'] as num?)?.toInt() ?? 0,
   isBuiltin: json['isBuiltin'] as bool? ?? false,
+  archived: json['archived'] as bool? ?? false,
 );
 
 Map<String, dynamic> _$GroupToJson(_Group instance) => <String, dynamic>{
@@ -20,4 +21,5 @@ Map<String, dynamic> _$GroupToJson(_Group instance) => <String, dynamic>{
   'colorValue': instance.colorValue,
   'sortOrder': instance.sortOrder,
   'isBuiltin': instance.isBuiltin,
+  'archived': instance.archived,
 };

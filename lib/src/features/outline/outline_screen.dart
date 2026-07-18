@@ -36,12 +36,13 @@ class OutlineScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // v1.2 — 동적 카테고리. loading / error 시 builtin 5종 fallback.
+    // v1.2 — 동적 카테고리 (보관 제외). loading / error 시 builtin 5종 fallback.
     final allCategories =
-        ref.watch(categoriesProvider).asData?.value ?? Category.builtinSeeds;
-    // 작업 3 (L) — 그룹 계층. loading / error 시 빈 목록 (= 그룹 헤더 없는 평면).
+        ref.watch(activeCategoriesProvider).asData?.value ??
+        Category.builtinSeeds;
+    // 작업 3 (L) — 그룹 계층 (보관 제외). loading / error 시 빈 목록 (= 평면).
     final allGroups =
-        ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
 
     // 그룹 스코프면 그 그룹 카테고리만 + 그룹 헤더 제거 (groups 를 비워 평면 렌더).
     final categories = group == null

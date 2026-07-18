@@ -710,12 +710,13 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    // v1.2 — 동적 카테고리. categoriesProvider 의 stream 으로 sidebar 와 동일 출처.
+    // v1.2 — 동적 카테고리 (보관 제외). activeCategoriesProvider 로 sidebar 와 동일 출처.
     // loading / error 시 builtin 5종 fallback.
-    final categoriesAsync = ref.watch(categoriesProvider);
+    final categoriesAsync = ref.watch(activeCategoriesProvider);
     final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
-    // J — 카테고리 칩을 소속 그룹별로 묶어 보여 주기 위해 그룹 목록도 watch.
-    final groups = ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+    // J — 카테고리 칩을 소속 그룹별로 묶어 보여 주기 위해 그룹 목록도 watch (보관 제외).
+    final groups =
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
     // 선택된 카테고리가 목록에 없으면 (삭제됨 / 초기값 불일치) 첫 항목으로 자동 보정.
     // build 중 setState 금지 → post-frame 으로 안전하게 갱신.
     //
@@ -732,7 +733,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         !categories.any((c) => c.id == _category.id)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final list = ref.read(categoriesProvider).asData?.value;
+        final list = ref.read(activeCategoriesProvider).asData?.value;
         if (list == null || list.isEmpty) return;
         if (list.any((c) => c.id == _category.id)) return;
         setState(() => _category = list.first);

@@ -6,6 +6,7 @@ import '../../domain/policies/carryover_policy.dart';
 import '../../domain/policies/recurrence_dedup_policy.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
+import '../category/categories_controller.dart';
 import '../outline/tree_providers.dart';
 
 /// 오늘 화면에 보일 todos (visibility 적용된 list).
@@ -19,11 +20,26 @@ final watchTodayTodosProvider = StreamProvider<List<Todo>>((ref) {
   return repo.watchToday(now);
 });
 
+/// 오늘 화면에서 **보관된 카테고리의 할 일을 제외**한 목록 (오늘/카운트의 표시용 출처).
+///
+/// [watchTodayTodosProvider] (순수 stream) 를 그대로 두고 파생 [Provider] 에서 필터만
+/// 얹는다 — StreamProvider 를 직접 건드리면 보관 집합 변화마다 stream 이 재구독돼
+/// fakeAsync 기반 테스트가 정착하지 못한다. 보관 집합이 비면 원본과 동일.
+final visibleTodayTodosProvider = Provider<AsyncValue<List<Todo>>>((ref) {
+  final async = ref.watch(watchTodayTodosProvider);
+  final archivedIds = ref.watch(archivedCategoryIdsProvider);
+  if (archivedIds.isEmpty) return async;
+  return async.whenData(
+    (todos) =>
+        todos.where((t) => !archivedIds.contains(t.category.id)).toList(),
+  );
+});
+
 /// 오늘 화면 visible todos 중 미체크 항목의 개수 (트레이 카운트 표시용).
 ///
 /// note(메모) 는 체크 개념이 없어(isDone 항상 false) 카운트에서 제외 — task 만 센다.
 final undoneTodayCountProvider = Provider<int>((ref) {
-  final asyncTodos = ref.watch(watchTodayTodosProvider);
+  final asyncTodos = ref.watch(visibleTodayTodosProvider);
   return asyncTodos.maybeWhen(
     data: (todos) =>
         todos.where((t) => t.type == TodoType.task && !t.isDone).length,
@@ -34,8 +50,8 @@ final undoneTodayCountProvider = Provider<int>((ref) {
 /// 어제 이전에서 이월된 미체크 항목의 개수 (배너 표시용).
 final carryoverCountProvider = Provider<int>((ref) {
   // currentDayProvider 가 자정 갱신 시 같이 재계산되도록 transitively 의존.
-  // watchTodayTodosProvider 가 이미 watch 하므로 별도 watch 불필요.
-  final asyncTodos = ref.watch(watchTodayTodosProvider);
+  // visibleTodayTodosProvider 가 이미 watch 하므로 별도 watch 불필요.
+  final asyncTodos = ref.watch(visibleTodayTodosProvider);
   final nowFn = ref.watch(nowProvider);
   return asyncTodos.maybeWhen(
     data: (todos) {
@@ -106,7 +122,7 @@ final recurringMastersProvider = Provider<List<Todo>>((ref) {
 /// 같은 반복 시리즈의 미체크 누적을 1건(leader)으로 접고 숨김 건수를 함께 제공한다.
 /// 로딩/에러 시 빈 결과.
 final dedupedTodayProvider = Provider<DedupedToday>((ref) {
-  final asyncTodos = ref.watch(watchTodayTodosProvider);
+  final asyncTodos = ref.watch(visibleTodayTodosProvider);
   return asyncTodos.maybeWhen(
     data: RecurrenceDedupPolicy.dedupe,
     orElse: () => const DedupedToday(visible: [], hiddenCountBySeries: {}),

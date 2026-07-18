@@ -192,6 +192,12 @@ alter table solo_todo.todos add column if not exists recurrence_end_at timestamp
 alter table solo_todo.todos add column if not exists is_series_master  boolean not null default false;
 create index if not exists todos_series_idx on solo_todo.todos (user_id, series_id);
 
+-- 20) categories / groups 보관(archive) 컬럼 (v1.6)
+-- archived=true 면 앱의 활성 화면에서 숨김 (데이터 보존). 그룹 보관은 소속
+-- 카테고리도 cascade 보관 (앱 로직). 기본 false 라 기존 row 는 활성 그대로.
+alter table solo_todo.categories add column if not exists archived boolean not null default false;
+alter table solo_todo.groups     add column if not exists archived boolean not null default false;
+
 -- ─────────────────────────────────────────────────────────────────────
 -- v1.1 → v1.2 마이그레이션 (기존 환경 — schema.sql 이미 실행된 프로젝트)
 --

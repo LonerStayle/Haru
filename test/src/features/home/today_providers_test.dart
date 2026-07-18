@@ -7,6 +7,7 @@ import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
 
 /// today_providers (watchTodayTodos + carryoverCount) 의 v1.5 날짜 기반 동작 검증.
@@ -21,6 +22,11 @@ void main() {
     overrides: [
       appDatabaseProvider.overrideWithValue(db),
       nowProvider.overrideWithValue(() => clock.now()),
+      // watchTodayTodosProvider 는 이제 보관 카테고리 필터를 위해 categoriesProvider 를
+      // 참조한다. drift stream 대신 즉시 emit 하는 Stream.value 로 대체 (fakeAsync 정착).
+      categoriesProvider.overrideWith(
+        (ref) => Stream.value(Category.builtinSeeds),
+      ),
     ],
   );
 

@@ -107,6 +107,20 @@ class CategoriesController {
     }
   }
 
+  /// 카테고리 보관 — 활성 화면(사이드바/탭/오늘/타임라인/전체보기)에서 숨긴다.
+  /// 데이터는 보존되며, 삭제와 달리 안 todos 가 있어도 허용된다 (그게 보관의 목적).
+  /// 대상이 없거나 이미 보관 상태면 no-op (idempotent).
+  Future<void> archive(String id) => _setArchived(id, true);
+
+  /// 카테고리 복원 — 보관 해제. 원래 그룹/순서 그대로 활성 화면에 되돌아온다.
+  Future<void> unarchive(String id) => _setArchived(id, false);
+
+  Future<void> _setArchived(String id, bool archived) async {
+    final category = await _repo.getById(id);
+    if (category == null || category.archived == archived) return;
+    await _repo.upsert(category.copyWith(archived: archived));
+  }
+
   /// id 기준 삭제 시도.
   ///
   /// 반환값:
@@ -128,9 +142,37 @@ class CategoriesController {
   }
 }
 
-/// 전체 카테고리 stream — sidebar / outline 이 watch.
+/// 전체 카테고리 stream (보관 포함) — [activeCategoriesProvider] /
+/// [archivedCategoriesProvider] 파생의 단일 원본이자 테스트 override 지점.
 final categoriesProvider = StreamProvider<List<Category>>((ref) {
   return ref.watch(categoriesRepositoryProvider).watchAll();
+});
+
+/// 활성 카테고리 (보관 제외) — 사이드바/탭/오늘/타임라인/전체보기의 단일 출처.
+/// 보관된 카테고리는 여기서 걸러져 활성 화면 어디에도 나타나지 않는다.
+final activeCategoriesProvider = Provider<AsyncValue<List<Category>>>((ref) {
+  return ref
+      .watch(categoriesProvider)
+      .whenData((list) => list.where((c) => !c.archived).toList());
+});
+
+/// 보관된 카테고리 — 설정 > 보관함 (복원 대상).
+final archivedCategoriesProvider = Provider<AsyncValue<List<Category>>>((ref) {
+  return ref
+      .watch(categoriesProvider)
+      .whenData((list) => list.where((c) => c.archived).toList());
+});
+
+/// 보관된 카테고리 id 집합 — 오늘/타임라인에서 그 카테고리의 todo 를 숨길 때 사용.
+///
+/// "활성 집합에 든 것만 남긴다"(화이트리스트)가 아니라 "보관된 것만 뺀다"(블랙리스트)
+/// 방식이라, 카테고리가 아직 로딩 전이거나 orphan(삭제된 카테고리를 참조) 인 todo 는
+/// 그대로 보인다 — 명시적으로 보관된 카테고리의 todo 만 사라진다. 로딩 중엔 빈 집합.
+final archivedCategoryIdsProvider = Provider<Set<String>>((ref) {
+  final archived = ref.watch(archivedCategoriesProvider).asData?.value;
+  return archived == null
+      ? const <String>{}
+      : archived.map((c) => c.id).toSet();
 });
 
 final categoriesControllerProvider = Provider<CategoriesController>((ref) {
