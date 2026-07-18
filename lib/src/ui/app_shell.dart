@@ -10,6 +10,7 @@ import '../data/remote/supabase_realtime_sync.dart';
 import '../domain/category.dart';
 import '../domain/group.dart';
 import '../features/add_todo/add_todo_controller.dart';
+import '../features/add_todo/add_todo_default_category.dart';
 import '../features/add_todo/add_todo_sheet.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/category/add_category_dialog.dart';
@@ -401,19 +402,23 @@ class _AppShellState extends ConsumerState<AppShell> {
   }
 
   Future<void> _openAddTodo() async {
-    // _index 가 destinations 범위를 벗어났을 수 있으므로 safe lookup.
-    final dest = (_index < _destinations.length)
-        ? _destinations[_index]
-        : _destinations.first;
-    // 카테고리 화면이면 그 카테고리. 오늘/전체보기/FAB/Cmd+N 전역 추가는 컨텍스트가
-    // 없으므로 **현재 카테고리 목록의 첫 항목**(정렬 기준)을 기본값으로. 무조건 '일상'
-    // 으로 떨어지던 버그 (J) 수정 — 목록이 비면 builtinSeeds.first 로 fallback.
+    // 기본 카테고리 = "지금 보고 있는 화면" 과 동일한 규칙으로 결정 (build 표시 로직과 일치).
+    //
+    // ⚠️ RISK(side-effect): 과거엔 raw `_index` 만 봐서 (a) 그룹 화면(_selectedGroupId)을
+    // 무시하고, (b) 비동기 카테고리 리로드로 `_index` 가 범위를 벗어나면 오늘로 폴백해
+    // "보던 카테고리와 다른 기본값" 이 되었다. resolveAddTodoDefaultCategory 로 build 의
+    // selectedGroup + safeIndex 와 동일 규칙을 공유해 화면과 항상 일치시킨다.
+    // — by _openAddTodo (기본 카테고리 어긋남 수정)
     final categories =
         ref.read(categoriesProvider).asData?.value ?? Category.builtinSeeds;
-    final fallback = categories.isNotEmpty
-        ? categories.first
-        : Category.builtinSeeds.first;
-    final initialCategory = dest.category ?? fallback;
+    final groups = ref.read(groupsProvider).asData?.value ?? const <Group>[];
+    final initialCategory = resolveAddTodoDefaultCategory(
+      categories: categories,
+      groups: groups,
+      destinations: _destinations,
+      index: _index,
+      selectedGroupId: _selectedGroupId,
+    );
 
     // sheet 가 닫힌 후 controller 를 호출해 결과(Calendar 경고 등)를 처리한다.
     AddTodoSubmission? submitted;
