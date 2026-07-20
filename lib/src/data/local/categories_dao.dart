@@ -55,6 +55,7 @@ class CategoriesDao extends DatabaseAccessor<AppDatabase>
         isBuiltin: Value(category.isBuiltin),
         createdAt: createdAt ?? DateTime.now().toUtc(),
         groupId: Value(category.groupId),
+        archived: Value(category.archived),
       ),
     );
   }
@@ -86,6 +87,7 @@ class CategoriesDao extends DatabaseAccessor<AppDatabase>
       sortOrder: row.sortOrder,
       isBuiltin: row.isBuiltin,
       groupId: row.groupId,
+      archived: row.archived,
     );
   }
 }

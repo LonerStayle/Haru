@@ -107,7 +107,7 @@ void main() {
   });
 
   group('체크리스트 탭 (task 트리)', () {
-    testWidgets('카테고리에 task root 2건 (1 done) → 헤더에 1/2 + root 표시', (
+    testWidgets('카테고리에 task root 2건 (1 done) → 헤더 1/2 + 완료는 접기 행 아래로', (
       tester,
     ) async {
       final root1 = make(id: 'r1', title: '캔버스 첨부 오류');
@@ -124,9 +124,68 @@ void main() {
         allTodos: [root1, root2Done],
       );
 
+      // 진척 배지는 완료 포함 그대로 (allTodos 기반).
       expect(find.text('1/2'), findsOneWidget);
+      // 미완료 root 는 노출.
       expect(find.text('캔버스 첨부 오류'), findsOneWidget);
+      // 완료 root 는 기본 접힘 — "완료 1개" 행 아래로 숨는다.
+      expect(find.text('오타 수정'), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+
+      // 완료 접기 행 탭 → 완료 root 노출.
+      await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
+      await tester.pump();
       expect(find.text('오타 수정'), findsOneWidget);
+    });
+
+    testWidgets('완료 root 가 없으면 "완료 N개" 접기 행이 없다', (tester) async {
+      final root1 = make(id: 'r1', title: '미완료 A');
+      final root2 = make(id: 'r2', title: '미완료 B');
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [root1, root2],
+        },
+        allTodos: [root1, root2],
+      );
+
+      expect(find.text('미완료 A'), findsOneWidget);
+      expect(find.text('미완료 B'), findsOneWidget);
+      // 완료가 하나도 없으면 접기 행 미표시.
+      expect(
+        find.byKey(const ValueKey('outline-done-toggle-work')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('완료 접기 행 왕복 — 펼쳤다 다시 접으면 완료가 숨는다', (tester) async {
+      final active = make(id: 'a', title: '진행중');
+      final done = make(
+        id: 'd',
+        title: '끝난 일',
+        doneAt: DateTime(2026, 5, 27, 10),
+      );
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [active, done],
+        },
+        allTodos: [active, done],
+      );
+
+      final toggle = find.byKey(const ValueKey('outline-done-toggle-work'));
+      // 기본 접힘.
+      expect(find.text('끝난 일'), findsNothing);
+      // 펼침.
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(find.text('끝난 일'), findsOneWidget);
+      // 다시 접힘.
+      await tester.tap(toggle);
+      await tester.pump();
+      expect(find.text('끝난 일'), findsNothing);
+      // 진행중 root 는 항상 노출.
+      expect(find.text('진행중'), findsOneWidget);
     });
 
     testWidgets('체크 circle — 미완료 ring 카테고리색(0.55), 완료 채움 (TodoTile 일관)', (
@@ -146,6 +205,10 @@ void main() {
         },
         allTodos: [undone, done],
       );
+
+      // 완료 root 는 기본 접힘 — 체크 circle 비교 위해 완료 섹션을 펼친다.
+      await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
+      await tester.pump();
 
       BoxDecoration circleDeco(String id) {
         final container = tester.widget<AnimatedContainer>(
@@ -232,6 +295,12 @@ void main() {
         reason: '상세 화면 진입',
       );
       expect(find.text('캔버스 첨부 오류'), findsOneWidget);
+      // child2 는 완료라 상세 화면(드릴 리스트)에서도 기본 접힘.
+      expect(find.text('narrative 에러'), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+      // 상세 화면 완료 접기 행 펼치면 노출.
+      await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
+      await tester.pump();
       expect(find.text('narrative 에러'), findsOneWidget);
     });
 
@@ -252,11 +321,18 @@ void main() {
         allTodos: [task, note1, note2],
       );
 
-      // 체크리스트 탭(default) 에는 note 가 보이지 않고 task 만.
+      // 체크리스트 탭(default) 에는 note 가 보이지 않는다. task 는 완료라 기본 접힘.
+      expect(find.text('메모1'), findsNothing);
+      expect(find.text('메모2'), findsNothing);
+      // 진척 배지 1/1 은 헤더라 접힘과 무관하게 노출.
+      expect(find.text('1/1'), findsOneWidget);
+      expect(find.text('완료 1개'), findsOneWidget);
+      // 완료 섹션 펼치면 task 노출 (note 는 여전히 제외).
+      await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
+      await tester.pump();
       expect(find.text('체크할 일'), findsOneWidget);
       expect(find.text('메모1'), findsNothing);
       expect(find.text('메모2'), findsNothing);
-      expect(find.text('1/1'), findsOneWidget);
     });
 
     testWidgets('note 자식은 진척률 카운트에서 제외 (task 자식만) — 자식은 인라인 비노출', (
@@ -356,6 +432,29 @@ void main() {
       expect(find.text('체크할 일'), findsNothing);
       // 메모는 체크 토글 없음.
       expect(find.byKey(const ValueKey('outline-check-t')), findsNothing);
+    });
+
+    testWidgets('메모 카드 탭 → 편집/상세 시트(AddTodoSheet) 노출', (tester) async {
+      final note = make(
+        id: 'n1',
+        title: '메모1',
+        type: TodoType.note,
+        description: '메모 본문',
+      );
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [note],
+        },
+        allTodos: [note],
+      );
+
+      await openNotesTab(tester);
+
+      // 탭 → 편집/상세 바텀시트(AddTodoSheet) 노출 (체크리스트 leaf 와 동일 패턴).
+      await tester.tap(find.byKey(const ValueKey('outline-note-n1')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
     });
 
     testWidgets('_NoteCard 가 NoteVisual 토큰으로 통일 (틴트+accent, non-italic)', (

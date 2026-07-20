@@ -22,6 +22,10 @@ part 'category.g.dart';
 /// - [groupId] — 소속 그룹 [Group.id]. null = '미분류' (사이드바 최상단 섹션).
 ///   builtin 5종은 모두 null 로 시작 (사용자가 '그룹 이동' 으로 배정). 역호환:
 ///   기존 JSON / Supabase row 에 group_id 가 없으면 null 로 디코드된다.
+/// - [archived] — 보관 여부. true 면 사이드바/탭/오늘/타임라인/전체보기에서 숨겨지고
+///   그 카테고리의 할 일도 함께 숨는다 (데이터는 보존, 설정 > 보관함에서 복원 가능).
+///   삭제와 달리 할 일이 남아 있어도 보관 가능. 역호환: 기존 row 에 archived 가
+///   없으면 false 로 디코드된다. builtin 5종도 보관 가능.
 @freezed
 abstract class Category with _$Category {
   const Category._();
@@ -34,6 +38,7 @@ abstract class Category with _$Category {
     @Default(0) int sortOrder,
     @Default(false) bool isBuiltin,
     @Default(null) String? groupId,
+    @Default(false) bool archived,
   }) = _Category;
 
   factory Category.fromJson(Map<String, dynamic> json) =>

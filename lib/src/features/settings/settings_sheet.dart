@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform.dart';
 import '../../core/theme.dart';
+import '../../domain/category.dart';
+import '../../domain/group.dart';
+import '../category/categories_controller.dart';
+import '../category/groups_controller.dart';
+import 'archive_screen.dart';
 import 'launch_at_login_service.dart';
 
 /// 앱 설정 하단 시트. 현재 항목:
@@ -128,6 +134,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
                 _autoLaunchTile(theme, scheme),
                 const Divider(height: AppTokens.hairline),
               ],
+              _archiveTile(theme, scheme),
+              const Divider(height: AppTokens.hairline),
               _infoTile(theme, scheme),
               const SizedBox(height: AppTokens.space8),
             ],
@@ -194,6 +202,102 @@ class _SettingsSheetState extends State<SettingsSheet> {
             ),
         ],
       ),
+    );
+  }
+
+  /// 보관함 진입 — 보관된 그룹/카테고리 개수를 배지로 보여주고 [ArchiveScreen] 으로 이동.
+  /// (Consumer 로 감싸 count 를 reactive 하게 반영 — 보관/복원 시 즉시 갱신.)
+  Widget _archiveTile(ThemeData theme, ColorScheme scheme) {
+    return Consumer(
+      builder: (context, ref, _) {
+        final archivedGroups =
+            ref.watch(archivedGroupsProvider).asData?.value ?? const <Group>[];
+        final archivedCats =
+            ref.watch(archivedCategoriesProvider).asData?.value ??
+            const <Category>[];
+        final archivedGroupIds = archivedGroups.map((g) => g.id).toSet();
+        // 보관 그룹에 포함된 카테고리는 그룹 항목으로 대표되므로 개수에서 제외.
+        final standalone = archivedCats
+            .where(
+              (c) => c.groupId == null || !archivedGroupIds.contains(c.groupId),
+            )
+            .length;
+        final count = archivedGroups.length + standalone;
+
+        return InkWell(
+          key: const ValueKey('archive-entry'),
+          onTap: () => ArchiveScreen.show(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTokens.space16,
+              vertical: AppTokens.space8,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.onSurface.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(AppTokens.radiusM),
+                  ),
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    color: scheme.onSurface.withValues(alpha: 0.7),
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '보관함',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: AppTokens.space2),
+                      Text(
+                        count > 0
+                            ? '보관된 항목 $count개 · 복원할 수 있어요'
+                            : '보관된 항목이 없어요',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (count > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space8,
+                      vertical: AppTokens.space2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: AppTokens.space4),
+                Icon(
+                  Icons.chevron_right,
+                  color: scheme.onSurface.withValues(alpha: 0.4),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

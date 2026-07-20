@@ -56,6 +56,7 @@ class SupabaseGroupsApi implements RemoteGroupsApi {
     'color_value': g.colorValue,
     'sort_order': g.sortOrder,
     'is_builtin': g.isBuiltin,
+    'archived': g.archived,
   };
 
   Group _fromRow(Map<String, dynamic> row) => Group(
@@ -64,6 +65,7 @@ class SupabaseGroupsApi implements RemoteGroupsApi {
     colorValue: _toInt(row['color_value']),
     sortOrder: _toInt(row['sort_order']),
     isBuiltin: (row['is_builtin'] as bool?) ?? false,
+    archived: (row['archived'] as bool?) ?? false,
   );
 
   /// PostgREST 가 int 를 num 으로 반환할 수 있는 경우 안전 변환.

@@ -8,6 +8,7 @@ import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/home/home_screen.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
@@ -40,6 +41,10 @@ void main() {
           allTodosProvider.overrideWith((_) => Stream.value(allTodos)),
           // 오늘 화면 카테고리 섹션 헤더의 그룹 라벨용. Drift 의존 + timer leak 회피.
           groupsProvider.overrideWith((_) => Stream.value(const [])),
+          // 보관 필터(visibleTodayTodosProvider)가 categoriesProvider 를 참조 — Drift 회피.
+          categoriesProvider.overrideWith(
+            (_) => Stream.value(Category.builtinSeeds),
+          ),
         ],
         child: MaterialApp(
           theme: theme ?? AppTheme.mobileLight(),

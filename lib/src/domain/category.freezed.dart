@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$Category {
 
- String get id; String get label; int get iconCodePoint; int get colorValue; int get sortOrder; bool get isBuiltin; String? get groupId;
+ String get id; String get label; int get iconCodePoint; int get colorValue; int get sortOrder; bool get isBuiltin; String? get groupId; bool get archived;
 /// Create a copy of Category
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $CategoryCopyWith<Category> get copyWith => _$CategoryCopyWithImpl<Category>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Category&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.iconCodePoint, iconCodePoint) || other.iconCodePoint == iconCodePoint)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.groupId, groupId) || other.groupId == groupId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Category&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.iconCodePoint, iconCodePoint) || other.iconCodePoint == iconCodePoint)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.groupId, groupId) || other.groupId == groupId)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,label,iconCodePoint,colorValue,sortOrder,isBuiltin,groupId);
+int get hashCode => Object.hash(runtimeType,id,label,iconCodePoint,colorValue,sortOrder,isBuiltin,groupId,archived);
 
 @override
 String toString() {
-  return 'Category(id: $id, label: $label, iconCodePoint: $iconCodePoint, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, groupId: $groupId)';
+  return 'Category(id: $id, label: $label, iconCodePoint: $iconCodePoint, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, groupId: $groupId, archived: $archived)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $CategoryCopyWith<$Res>  {
   factory $CategoryCopyWith(Category value, $Res Function(Category) _then) = _$CategoryCopyWithImpl;
 @useResult
 $Res call({
- String id, String label, int iconCodePoint, int colorValue, int sortOrder, bool isBuiltin, String? groupId
+ String id, String label, int iconCodePoint, int colorValue, int sortOrder, bool isBuiltin, String? groupId, bool archived
 });
 
 
@@ -65,7 +65,7 @@ class _$CategoryCopyWithImpl<$Res>
 
 /// Create a copy of Category
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? label = null,Object? iconCodePoint = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? groupId = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? label = null,Object? iconCodePoint = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? groupId = freezed,Object? archived = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
@@ -74,7 +74,8 @@ as int,colorValue: null == colorValue ? _self.colorValue : colorValue // ignore:
 as int,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,isBuiltin: null == isBuiltin ? _self.isBuiltin : isBuiltin // ignore: cast_nullable_to_non_nullable
 as bool,groupId: freezed == groupId ? _self.groupId : groupId // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 
@@ -159,10 +160,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId,  bool archived)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Category() when $default != null:
-return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId);case _:
+return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId,_that.archived);case _:
   return orElse();
 
 }
@@ -180,10 +181,10 @@ return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId,  bool archived)  $default,) {final _that = this;
 switch (_that) {
 case _Category():
-return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId);case _:
+return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId,_that.archived);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -200,10 +201,10 @@ return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String label,  int iconCodePoint,  int colorValue,  int sortOrder,  bool isBuiltin,  String? groupId,  bool archived)?  $default,) {final _that = this;
 switch (_that) {
 case _Category() when $default != null:
-return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId);case _:
+return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.groupId,_that.archived);case _:
   return null;
 
 }
@@ -215,7 +216,7 @@ return $default(_that.id,_that.label,_that.iconCodePoint,_that.colorValue,_that.
 @JsonSerializable()
 
 class _Category extends Category {
-  const _Category({required this.id, required this.label, required this.iconCodePoint, required this.colorValue, this.sortOrder = 0, this.isBuiltin = false, this.groupId = null}): super._();
+  const _Category({required this.id, required this.label, required this.iconCodePoint, required this.colorValue, this.sortOrder = 0, this.isBuiltin = false, this.groupId = null, this.archived = false}): super._();
   factory _Category.fromJson(Map<String, dynamic> json) => _$CategoryFromJson(json);
 
 @override final  String id;
@@ -225,6 +226,7 @@ class _Category extends Category {
 @override@JsonKey() final  int sortOrder;
 @override@JsonKey() final  bool isBuiltin;
 @override@JsonKey() final  String? groupId;
+@override@JsonKey() final  bool archived;
 
 /// Create a copy of Category
 /// with the given fields replaced by the non-null parameter values.
@@ -239,16 +241,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Category&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.iconCodePoint, iconCodePoint) || other.iconCodePoint == iconCodePoint)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.groupId, groupId) || other.groupId == groupId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Category&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.iconCodePoint, iconCodePoint) || other.iconCodePoint == iconCodePoint)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.groupId, groupId) || other.groupId == groupId)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,label,iconCodePoint,colorValue,sortOrder,isBuiltin,groupId);
+int get hashCode => Object.hash(runtimeType,id,label,iconCodePoint,colorValue,sortOrder,isBuiltin,groupId,archived);
 
 @override
 String toString() {
-  return 'Category(id: $id, label: $label, iconCodePoint: $iconCodePoint, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, groupId: $groupId)';
+  return 'Category(id: $id, label: $label, iconCodePoint: $iconCodePoint, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, groupId: $groupId, archived: $archived)';
 }
 
 
@@ -259,7 +261,7 @@ abstract mixin class _$CategoryCopyWith<$Res> implements $CategoryCopyWith<$Res>
   factory _$CategoryCopyWith(_Category value, $Res Function(_Category) _then) = __$CategoryCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String label, int iconCodePoint, int colorValue, int sortOrder, bool isBuiltin, String? groupId
+ String id, String label, int iconCodePoint, int colorValue, int sortOrder, bool isBuiltin, String? groupId, bool archived
 });
 
 
@@ -276,7 +278,7 @@ class __$CategoryCopyWithImpl<$Res>
 
 /// Create a copy of Category
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? label = null,Object? iconCodePoint = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? groupId = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? label = null,Object? iconCodePoint = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? groupId = freezed,Object? archived = null,}) {
   return _then(_Category(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
@@ -285,7 +287,8 @@ as int,colorValue: null == colorValue ? _self.colorValue : colorValue // ignore:
 as int,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,isBuiltin: null == isBuiltin ? _self.isBuiltin : isBuiltin // ignore: cast_nullable_to_non_nullable
 as bool,groupId: freezed == groupId ? _self.groupId : groupId // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
+as bool,
   ));
 }
 

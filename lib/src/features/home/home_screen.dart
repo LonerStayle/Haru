@@ -41,20 +41,24 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final asyncTodos = ref.watch(watchTodayTodosProvider);
+    // 보관 카테고리 제외된 오늘 목록 (visibleTodayTodosProvider). 원본 stream 은
+    // 순수 유지하고 파생 필터만 적용 — 보관/복원 시 즉시 반영.
+    final asyncTodos = ref.watch(visibleTodayTodosProvider);
     // date-repeat — 반복 인스턴스 자동 생성 트리거 활성화(앱시작·자정). 이 화면이
     // 떠 있는 동안 마스터의 누락 발생분이 채워진다.
     ref.watch(recurrenceMaterializerProvider);
     final globalCarryover = ref.watch(carryoverCountProvider);
     final allTodos = ref.watch(allTodosProvider).asData?.value ?? const [];
-    final groups = ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+    final groups =
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
     final now = ref.watch(nowProvider)();
 
     // 그룹 필터 — 이 그룹에 속한 카테고리 id 집합 (null = 전역, 필터 없음).
     Set<String>? groupCategoryIds;
     if (group != null) {
       final categories =
-          ref.watch(categoriesProvider).asData?.value ?? const <Category>[];
+          ref.watch(activeCategoriesProvider).asData?.value ??
+          const <Category>[];
       groupCategoryIds = categories
           .where((c) => c.groupId == group!.id)
           .map((c) => c.id)

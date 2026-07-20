@@ -36,12 +36,13 @@ class OutlineScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // v1.2 — 동적 카테고리. loading / error 시 builtin 5종 fallback.
+    // v1.2 — 동적 카테고리 (보관 제외). loading / error 시 builtin 5종 fallback.
     final allCategories =
-        ref.watch(categoriesProvider).asData?.value ?? Category.builtinSeeds;
-    // 작업 3 (L) — 그룹 계층. loading / error 시 빈 목록 (= 그룹 헤더 없는 평면).
+        ref.watch(activeCategoriesProvider).asData?.value ??
+        Category.builtinSeeds;
+    // 작업 3 (L) — 그룹 계층 (보관 제외). loading / error 시 빈 목록 (= 평면).
     final allGroups =
-        ref.watch(groupsProvider).asData?.value ?? const <Group>[];
+        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
 
     // 그룹 스코프면 그 그룹 카테고리만 + 그룹 헤더 제거 (groups 를 비워 평면 렌더).
     final categories = group == null
@@ -290,12 +291,28 @@ class _ChecklistTabState extends ConsumerState<_ChecklistTab>
     });
   }
 
+  /// "완료 접기" 섹션이 펼쳐진 카테고리 id 모음 — 기본은 **접힘**(완료를 감춤).
+  /// id 가 set 에 있으면 그 카테고리의 완료 항목이 펼쳐져 보인다. 세션 한정(비영속) —
+  /// 저장 인프라 없이 매 세션 기본 접힘으로 시작해 브라우징 노이즈를 최소화한다.
+  final Set<String> _doneShown = {};
+  bool _isDoneShown(String catId) => _doneShown.contains(catId);
+  void _toggleDoneShown(String catId) {
+    setState(() {
+      if (!_doneShown.add(catId)) _doneShown.remove(catId);
+    });
+  }
+
   @override
   bool get wantKeepAlive => true;
 
   /// 한 카테고리 트리 위젯 (그룹 안/미분류 공통).
-  Widget _category(Category c) =>
-      _OutlineCategory(category: c, expanded: _expanded, onToggle: _toggle);
+  Widget _category(Category c) => _OutlineCategory(
+    category: c,
+    expanded: _expanded,
+    onToggle: _toggle,
+    doneShown: _isDoneShown,
+    onToggleDone: _toggleDoneShown,
+  );
 
   /// 체크리스트(= task root) 가 하나라도 있는 카테고리 id 집합만 통과시킨다.
   /// 메모만 있거나 완전히 빈 카테고리는 체크리스트 탭에서 숨긴다 (사용자 요청).
@@ -390,11 +407,17 @@ class _OutlineCategory extends ConsumerWidget {
     required this.category,
     required this.expanded,
     required this.onToggle,
+    required this.doneShown,
+    required this.onToggleDone,
   });
 
   final Category category;
   final bool Function(String id) expanded;
   final void Function(String id) onToggle;
+
+  /// 이 카테고리의 "완료 접기" 섹션이 펼쳐졌는지 (기본 접힘).
+  final bool Function(String catId) doneShown;
+  final void Function(String catId) onToggleDone;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -451,11 +474,123 @@ class _OutlineCategory extends ConsumerWidget {
                   AppTokens.space8,
                   AppTokens.space8,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [for (final r in roots) _OutlineNode(node: r)],
+                child: _CategoryRoots(
+                  roots: roots,
+                  category: category,
+                  doneShown: doneShown(category.id),
+                  onToggleDone: () => onToggleDone(category.id),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 한 카테고리의 root 목록 — 미완료 root 는 그대로, 완료(체크된 task root)는 "완료 N개"
+/// 접기 행 아래로 모은다. 기본 접힘이라 완료가 브라우징 화면에 쌓이지 않는다 (사용자 요청).
+class _CategoryRoots extends StatelessWidget {
+  const _CategoryRoots({
+    required this.roots,
+    required this.category,
+    required this.doneShown,
+    required this.onToggleDone,
+  });
+
+  final List<Todo> roots;
+  final Category category;
+  final bool doneShown;
+  final VoidCallback onToggleDone;
+
+  @override
+  Widget build(BuildContext context) {
+    // 완료 = 체크된 task root. note 헤딩(체크 개념 없음)은 항상 활성 목록에 남는다.
+    final active = <Todo>[];
+    final done = <Todo>[];
+    for (final r in roots) {
+      if (r.type == TodoType.task && r.isDone) {
+        done.add(r);
+      } else {
+        active.add(r);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final r in active) _OutlineNode(node: r),
+        if (done.isNotEmpty) ...[
+          _DoneCollapseRow(
+            catId: category.id,
+            count: done.length,
+            expanded: doneShown,
+            accent: category.color,
+            onTap: onToggleDone,
+          ),
+          if (doneShown)
+            for (final r in done) _OutlineNode(node: r),
+        ],
+      ],
+    );
+  }
+}
+
+/// "✓ 완료 N개" 접기 행 — 낮은 강조(muted)로 완료 항목 진입점을 제공한다.
+/// 탭하면 그 카테고리의 완료 항목만 펼쳐진다 (기본 접힘). 진척 배지는 별도 유지.
+class _DoneCollapseRow extends StatelessWidget {
+  const _DoneCollapseRow({
+    required this.catId,
+    required this.count,
+    required this.expanded,
+    required this.accent,
+    required this.onTap,
+  });
+
+  final String catId;
+  final int count;
+  final bool expanded;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return InkWell(
+      key: ValueKey('outline-done-toggle-$catId'),
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.space4,
+          vertical: AppTokens.space8,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.check_circle_rounded,
+              size: 18,
+              color: accent.withValues(alpha: 0.7),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Text(
+              '완료 $count개',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            AnimatedRotation(
+              turns: expanded ? 0.25 : 0,
+              duration: AppTokens.motionFast,
+              child: Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),
@@ -856,67 +991,86 @@ class _NoteCategorySection extends ConsumerWidget {
 }
 
 /// 단일 메모 카드 — 제목 + (있으면) 본문 미리보기. 체크 토글 없음.
-class _NoteCard extends StatelessWidget {
+///
+/// 탭 시 편집/상세 시트(AddTodoSheet)를 연다 — 체크리스트 탭의 leaf 와 동일 패턴.
+/// (메모 탭 note 는 `!hasTaskDescendant` = 하위 task 없는 순수 메모이므로 leaf 취급.)
+class _NoteCard extends ConsumerWidget {
   const _NoteCard({required this.note});
 
   final Todo note;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final desc = note.description;
+
+    // 체크리스트 leaf 의 openEdit 과 동일 — edit 모드 시트로 전체 메모를 조회/편집.
+    Future<void> openEdit() => AddTodoSheet.show(
+      context,
+      initialCategory: note.category,
+      initialTodo: note,
+      onSubmit: (_) {},
+      onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+    );
+
     // §13 — TodoTile note 와 동일한 NoteVisual 토큰을 공유해 시각 언어 통일.
     // 틴트 배경 + 좌측 accent 보더 + 카테고리색 글리프 + non-italic 제목.
     // (메모 탭은 전체가 메모라 per-card "메모" 라벨은 맥락상 중복 → 생략.)
-    return Container(
-      key: ValueKey('outline-note-${note.id}'),
-      margin: const EdgeInsets.symmetric(
+    return Padding(
+      padding: const EdgeInsets.symmetric(
         horizontal: AppTokens.space4,
         vertical: AppTokens.space4,
       ),
-      padding: const EdgeInsets.all(AppTokens.space12),
-      decoration: BoxDecoration(
-        color: NoteVisual.tint(note.category, theme.brightness),
+      child: InkWell(
+        onTap: openEdit,
         borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        border: Border(
-          left: BorderSide(
-            color: NoteVisual.accent(note.category),
-            width: NoteVisual.accentWidth,
-          ),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.sticky_note_2_outlined,
-            size: 16,
-            color: NoteVisual.accent(note.category),
-          ),
-          const SizedBox(width: AppTokens.space8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  note.title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (desc != null && desc.trim().isNotEmpty) ...[
-                  const SizedBox(height: AppTokens.space4),
-                  Text(
-                    desc,
-                    style: theme.textTheme.bodySmall,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
+        child: Container(
+          key: ValueKey('outline-note-${note.id}'),
+          padding: const EdgeInsets.all(AppTokens.space12),
+          decoration: BoxDecoration(
+            color: NoteVisual.tint(note.category, theme.brightness),
+            borderRadius: BorderRadius.circular(AppTokens.radiusM),
+            border: Border(
+              left: BorderSide(
+                color: NoteVisual.accent(note.category),
+                width: NoteVisual.accentWidth,
+              ),
             ),
           ),
-        ],
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.sticky_note_2_outlined,
+                size: 16,
+                color: NoteVisual.accent(note.category),
+              ),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      note.title,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (desc != null && desc.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppTokens.space4),
+                      Text(
+                        desc,
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

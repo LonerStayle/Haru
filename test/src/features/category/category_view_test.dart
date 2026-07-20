@@ -62,7 +62,7 @@ void main() {
     expect(find.text('회사 할일에 할 일이 없어요'), findsOneWidget);
   });
 
-  testWidgets('미체크 2 + 완료 1 → 통계 chip 과 3개 tile', (tester) async {
+  testWidgets('미체크 2 + 완료 1 → 통계 chip / 완료는 접기 행 아래로', (tester) async {
     final controller = await mount(tester, category: Category.idea);
     controller.add([
       todo(id: '1', category: Category.idea, title: '아이디어 A'),
@@ -76,11 +76,19 @@ void main() {
     ]);
     await tester.pump();
 
+    // 미체크는 노출.
     expect(find.text('아이디어 A'), findsOneWidget);
     expect(find.text('아이디어 B'), findsOneWidget);
-    expect(find.text('아이디어 C 완료'), findsOneWidget);
+    // 완료는 기본 접힘 — "완료 1개" 접기 행 아래로 숨는다.
+    expect(find.text('아이디어 C 완료'), findsNothing);
+    expect(find.text('완료 1개'), findsOneWidget);
+    // 헤더 통계 chip (미체크/완료) 은 접힘과 무관하게 그대로.
     expect(find.text('미체크 2'), findsOneWidget);
     expect(find.text('완료 1'), findsOneWidget);
+    // 접기 행 탭 → 완료 노출.
+    await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
+    await tester.pump();
+    expect(find.text('아이디어 C 완료'), findsOneWidget);
   });
 
   testWidgets('메모(note)는 미체크/완료 카운트에서 제외된다', (tester) async {

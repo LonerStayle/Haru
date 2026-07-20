@@ -77,6 +77,8 @@ class Categories extends Table {
   // v1.3 — 소속 그룹 (Groups.id). null = '미분류'. FK 제약 두지 않음 (Supabase
   // 동기화 중 일시적 dangling 허용 + UI 가 미지 groupId 를 미분류로 안전 fallback).
   TextColumn get groupId => text().nullable()();
+  // v1.6 — 보관(archive) 플래그. true 면 활성 화면에서 숨김 (데이터 보존).
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -96,6 +98,8 @@ class Groups extends Table {
   IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   BoolColumn get isBuiltin => boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime()();
+  // v1.6 — 보관(archive) 플래그. true 면 사이드바에서 숨김 + 소속 카테고리 cascade 보관.
+  BoolColumn get archived => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -129,7 +133,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   /// `storeDateTimeAsText: true` — DateTime 을 ISO 8601 text 로 저장.
   /// 기본 (unix int) 은 fetch 시 항상 local time 으로 변환되어 UTC↔local 구분을 잃는다.
@@ -150,6 +154,7 @@ class AppDatabase extends _$AppDatabase {
   /// - v6: groups 테이블 신규 + categories.group_id 컬럼 (그룹 계층). 가드 idempotent.
   /// - v7: todos 에 series_id / recurrence_rule / recurrence_end_at / is_series_master
   ///   추가 (date-repeat — 날짜 반복). PRAGMA 가드로 idempotent.
+  /// - v8: categories.archived / groups.archived 컬럼 추가 (보관 기능). 가드 idempotent.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -231,6 +236,20 @@ class AppDatabase extends _$AppDatabase {
         }
         if (!hasCol('is_series_master')) {
           await m.addColumn(todos, todos.isSeriesMaster);
+        }
+      }
+      // 7 → 8: categories.archived / groups.archived 추가 (보관 기능).
+      // 각 테이블 PRAGMA 가드로 idempotent — 부분 적용/다중 디바이스 안전.
+      if (from < 8) {
+        final catInfo = await customSelect(
+          "PRAGMA table_info('categories')",
+        ).get();
+        if (!catInfo.any((r) => r.data['name'] == 'archived')) {
+          await m.addColumn(categories, categories.archived);
+        }
+        final grpInfo = await customSelect("PRAGMA table_info('groups')").get();
+        if (!grpInfo.any((r) => r.data['name'] == 'archived')) {
+          await m.addColumn(groups, groups.archived);
         }
       }
     },

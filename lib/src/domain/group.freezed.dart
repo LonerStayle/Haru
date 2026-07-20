@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$Group {
 
- String get id; String get label; int get colorValue; int get sortOrder; bool get isBuiltin;
+ String get id; String get label; int get colorValue; int get sortOrder; bool get isBuiltin; bool get archived;
 /// Create a copy of Group
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $GroupCopyWith<Group> get copyWith => _$GroupCopyWithImpl<Group>(this as Group, 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Group&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Group&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,label,colorValue,sortOrder,isBuiltin);
+int get hashCode => Object.hash(runtimeType,id,label,colorValue,sortOrder,isBuiltin,archived);
 
 @override
 String toString() {
-  return 'Group(id: $id, label: $label, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin)';
+  return 'Group(id: $id, label: $label, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, archived: $archived)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $GroupCopyWith<$Res>  {
   factory $GroupCopyWith(Group value, $Res Function(Group) _then) = _$GroupCopyWithImpl;
 @useResult
 $Res call({
- String id, String label, int colorValue, int sortOrder, bool isBuiltin
+ String id, String label, int colorValue, int sortOrder, bool isBuiltin, bool archived
 });
 
 
@@ -65,13 +65,14 @@ class _$GroupCopyWithImpl<$Res>
 
 /// Create a copy of Group
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? label = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? label = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? archived = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
 as String,colorValue: null == colorValue ? _self.colorValue : colorValue // ignore: cast_nullable_to_non_nullable
 as int,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,isBuiltin: null == isBuiltin ? _self.isBuiltin : isBuiltin // ignore: cast_nullable_to_non_nullable
+as bool,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -157,10 +158,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin,  bool archived)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Group() when $default != null:
-return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin);case _:
+return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.archived);case _:
   return orElse();
 
 }
@@ -178,10 +179,10 @@ return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBu
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin,  bool archived)  $default,) {final _that = this;
 switch (_that) {
 case _Group():
-return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin);case _:
+return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.archived);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -198,10 +199,10 @@ return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBu
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String label,  int colorValue,  int sortOrder,  bool isBuiltin,  bool archived)?  $default,) {final _that = this;
 switch (_that) {
 case _Group() when $default != null:
-return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin);case _:
+return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBuiltin,_that.archived);case _:
   return null;
 
 }
@@ -213,7 +214,7 @@ return $default(_that.id,_that.label,_that.colorValue,_that.sortOrder,_that.isBu
 @JsonSerializable()
 
 class _Group extends Group {
-  const _Group({required this.id, required this.label, required this.colorValue, this.sortOrder = 0, this.isBuiltin = false}): super._();
+  const _Group({required this.id, required this.label, required this.colorValue, this.sortOrder = 0, this.isBuiltin = false, this.archived = false}): super._();
   factory _Group.fromJson(Map<String, dynamic> json) => _$GroupFromJson(json);
 
 @override final  String id;
@@ -221,6 +222,7 @@ class _Group extends Group {
 @override final  int colorValue;
 @override@JsonKey() final  int sortOrder;
 @override@JsonKey() final  bool isBuiltin;
+@override@JsonKey() final  bool archived;
 
 /// Create a copy of Group
 /// with the given fields replaced by the non-null parameter values.
@@ -235,16 +237,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Group&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Group&&(identical(other.id, id) || other.id == id)&&(identical(other.label, label) || other.label == label)&&(identical(other.colorValue, colorValue) || other.colorValue == colorValue)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.isBuiltin, isBuiltin) || other.isBuiltin == isBuiltin)&&(identical(other.archived, archived) || other.archived == archived));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,label,colorValue,sortOrder,isBuiltin);
+int get hashCode => Object.hash(runtimeType,id,label,colorValue,sortOrder,isBuiltin,archived);
 
 @override
 String toString() {
-  return 'Group(id: $id, label: $label, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin)';
+  return 'Group(id: $id, label: $label, colorValue: $colorValue, sortOrder: $sortOrder, isBuiltin: $isBuiltin, archived: $archived)';
 }
 
 
@@ -255,7 +257,7 @@ abstract mixin class _$GroupCopyWith<$Res> implements $GroupCopyWith<$Res> {
   factory _$GroupCopyWith(_Group value, $Res Function(_Group) _then) = __$GroupCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String label, int colorValue, int sortOrder, bool isBuiltin
+ String id, String label, int colorValue, int sortOrder, bool isBuiltin, bool archived
 });
 
 
@@ -272,13 +274,14 @@ class __$GroupCopyWithImpl<$Res>
 
 /// Create a copy of Group
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? label = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? label = null,Object? colorValue = null,Object? sortOrder = null,Object? isBuiltin = null,Object? archived = null,}) {
   return _then(_Group(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
 as String,colorValue: null == colorValue ? _self.colorValue : colorValue // ignore: cast_nullable_to_non_nullable
 as int,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,isBuiltin: null == isBuiltin ? _self.isBuiltin : isBuiltin // ignore: cast_nullable_to_non_nullable
+as bool,archived: null == archived ? _self.archived : archived // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
