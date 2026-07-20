@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
+import '../../ui/widgets/in_progress_triangle.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/undo_snackbar.dart';
@@ -49,6 +50,7 @@ class TodoDetailScreen extends ConsumerWidget {
 
     final isNote = live.type == TodoType.note;
     final isDone = live.isDone;
+    final isInProgress = live.isInProgress;
     // §14 — 자손 task 진척 요약 (note 헤딩/ task 폴더 공통). taskCount 0 이면 숨김.
     final progress = computeSubtreeProgress(live, allTodos);
 
@@ -58,6 +60,18 @@ class TodoDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(live.title, overflow: TextOverflow.ellipsis),
         actions: [
+          // 진행중(세모) 토글 — 완료 체크 왼쪽. note 는 진행 개념 없음 → 미표시.
+          if (!isNote)
+            IconButton(
+              key: const ValueKey('detail-progress'),
+              tooltip: isInProgress ? '진행중 해제' : '진행중',
+              icon: InProgressTriangle(
+                active: isInProgress,
+                color: live.category.color,
+                size: 20,
+              ),
+              onPressed: () => actions.toggleInProgress(live),
+            ),
           // parent 체크 토글 (note 는 체크 개념 없음 → 미표시).
           if (!isNote)
             IconButton(
@@ -140,6 +154,7 @@ class TodoDetailScreen extends ConsumerWidget {
                     onUpdate: (updated) => actions.update(updated),
                   ),
                   onToggle: actions.toggle,
+                  onToggleInProgress: actions.toggleInProgress,
                   onAddChild: (p) => showAddChildSheet(context, ref, parent: p),
                   onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
                   onDelete: (t) async {

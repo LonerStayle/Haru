@@ -26,6 +26,16 @@ class TodoActionsController {
     return updated;
   }
 
+  /// 진행중 상태를 토글. 미완료/완료 → 진행중, 진행중 → 미완료.
+  ///
+  /// Task B 불변식 — toggle 과 마찬가지로 **sortOrder 는 절대 바꾸지 않는다**
+  /// ([Todo.toggleInProgress] 가 startedAt/doneAt/updatedAt 만 copyWith).
+  Future<Todo> toggleInProgress(Todo todo) async {
+    final updated = todo.toggleInProgress(now: _now);
+    await _repo.upsert(updated);
+    return updated;
+  }
+
   /// id 기준 삭제. 호출자가 [restore] 로 되돌릴 수 있도록 원본은 호출자가 보관.
   Future<void> delete(Todo todo) => _repo.deleteById(todo.id);
 

@@ -28,6 +28,7 @@ class TodoDrillListSliver extends StatefulWidget {
     required this.onDrillDown,
     required this.onEdit,
     required this.onToggle,
+    this.onToggleInProgress,
     required this.onAddChild,
     required this.onCopy,
     required this.onDelete,
@@ -49,6 +50,9 @@ class TodoDrillListSliver extends StatefulWidget {
   final void Function(Todo leaf) onEdit;
 
   final void Function(Todo) onToggle;
+
+  /// 진행중(세모) 토글. null 이면 세모 버튼 미표시.
+  final void Function(Todo)? onToggleInProgress;
 
   /// "＋ 하위 추가" — 그 항목을 부모로 자식 생성 sheet 를 연다.
   final void Function(Todo parent) onAddChild;
@@ -113,6 +117,9 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
       final tileWidget = DismissibleTodoTile(
         todo: todo,
         onToggle: () => widget.onToggle(todo),
+        onToggleInProgress: widget.onToggleInProgress == null
+            ? null
+            : () => widget.onToggleInProgress!(todo),
         onDelete: () => widget.onDelete(todo),
         // 자식 있으면 드릴, 없으면 편집.
         onTap: () =>

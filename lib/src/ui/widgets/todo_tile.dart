@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/date_format.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
+import 'in_progress_triangle.dart';
 
 /// 한 줄짜리 Todo 카드 — 카테고리 컬러바 + 제목 + 시간 + 체크 아이콘.
 ///
@@ -13,6 +14,7 @@ class TodoTile extends StatelessWidget {
     super.key,
     required this.todo,
     this.onToggle,
+    this.onToggleInProgress,
     this.onTap,
     this.onAddChild,
     this.onCopy,
@@ -28,6 +30,10 @@ class TodoTile extends StatelessWidget {
 
   final Todo todo;
   final VoidCallback? onToggle;
+
+  /// 진행중(세모) 토글. null 이면 세모 버튼 미표시 (진행중 미지원 화면 / note).
+  final VoidCallback? onToggleInProgress;
+
   final VoidCallback? onTap;
 
   /// 더보기(⋮) 메뉴 — 이 항목을 복사 (제목·내용·카테고리·날짜/종류를 채운 새 항목 시트).
@@ -72,6 +78,7 @@ class TodoTile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDone = todo.isDone;
+    final isInProgress = todo.isInProgress;
     final isNote = todo.type == TodoType.note;
     // §14 — 자식 보유 note 는 "섹션 헤딩" 으로 강조(진한 틴트 + 굵은 제목).
     // 자식 0 인 note 는 §13 의 leaf 메모(연한 틴트 카드).
@@ -215,6 +222,32 @@ class TodoTile extends StatelessWidget {
                         ],
                       ],
                     ),
+                    // 진행중 3-상태 — 진행중이면 제목 아래 작은 "진행중" 라벨(문구 신호).
+                    // 완료 취소선/흐림(isDone)과 상호배타 — 진행중은 취소선 없음.
+                    if (isInProgress)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppTokens.space4),
+                        child: Container(
+                          key: const ValueKey('todo-tile-inprogress-label'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppTokens.space8,
+                            vertical: AppTokens.space2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: todo.category.color.withValues(alpha: 0.14),
+                            borderRadius: BorderRadius.circular(
+                              AppTokens.radiusFull,
+                            ),
+                          ),
+                          child: Text(
+                            '진행중',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: todo.category.color,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
                     // §13 — note 본문(description) 2줄 프리뷰. "정보=메모" 를 즉시 전달.
                     // task 는 미노출(위 힌트 아이콘 유지), 빈 description note 는 생략.
                     if (isNote && (todo.description ?? '').trim().isNotEmpty)
@@ -309,6 +342,19 @@ class TodoTile extends StatelessWidget {
                   color: scheme.onSurface.withValues(alpha: 0.45),
                   visualDensity: VisualDensity.compact,
                   tooltip: '하위 추가',
+                ),
+              // 진행중 3-상태 — 완료 체크(원) 왼쪽에 진행중(세모) 버튼. onToggleInProgress
+              // 가 배선된 화면(오늘/카테고리/상세/타임라인)에서만 노출. note 는 제외.
+              if (!isNote && onToggleInProgress != null)
+                IconButton(
+                  key: const ValueKey('todo-tile-progress'),
+                  onPressed: onToggleInProgress,
+                  icon: InProgressTriangle(
+                    active: isInProgress,
+                    color: todo.category.color,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  tooltip: isInProgress ? '진행중 해제' : '진행중',
                 ),
               // §13 — note 는 trailing 을 비운다(체크 affordance 부재 명확화 — 메모는
               // 좌측 글리프로만 식별). task 만 trailing 체크 버튼.

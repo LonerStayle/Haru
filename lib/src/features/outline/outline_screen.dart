@@ -7,6 +7,7 @@ import '../../domain/category.dart';
 import '../../domain/group.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
+import '../../ui/widgets/in_progress_triangle.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
@@ -689,6 +690,7 @@ class _OutlineNode extends ConsumerWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDone = node.isDone;
+    final isInProgress = node.isInProgress;
     // §14 — note 헤딩은 체크 개념이 없어 체크박스 대신 카테고리색 메모 글리프로 표시.
     final isNote = node.type == TodoType.note;
     // 날짜가 지정된 체크리스트 항목은 제목 아래에 날짜 라벨을 노출 (TodoTile 과 동일 출처).
@@ -729,13 +731,29 @@ class _OutlineNode extends ConsumerWidget {
                   color: NoteVisual.accent(node.category),
                 ),
               )
-            else
+            else ...[
+              // 진행중(세모) 버튼 — 완료 체크 원 왼쪽. task 만.
+              InkWell(
+                key: ValueKey('outline-progress-${node.id}'),
+                onTap: () =>
+                    ref.read(todoActionsProvider).toggleInProgress(node),
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppTokens.space4),
+                  child: InProgressTriangle(
+                    active: isInProgress,
+                    color: node.category.color,
+                    size: 20,
+                  ),
+                ),
+              ),
               _CheckCircle(
                 checkKey: ValueKey('outline-check-${node.id}'),
                 done: isDone,
                 color: node.category.color,
                 onTap: () => ref.read(todoActionsProvider).toggle(node),
               ),
+            ],
             const SizedBox(width: AppTokens.space12),
             Expanded(
               child: Column(

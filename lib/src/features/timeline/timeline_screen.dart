@@ -7,6 +7,7 @@ import '../../domain/group.dart';
 import '../../domain/todo.dart';
 import '../../data/providers.dart';
 import '../../ui/widgets/empty_state.dart';
+import '../../ui/widgets/in_progress_triangle.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
@@ -112,6 +113,8 @@ class TimelineScreen extends ConsumerWidget {
                             : groupLabelOf[t.category.groupId],
                         overdue: bucket.kind == _BucketKind.overdue,
                         onToggle: () => ref.read(todoActionsProvider).toggle(t),
+                        onToggleInProgress: () =>
+                            ref.read(todoActionsProvider).toggleInProgress(t),
                         onTap: () => edit(t),
                       ),
                     );
@@ -249,6 +252,7 @@ class _TimelineTile extends StatelessWidget {
     required this.groupLabel,
     required this.overdue,
     required this.onToggle,
+    required this.onToggleInProgress,
     required this.onTap,
   });
 
@@ -256,6 +260,7 @@ class _TimelineTile extends StatelessWidget {
   final String? groupLabel;
   final bool overdue;
   final VoidCallback onToggle;
+  final VoidCallback onToggleInProgress;
   final VoidCallback onTap;
 
   @override
@@ -276,6 +281,20 @@ class _TimelineTile extends StatelessWidget {
           ),
           child: Row(
             children: [
+              // 진행중(세모) 버튼 — 완료 체크 원 왼쪽.
+              InkWell(
+                key: ValueKey('timeline-progress-${todo.id}'),
+                onTap: onToggleInProgress,
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppTokens.space4),
+                  child: InProgressTriangle(
+                    active: todo.isInProgress,
+                    color: color,
+                    size: 20,
+                  ),
+                ),
+              ),
               // 원형 체크 — 탭 시 완료(목록에서 사라짐).
               InkWell(
                 key: ValueKey('timeline-check-${todo.id}'),
@@ -288,6 +307,9 @@ class _TimelineTile extends StatelessWidget {
                     height: 22,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
+                      color: todo.isInProgress
+                          ? color.withValues(alpha: 0.12)
+                          : null,
                       border: Border.all(color: scheme.outline, width: 2),
                     ),
                   ),

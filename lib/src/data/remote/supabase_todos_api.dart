@@ -62,6 +62,7 @@ class SupabaseTodosApi implements RemoteTodosApi {
     'category': t.category.id,
     'due_at': t.dueAt?.toIso8601String(),
     'done_at': t.doneAt?.toIso8601String(),
+    'started_at': t.startedAt?.toIso8601String(),
     'created_at': t.createdAt.toUtc().toIso8601String(),
     // updatedAt 은 LWW 키 — UTC 로 전송해 로컬 저장(UTC)과 round-trip 일치.
     'updated_at': t.updatedAt.toUtc().toIso8601String(),
@@ -95,6 +96,8 @@ class SupabaseTodosApi implements RemoteTodosApi {
         ),
     dueAt: _parseTime(row['due_at']),
     doneAt: _parseTime(row['done_at']),
+    // 진행중 3-상태 — 옛 스키마 row 는 컬럼이 없어 null 로 안전 fallback.
+    startedAt: _parseTime(row['started_at']),
     createdAt: _parseTime(row['created_at'])!,
     updatedAt: _parseTime(row['updated_at'])!,
     calendarEventId: row['calendar_event_id'] as String?,

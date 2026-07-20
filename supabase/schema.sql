@@ -198,6 +198,10 @@ create index if not exists todos_series_idx on solo_todo.todos (user_id, series_
 alter table solo_todo.categories add column if not exists archived boolean not null default false;
 alter table solo_todo.groups     add column if not exists archived boolean not null default false;
 
+-- 21) todos.started_at 컬럼 (진행중 3-상태 — v1.7)
+-- 값 있고 done_at 이 null 이면 '진행중'. 완료 시 앱이 null 로 비운다. 기본 null(미완료).
+alter table solo_todo.todos add column if not exists started_at timestamptz;
+
 -- ─────────────────────────────────────────────────────────────────────
 -- v1.1 → v1.2 마이그레이션 (기존 환경 — schema.sql 이미 실행된 프로젝트)
 --

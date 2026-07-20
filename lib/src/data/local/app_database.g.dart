@@ -55,6 +55,17 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _startedAtMeta = const VerificationMeta(
+    'startedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> startedAt = GeneratedColumn<DateTime>(
+    'started_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -224,6 +235,7 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
     category,
     dueAt,
     doneAt,
+    startedAt,
     createdAt,
     updatedAt,
     calendarEventId,
@@ -282,6 +294,12 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
       context.handle(
         _doneAtMeta,
         doneAt.isAcceptableOrUnknown(data['done_at']!, _doneAtMeta),
+      );
+    }
+    if (data.containsKey('started_at')) {
+      context.handle(
+        _startedAtMeta,
+        startedAt.isAcceptableOrUnknown(data['started_at']!, _startedAtMeta),
       );
     }
     if (data.containsKey('created_at')) {
@@ -416,6 +434,10 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
         DriftSqlType.dateTime,
         data['${effectivePrefix}done_at'],
       ),
+      startedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}started_at'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -487,6 +509,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
   final String category;
   final DateTime? dueAt;
   final DateTime? doneAt;
+  final DateTime? startedAt;
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? calendarEventId;
@@ -507,6 +530,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     required this.category,
     this.dueAt,
     this.doneAt,
+    this.startedAt,
     required this.createdAt,
     required this.updatedAt,
     this.calendarEventId,
@@ -533,6 +557,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     }
     if (!nullToAbsent || doneAt != null) {
       map['done_at'] = Variable<DateTime>(doneAt);
+    }
+    if (!nullToAbsent || startedAt != null) {
+      map['started_at'] = Variable<DateTime>(startedAt);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -576,6 +603,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       doneAt: doneAt == null && nullToAbsent
           ? const Value.absent()
           : Value(doneAt),
+      startedAt: startedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(startedAt),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       calendarEventId: calendarEventId == null && nullToAbsent
@@ -618,6 +648,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       category: serializer.fromJson<String>(json['category']),
       dueAt: serializer.fromJson<DateTime?>(json['dueAt']),
       doneAt: serializer.fromJson<DateTime?>(json['doneAt']),
+      startedAt: serializer.fromJson<DateTime?>(json['startedAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       calendarEventId: serializer.fromJson<String?>(json['calendarEventId']),
@@ -643,6 +674,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       'category': serializer.toJson<String>(category),
       'dueAt': serializer.toJson<DateTime?>(dueAt),
       'doneAt': serializer.toJson<DateTime?>(doneAt),
+      'startedAt': serializer.toJson<DateTime?>(startedAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'calendarEventId': serializer.toJson<String?>(calendarEventId),
@@ -666,6 +698,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     String? category,
     Value<DateTime?> dueAt = const Value.absent(),
     Value<DateTime?> doneAt = const Value.absent(),
+    Value<DateTime?> startedAt = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<String?> calendarEventId = const Value.absent(),
@@ -686,6 +719,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     category: category ?? this.category,
     dueAt: dueAt.present ? dueAt.value : this.dueAt,
     doneAt: doneAt.present ? doneAt.value : this.doneAt,
+    startedAt: startedAt.present ? startedAt.value : this.startedAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     calendarEventId: calendarEventId.present
@@ -714,6 +748,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       category: data.category.present ? data.category.value : this.category,
       dueAt: data.dueAt.present ? data.dueAt.value : this.dueAt,
       doneAt: data.doneAt.present ? data.doneAt.value : this.doneAt,
+      startedAt: data.startedAt.present ? data.startedAt.value : this.startedAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       calendarEventId: data.calendarEventId.present
@@ -751,6 +786,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
           ..write('category: $category, ')
           ..write('dueAt: $dueAt, ')
           ..write('doneAt: $doneAt, ')
+          ..write('startedAt: $startedAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('calendarEventId: $calendarEventId, ')
@@ -776,6 +812,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     category,
     dueAt,
     doneAt,
+    startedAt,
     createdAt,
     updatedAt,
     calendarEventId,
@@ -800,6 +837,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
           other.category == this.category &&
           other.dueAt == this.dueAt &&
           other.doneAt == this.doneAt &&
+          other.startedAt == this.startedAt &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.calendarEventId == this.calendarEventId &&
@@ -822,6 +860,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
   final Value<String> category;
   final Value<DateTime?> dueAt;
   final Value<DateTime?> doneAt;
+  final Value<DateTime?> startedAt;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<String?> calendarEventId;
@@ -843,6 +882,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     this.category = const Value.absent(),
     this.dueAt = const Value.absent(),
     this.doneAt = const Value.absent(),
+    this.startedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.calendarEventId = const Value.absent(),
@@ -865,6 +905,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     required String category,
     this.dueAt = const Value.absent(),
     this.doneAt = const Value.absent(),
+    this.startedAt = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
     this.calendarEventId = const Value.absent(),
@@ -891,6 +932,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     Expression<String>? category,
     Expression<DateTime>? dueAt,
     Expression<DateTime>? doneAt,
+    Expression<DateTime>? startedAt,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<String>? calendarEventId,
@@ -913,6 +955,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
       if (category != null) 'category': category,
       if (dueAt != null) 'due_at': dueAt,
       if (doneAt != null) 'done_at': doneAt,
+      if (startedAt != null) 'started_at': startedAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
@@ -937,6 +980,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     Value<String>? category,
     Value<DateTime?>? dueAt,
     Value<DateTime?>? doneAt,
+    Value<DateTime?>? startedAt,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<String?>? calendarEventId,
@@ -959,6 +1003,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
       category: category ?? this.category,
       dueAt: dueAt ?? this.dueAt,
       doneAt: doneAt ?? this.doneAt,
+      startedAt: startedAt ?? this.startedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       calendarEventId: calendarEventId ?? this.calendarEventId,
@@ -994,6 +1039,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     }
     if (doneAt.present) {
       map['done_at'] = Variable<DateTime>(doneAt.value);
+    }
+    if (startedAt.present) {
+      map['started_at'] = Variable<DateTime>(startedAt.value);
     }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
@@ -1051,6 +1099,7 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
           ..write('category: $category, ')
           ..write('dueAt: $dueAt, ')
           ..write('doneAt: $doneAt, ')
+          ..write('startedAt: $startedAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('calendarEventId: $calendarEventId, ')
@@ -2483,6 +2532,7 @@ typedef $$TodosTableCreateCompanionBuilder =
       required String category,
       Value<DateTime?> dueAt,
       Value<DateTime?> doneAt,
+      Value<DateTime?> startedAt,
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<String?> calendarEventId,
@@ -2506,6 +2556,7 @@ typedef $$TodosTableUpdateCompanionBuilder =
       Value<String> category,
       Value<DateTime?> dueAt,
       Value<DateTime?> doneAt,
+      Value<DateTime?> startedAt,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<String?> calendarEventId,
@@ -2553,6 +2604,11 @@ class $$TodosTableFilterComposer extends Composer<_$AppDatabase, $TodosTable> {
 
   ColumnFilters<DateTime> get doneAt => $composableBuilder(
     column: $table.doneAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2661,6 +2717,11 @@ class $$TodosTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get startedAt => $composableBuilder(
+    column: $table.startedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2756,6 +2817,9 @@ class $$TodosTableAnnotationComposer
   GeneratedColumn<DateTime> get doneAt =>
       $composableBuilder(column: $table.doneAt, builder: (column) => column);
 
+  GeneratedColumn<DateTime> get startedAt =>
+      $composableBuilder(column: $table.startedAt, builder: (column) => column);
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -2844,6 +2908,7 @@ class $$TodosTableTableManager
                 Value<String> category = const Value.absent(),
                 Value<DateTime?> dueAt = const Value.absent(),
                 Value<DateTime?> doneAt = const Value.absent(),
+                Value<DateTime?> startedAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<String?> calendarEventId = const Value.absent(),
@@ -2865,6 +2930,7 @@ class $$TodosTableTableManager
                 category: category,
                 dueAt: dueAt,
                 doneAt: doneAt,
+                startedAt: startedAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 calendarEventId: calendarEventId,
@@ -2888,6 +2954,7 @@ class $$TodosTableTableManager
                 required String category,
                 Value<DateTime?> dueAt = const Value.absent(),
                 Value<DateTime?> doneAt = const Value.absent(),
+                Value<DateTime?> startedAt = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<String?> calendarEventId = const Value.absent(),
@@ -2909,6 +2976,7 @@ class $$TodosTableTableManager
                 category: category,
                 dueAt: dueAt,
                 doneAt: doneAt,
+                startedAt: startedAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 calendarEventId: calendarEventId,

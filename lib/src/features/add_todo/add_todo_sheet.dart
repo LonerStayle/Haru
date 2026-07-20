@@ -352,6 +352,8 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         // 없어 옛 doneAt 이 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
         // (dueAt/isAllDay 는 _serializeDate 가 note 일 때 이미 null/false 로 비운다.)
         doneAt: isNote ? null : initial.doneAt,
+        // 진행중 표식도 note 전환 시 제거 (note 는 진행 개념 없음).
+        startedAt: isNote ? null : initial.startedAt,
         calendarEventId: isNote ? null : initial.calendarEventId,
       );
       widget.onUpdate?.call(updated);

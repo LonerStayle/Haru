@@ -80,6 +80,106 @@ void main() {
     });
   });
 
+  group('진행중 3-상태 — startedAt / isInProgress / toggleInProgress', () {
+    Todo fresh() => Todo.create(
+      title: 'x',
+      category: Category.daily,
+      now: () => DateTime.utc(2026, 5, 1),
+      idGen: fixedId,
+    );
+
+    test('Todo.create 는 startedAt null (미완료)', () {
+      final t = fresh();
+      expect(t.startedAt, isNull);
+      expect(t.isInProgress, isFalse);
+      expect(t.isDone, isFalse);
+    });
+
+    test('미완료 → 진행중: startedAt 세팅, doneAt null 유지', () {
+      final at = DateTime.utc(2026, 5, 27, 10);
+      final ip = fresh().toggleInProgress(now: () => at);
+      expect(ip.isInProgress, isTrue);
+      expect(ip.isDone, isFalse);
+      expect(ip.startedAt, at);
+      expect(ip.doneAt, isNull);
+      expect(ip.updatedAt, at);
+    });
+
+    test('진행중 → 미완료: 다시 토글하면 startedAt null', () {
+      final ip = fresh().toggleInProgress(now: () => DateTime.utc(2026, 5, 27));
+      final undone = ip.toggleInProgress(now: () => DateTime.utc(2026, 5, 28));
+      expect(undone.isInProgress, isFalse);
+      expect(undone.startedAt, isNull);
+      expect(undone.doneAt, isNull);
+    });
+
+    test('진행중 → 완료: 완료 시 startedAt 제거 (완료 = 진행중 아님)', () {
+      final ip = fresh().toggleInProgress(now: () => DateTime.utc(2026, 5, 27));
+      final done = ip.toggleDone(now: () => DateTime.utc(2026, 5, 28, 12));
+      expect(done.isDone, isTrue);
+      expect(done.isInProgress, isFalse);
+      expect(done.startedAt, isNull, reason: '완료 시 진행중 표식 제거');
+      expect(done.doneAt, DateTime.utc(2026, 5, 28, 12));
+    });
+
+    test('완료 → 진행중: 진행중 토글 시 doneAt 해제 (불변식: 동시 세팅 금지)', () {
+      final done = fresh().toggleDone(now: () => DateTime.utc(2026, 5, 27));
+      final ip = done.toggleInProgress(now: () => DateTime.utc(2026, 5, 28));
+      expect(ip.isInProgress, isTrue);
+      expect(ip.isDone, isFalse);
+      expect(ip.doneAt, isNull);
+      expect(ip.startedAt, DateTime.utc(2026, 5, 28));
+    });
+
+    test('완료 해제 → 미완료 (startedAt 이미 없음)', () {
+      final done = fresh().toggleDone(now: () => DateTime.utc(2026, 5, 27));
+      final undone = done.toggleDone(now: () => DateTime.utc(2026, 5, 28));
+      expect(undone.isDone, isFalse);
+      expect(undone.isInProgress, isFalse);
+      expect(undone.startedAt, isNull);
+      expect(undone.doneAt, isNull);
+    });
+
+    test('note 는 toggleInProgress 무시 (진행 개념 없음)', () {
+      final note = Todo.create(
+        title: '메모',
+        category: Category.idea,
+        now: fixedNow,
+        idGen: fixedId,
+        type: TodoType.note,
+      );
+      final toggled = note.toggleInProgress(
+        now: () => DateTime.utc(2026, 5, 28),
+      );
+      expect(toggled, note);
+      expect(
+        note.copyWith(startedAt: DateTime.utc(2026, 5, 28)).isInProgress,
+        isFalse,
+      );
+    });
+
+    test('JSON round-trip — startedAt 보존', () {
+      final ip = fresh().toggleInProgress(now: () => DateTime.utc(2026, 5, 27));
+      expect(Todo.fromJson(ip.toJson()), ip);
+    });
+
+    test('JSON 역호환 — startedAt 누락 → null (미완료)', () {
+      final legacyJson = <String, dynamic>{
+        'id': 'legacy',
+        'title': '옛 todo',
+        'category': 'work',
+        'dueAt': null,
+        'doneAt': null,
+        'createdAt': '2026-05-01T09:00:00.000Z',
+        'updatedAt': '2026-05-01T09:00:00.000Z',
+        'calendarEventId': null,
+      };
+      final restored = Todo.fromJson(legacyJson);
+      expect(restored.startedAt, isNull);
+      expect(restored.isInProgress, isFalse);
+    });
+  });
+
   test('withCalendarEvent 가 eventId 와 updatedAt 만 변경', () {
     final t = Todo.create(
       title: 'x',

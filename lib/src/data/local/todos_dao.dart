@@ -146,6 +146,7 @@ class TodosDao extends DatabaseAccessor<AppDatabase> with _$TodosDaoMixin {
       category: _resolveCategory(row.category, catRow),
       dueAt: row.dueAt,
       doneAt: row.doneAt,
+      startedAt: row.startedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       calendarEventId: row.calendarEventId,
@@ -213,6 +214,7 @@ class TodosDao extends DatabaseAccessor<AppDatabase> with _$TodosDaoMixin {
       category: Value(t.category.id),
       dueAt: Value(t.dueAt),
       doneAt: Value(t.doneAt),
+      startedAt: Value(t.startedAt),
       createdAt: Value(t.createdAt),
       // updatedAt 은 LWW 키 — 반드시 UTC 로 저장해 원격(UTC)과 round-trip 일치.
       updatedAt: Value(t.updatedAt.toUtc()),

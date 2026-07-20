@@ -14,6 +14,9 @@ _Todo _$TodoFromJson(Map<String, dynamic> json) => _Todo(
   doneAt: json['doneAt'] == null
       ? null
       : DateTime.parse(json['doneAt'] as String),
+  startedAt: json['startedAt'] == null
+      ? null
+      : DateTime.parse(json['startedAt'] as String),
   createdAt: DateTime.parse(json['createdAt'] as String),
   updatedAt: DateTime.parse(json['updatedAt'] as String),
   calendarEventId: json['calendarEventId'] as String?,
@@ -38,6 +41,7 @@ Map<String, dynamic> _$TodoToJson(_Todo instance) => <String, dynamic>{
   'category': _categoryToJson(instance.category),
   'dueAt': instance.dueAt?.toIso8601String(),
   'doneAt': instance.doneAt?.toIso8601String(),
+  'startedAt': instance.startedAt?.toIso8601String(),
   'createdAt': instance.createdAt.toIso8601String(),
   'updatedAt': instance.updatedAt.toIso8601String(),
   'calendarEventId': instance.calendarEventId,
