@@ -48,6 +48,18 @@ flutter build macos --release
 flutter build apk --release
 ```
 
+## 배포/공유용 release 빌드 (⚠️ clean 강제)
+
+배포용 .zip/.apk 는 **반드시 `flutter clean` 먼저**. 증분빌드가 옛 캐시로 컴파일해
+새 기능이 산출물에서 조용히 누락된 사고가 있었다(보관 기능 zip·APK 양쪽 실종).
+
+```bash
+flutter clean && flutter pub get   # 배포 빌드 전 필수. 생략 금지.
+make build-macos && make build-apk
+# 검증: 산출물에 새 한글 문구가 박혔는지 (Dart AOT 는 한글=UTF-16LE). 0 이면 옛 캐시 → 재빌드.
+# python3 -c "print(open('<App바이너리>','rb').read().count('<문구>'.encode('utf-16-le')))"
+```
+
 ---
 
 ## 실행 (로컬 확인용)

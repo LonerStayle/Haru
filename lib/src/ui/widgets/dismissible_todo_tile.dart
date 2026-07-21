@@ -13,6 +13,7 @@ class DismissibleTodoTile extends StatelessWidget {
     super.key,
     required this.todo,
     this.onToggle,
+    this.onToggleInProgress,
     this.onDelete,
     this.onTap,
     this.confirmDismiss,
@@ -34,6 +35,10 @@ class DismissibleTodoTile extends StatelessWidget {
 
   final Todo todo;
   final VoidCallback? onToggle;
+
+  /// 진행중(세모) 토글. TodoTile 로 그대로 전달. null 이면 세모 버튼 미표시.
+  final VoidCallback? onToggleInProgress;
+
   final VoidCallback? onDelete;
 
   /// v1.2 — tile tap → edit sheet 진입 등. null 이면 InkWell 비활성.
@@ -91,6 +96,7 @@ class DismissibleTodoTile extends StatelessWidget {
       child: TodoTile(
         todo: todo,
         onToggle: onToggle,
+        onToggleInProgress: onToggleInProgress,
         onTap: onTap,
         onAddChild: onAddChild,
         onCopy: onCopy,

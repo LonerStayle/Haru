@@ -2,7 +2,7 @@
 
 > ralph 자동 루프 + 사람 reader 모두 이 파일 하나로 컨텍스트 복원 가능하게 작성.
 > 매 iter 시작 시 CLAUDE.md / PROMPT.md / IMPLEMENTATION_PLAN.md 와 함께 이 파일도 읽는다.
-> 마지막 업데이트: **2026-06-06 (브랜딩 라운드 — 앱 이름 '하루' + 볼드 체크 아이콘 + macOS 로그인 자동실행 토글 + macOS 번들 파일명 `haru.app`)**
+> 마지막 업데이트: **2026-07-18 (진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 + 완료율 링 진행중 세그먼트 + 카테고리 미완료/진행중/완료 3칩. drift v8→9 started_at)**
 
 ---
 
@@ -32,6 +32,7 @@
 | **fast-tasks — 날짜·기간 모델 + 그룹 계층 + Android 캘린더 권한 (5 task)** | ✅ 종료 (`167415d`) | 아래 "fast-tasks 내역" 참조. **DB 스키마 변경됨 → Supabase schema.sql 재실행 필요 + Google Console 설정 필요** |
 | **배치2 — 중첩 체크리스트 + 모바일 관리 + 정렬 + 전체보기 탭 + 카테고리 동기화 (`ca27c79`)** | ✅ 종료 | 402/402 PASS. **스키마 변경 없음**. 아래 "배치2 내역" 참조. 카테고리/그룹 cross-device 동기화 버그 수정 포함 |
 | **브랜딩 — 앱 이름 '하루' + 볼드 체크 아이콘 + macOS 로그인 자동실행 토글** | ✅ 종료 | 561/561 PASS. **스키마 변경 없음**. 아래 "브랜딩 내역" 참조. 대표님 직접 요청(아이콘·이름·자동실행) |
+| **진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 (2026-07-18)** | ✅ 종료 | 602/602 PASS. **DB 스키마 변경됨 (drift v8→9 `todos.started_at`) → Supabase schema.sql 재실행 필요.** 아래 "진행중 3-상태 내역" 참조. 대표님 직접 요청 |
 
 ### 현 상태 (2026-06-06)
 
@@ -39,6 +40,17 @@
 - analyze clean / format clean / **flutter test 561/561 PASS** / **macOS 디버그 빌드 성공**
 - **데스크탑 ↔ 폰 Supabase 동기화 정상 작동 확인됨** (대표님 실기기에서 검증 완료)
 - 갤럭시 S24 (SM S921N) 에 release APK 설치 완료
+
+### 진행중 3-상태 내역 (완료 체크 + 진행중 세모) — 2026-07-18
+
+대표님 직접 요청: "체크리스트에 체크만 있는 게 아니라 진행중 세모 버튼". 미완료 / **진행중** / 완료 3-상태.
+
+- **상태 모델**: `doneAt` 과 짝이 되는 `Todo.startedAt`(nullable timestamp) 신설. **불변식: startedAt/doneAt 동시 세팅 금지** — 미완료(둘 다 null) / 진행중(startedAt만) / 완료(doneAt). `isDone` 은 그대로 doneAt 기반이라 **이월·오늘노출·완료접기 정책은 무손상**(진행중은 자동으로 "미완료"처럼 이월·표시). `isInProgress` getter + `toggleInProgress()` 신설. **완료 시 startedAt 제거**(완료=진행중 아님), 진행중 토글 시 doneAt 해제.
+- **조작 UI**: 완료 체크(원) **왼쪽에 세모(진행중) 버튼** — 탭=진행중 토글. `InProgressTriangle` 위젯(`lib/src/ui/widgets/in_progress_triangle.dart`, CustomPaint 세모). TodoTile / 아웃라인 _OutlineNode / 상세 AppBar / 타임라인 타일 4곳. `onToggleInProgress` 는 **nullable(선택)** 로 배선 — note 및 미지원 화면은 세모 미표시.
+- **문구/카운트**: 오늘 상단 링 = **완료만 진하게 채움 + 진행중은 옅은 세그먼트**(대표님 확정) + "남은 N개 · 진행중 M". 타일은 진행중이면 제목 아래 "진행중" 라벨. 카테고리 헤더 = 미완료/진행중/완료 3칩(Wrap). 트레이 "미체크 N" 은 진행중 포함 유지(안 끝남).
+- **DB**: drift **schemaVersion 8→9** (`todos.started_at`, PRAGMA 가드 idempotent). Supabase `schema.sql` §21 `add column if not exists started_at`. remote 매핑(`started_at`) + 옛 스키마 null fallback. LWW 는 updatedAt 기반이라 그대로.
+- **검증**: analyze 0 / format 0 / **flutter test 602/602 PASS** (신규: todo_test 진행중 그룹 11 + todo_tile_test 세모 6 + category chip 라벨 갱신).
+- ⚠️ **대표님 액션**: `make sql` → Supabase SQL Editor 재실행(started_at 컬럼 + notify pgrst). 미실행 시 진행중 상태가 기기 간 동기화에서 PGRST204/누락. + 폰 재빌드(`make build-apk`).
 
 ### 브랜딩 내역 (앱 이름 + 아이콘 + 자동실행) — 2026-06-06
 
@@ -126,6 +138,7 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | Supabase OTP length | 8자리 (앱은 6~10 가변 허용) |
 | **Supabase v1.1+v1.2 마이그레이션 (parent_id/type/sort_order/description + categories)** | ✅ 완료 — schema.sql 실행 + 동기화 검증됨 (`b246b64` 수정본 기준) |
 | **Supabase fast-tasks 마이그레이션 (todos.end_at/is_all_day/time_anchor + groups + categories.group_id)** | ⚠️ **대표님 액션 필요** — `make sql` → Supabase SQL Editor 에 schema.sql 재실행. 전체 idempotent. 미실행 시 신규 필드 동기화에서 PGRST204. |
+| **Supabase 진행중 3-상태 마이그레이션 (todos.started_at)** | ⚠️ **대표님 액션 필요 (2026-07-18)** — `make sql` → schema.sql 재실행(§21 started_at + notify pgrst). idempotent. 미실행 시 진행중 상태가 기기 간 동기화 안 됨. |
 | **Google Cloud Console — Android OAuth client + calendar scope + 테스트 사용자** | ⚠️ **대표님 액션 필요** (Task 3). 아래 § 3 참조. 미설정 시 갤S24 캘린더 동의 차단. |
 | `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ⚠️ Android OAuth client id 채워야 Calendar provider 활성 (실제 매칭은 SHA-1). |
 | 갤럭시 S24 (SM S921N) release APK 설치 | ✅ (단 fast-tasks 변경분은 재빌드·재설치 필요) |

@@ -82,8 +82,8 @@ void main() {
     // 완료는 기본 접힘 — "완료 1개" 접기 행 아래로 숨는다.
     expect(find.text('아이디어 C 완료'), findsNothing);
     expect(find.text('완료 1개'), findsOneWidget);
-    // 헤더 통계 chip (미체크/완료) 은 접힘과 무관하게 그대로.
-    expect(find.text('미체크 2'), findsOneWidget);
+    // 헤더 통계 chip (미완료/완료) 은 접힘과 무관하게 그대로.
+    expect(find.text('미완료 2'), findsOneWidget);
     expect(find.text('완료 1'), findsOneWidget);
     // 접기 행 탭 → 완료 노출.
     await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
@@ -91,7 +91,7 @@ void main() {
     expect(find.text('아이디어 C 완료'), findsOneWidget);
   });
 
-  testWidgets('메모(note)는 미체크/완료 카운트에서 제외된다', (tester) async {
+  testWidgets('메모(note)는 미완료/완료 카운트에서 제외된다', (tester) async {
     final controller = await mount(tester, category: Category.idea);
     controller.add([
       todo(id: '1', category: Category.idea, title: '태스크 미체크'),
@@ -113,7 +113,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('참고 노트'), findsOneWidget);
-    expect(find.text('미체크 1'), findsOneWidget);
+    expect(find.text('미완료 1'), findsOneWidget);
     expect(find.text('완료 1'), findsOneWidget);
   });
 

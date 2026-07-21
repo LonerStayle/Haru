@@ -31,6 +31,8 @@ class CategoryView extends ConsumerWidget {
         category: category,
         todos: todos,
         onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
+        onToggleInProgress: (t) =>
+            ref.read(todoActionsProvider).toggleInProgress(t),
         onDelete: (t) async {
           final actions = ref.read(todoActionsProvider);
           await actions.delete(t);
@@ -71,6 +73,7 @@ class _Loaded extends StatefulWidget {
     required this.category,
     required this.todos,
     required this.onToggle,
+    required this.onToggleInProgress,
     required this.onDelete,
     required this.onEdit,
     required this.onDrillDown,
@@ -84,6 +87,7 @@ class _Loaded extends StatefulWidget {
   /// 이 카테고리에 속한 모든 todo (root + 자손). root 선별 + childCount 양쪽에 사용.
   final List<Todo> todos;
   final void Function(Todo) onToggle;
+  final void Function(Todo) onToggleInProgress;
   final void Function(Todo) onDelete;
   final void Function(Todo) onEdit;
   final void Function(Todo) onDrillDown;
@@ -105,10 +109,12 @@ class _LoadedState extends State<_Loaded> {
   Widget build(BuildContext context) {
     final todos = widget.todos;
     final category = widget.category;
-    // 미체크/완료 카운트는 **task 만** 센다. note(메모) 는 체크 개념이 없어
+    // 미완료/진행중/완료 카운트는 **task 만** 센다. note(메모) 는 체크 개념이 없어
     // isDone 이 항상 false → 예전엔 모두 '미체크'로 잘못 잡혔다 (이슈 수정).
+    // 진행중 3-상태 — '미완료'는 순수 미완료(진행중 제외), 진행중은 별도 칩.
     final tasks = todos.where((t) => t.type == TodoType.task);
-    final undone = tasks.where((t) => !t.isDone).length;
+    final inProgress = tasks.where((t) => t.isInProgress).length;
+    final undone = tasks.where((t) => !t.isDone && !t.isInProgress).length;
     final done = tasks.where((t) => t.isDone).length;
     // §14-B — 메모 개수 보조 카운트 (0 이면 헤더에서 생략).
     final noteCount = todos.where((t) => t.type == TodoType.note).length;
@@ -126,6 +132,7 @@ class _LoadedState extends State<_Loaded> {
             child: _Header(
               category: category,
               undone: undone,
+              inProgress: inProgress,
               done: done,
               noteCount: noteCount,
             ),
@@ -153,6 +160,7 @@ class _LoadedState extends State<_Loaded> {
               items: _roots,
               allTodos: todos,
               onToggle: widget.onToggle,
+              onToggleInProgress: widget.onToggleInProgress,
               onDelete: widget.onDelete,
               onEdit: widget.onEdit,
               onDrillDown: widget.onDrillDown,
@@ -170,12 +178,14 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.category,
     required this.undone,
+    required this.inProgress,
     required this.done,
     required this.noteCount,
   });
 
   final Category category;
   final int undone;
+  final int inProgress;
   final int done;
   final int noteCount;
 
@@ -209,24 +219,31 @@ class _Header extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppTokens.space12),
-        Row(
+        // 진행중 3-상태 — 미완료 / 진행중 / 완료 (+ 메모). 칩이 4개까지 늘 수 있어
+        // 좁은 모바일 폭에서 넘치지 않도록 Wrap 으로 감싼다.
+        Wrap(
+          spacing: AppTokens.space8,
+          runSpacing: AppTokens.space8,
           children: [
-            _StatChip(label: '미체크', count: undone, color: category.color),
-            const SizedBox(width: AppTokens.space8),
+            _StatChip(
+              label: '미완료',
+              count: undone,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+            ),
+            // 진행중은 카테고리색으로 강조 (세모 버튼과 같은 색 언어).
+            _StatChip(label: '진행중', count: inProgress, color: category.color),
             _StatChip(
               label: '완료',
               count: done,
               color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
             ),
             // §14-B — 메모가 있을 때만 "메모 N" 보조 카운트.
-            if (noteCount > 0) ...[
-              const SizedBox(width: AppTokens.space8),
+            if (noteCount > 0)
               _StatChip(
                 label: '메모',
                 count: noteCount,
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
               ),
-            ],
           ],
         ),
       ],

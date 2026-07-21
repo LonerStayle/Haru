@@ -25,6 +25,8 @@ class Todos extends Table {
   TextColumn get category => text()();
   DateTimeColumn get dueAt => dateTime().nullable()();
   DateTimeColumn get doneAt => dateTime().nullable()();
+  // 진행중(in-progress) 시작 시각. 값 있고 done_at 이 null 이면 진행중. 완료 시 null.
+  DateTimeColumn get startedAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
   TextColumn get calendarEventId => text().nullable()();
@@ -133,7 +135,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   /// `storeDateTimeAsText: true` — DateTime 을 ISO 8601 text 로 저장.
   /// 기본 (unix int) 은 fetch 시 항상 local time 으로 변환되어 UTC↔local 구분을 잃는다.
@@ -155,6 +157,7 @@ class AppDatabase extends _$AppDatabase {
   /// - v7: todos 에 series_id / recurrence_rule / recurrence_end_at / is_series_master
   ///   추가 (date-repeat — 날짜 반복). PRAGMA 가드로 idempotent.
   /// - v8: categories.archived / groups.archived 컬럼 추가 (보관 기능). 가드 idempotent.
+  /// - v9: todos.started_at 컬럼 추가 (진행중 3-상태). PRAGMA 가드로 idempotent.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -250,6 +253,13 @@ class AppDatabase extends _$AppDatabase {
         final grpInfo = await customSelect("PRAGMA table_info('groups')").get();
         if (!grpInfo.any((r) => r.data['name'] == 'archived')) {
           await m.addColumn(groups, groups.archived);
+        }
+      }
+      // 8 → 9: todos.started_at 추가 (진행중 3-상태). PRAGMA 가드로 idempotent.
+      if (from < 9) {
+        final info = await customSelect("PRAGMA table_info('todos')").get();
+        if (!info.any((r) => r.data['name'] == 'started_at')) {
+          await m.addColumn(todos, todos.startedAt);
         }
       }
     },

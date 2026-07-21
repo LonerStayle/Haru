@@ -85,9 +85,10 @@ class HomeScreen extends ConsumerWidget {
             : todos
                   .where((t) => CarryoverPolicy.shouldCarryOverToday(t, now))
                   .length;
-        // 상단 진척 요약 — 오늘 task(메모 제외) 완료/전체.
+        // 상단 진척 요약 — 오늘 task(메모 제외) 완료/전체 + 진행중.
         final tasks = todos.where((t) => t.type == TodoType.task);
         final doneCount = tasks.where((t) => t.isDone).length;
+        final inProgressCount = tasks.where((t) => t.isInProgress).length;
         final totalCount = tasks.length;
         return _Loaded(
           todos: todos,
@@ -97,11 +98,14 @@ class HomeScreen extends ConsumerWidget {
           // 그룹 탭(group != null) 안에서는 그룹 라벨이 중복이라 숨긴다.
           showGroupLabel: group == null,
           doneCount: doneCount,
+          inProgressCount: inProgressCount,
           totalCount: totalCount,
           carryoverCount: carryoverCount,
           showHeader: showHeader,
           now: now,
           onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
+          onToggleInProgress: (t) =>
+              ref.read(todoActionsProvider).toggleInProgress(t),
           onDelete: (t) async {
             final actions = ref.read(todoActionsProvider);
             await actions.delete(t);
@@ -154,11 +158,13 @@ class _Loaded extends StatefulWidget {
     required this.hiddenCountBySeries,
     required this.showGroupLabel,
     required this.doneCount,
+    required this.inProgressCount,
     required this.totalCount,
     required this.carryoverCount,
     required this.showHeader,
     required this.now,
     required this.onToggle,
+    required this.onToggleInProgress,
     required this.onDelete,
     required this.onEdit,
     required this.onDrillDown,
@@ -182,8 +188,9 @@ class _Loaded extends StatefulWidget {
   /// 그룹 탭 안에서는 그룹 라벨이 중복이라 false.
   final bool showGroupLabel;
 
-  /// 상단 진척 요약 — 오늘 task 완료/전체.
+  /// 상단 진척 요약 — 오늘 task 완료/전체 + 진행중.
   final int doneCount;
+  final int inProgressCount;
   final int totalCount;
   final int carryoverCount;
 
@@ -191,6 +198,7 @@ class _Loaded extends StatefulWidget {
   final bool showHeader;
   final DateTime now;
   final void Function(Todo) onToggle;
+  final void Function(Todo) onToggleInProgress;
   final void Function(Todo) onDelete;
   final void Function(Todo) onEdit;
   final void Function(Todo) onDrillDown;
@@ -246,6 +254,7 @@ class _LoadedState extends State<_Loaded> {
             sliver: SliverToBoxAdapter(
               child: TodayProgressSummary(
                 done: widget.doneCount,
+                inProgress: widget.inProgressCount,
                 total: widget.totalCount,
               ),
             ),
@@ -278,6 +287,7 @@ class _LoadedState extends State<_Loaded> {
             groups: widget.groups,
             showGroupLabel: widget.showGroupLabel,
             onToggle: widget.onToggle,
+            onToggleInProgress: widget.onToggleInProgress,
             onDelete: widget.onDelete,
             onEdit: widget.onEdit,
             onDrillDown: widget.onDrillDown,

@@ -25,6 +25,7 @@ List<Widget> todayCategorySectionSlivers({
   required void Function(Todo folder) onDrillDown,
   required void Function(Todo leaf) onEdit,
   required void Function(Todo) onToggle,
+  void Function(Todo)? onToggleInProgress,
   required void Function(Todo parent) onAddChild,
   required void Function(Todo) onCopy,
   required void Function(Todo) onDelete,
@@ -119,6 +120,9 @@ List<Widget> todayCategorySectionSlivers({
                 child: DismissibleTodoTile(
                   todo: todo,
                   onToggle: () => onToggle(todo),
+                  onToggleInProgress: onToggleInProgress == null
+                      ? null
+                      : () => onToggleInProgress(todo),
                   onDelete: () => onDelete(todo),
                   onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
                   // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.

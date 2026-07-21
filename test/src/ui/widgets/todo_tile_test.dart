@@ -13,6 +13,7 @@ void main() {
     Category category = Category.work,
     DateTime? dueAt,
     DateTime? doneAt,
+    DateTime? startedAt,
     DateTime? endAt,
     bool isAllDay = false,
     String timeAnchor = 'start',
@@ -23,6 +24,7 @@ void main() {
     category: category,
     dueAt: dueAt,
     doneAt: doneAt,
+    startedAt: startedAt,
     createdAt: DateTime.utc(2026, 5, 27, 9),
     updatedAt: DateTime.utc(2026, 5, 27, 9),
     calendarEventId: null,
@@ -32,12 +34,21 @@ void main() {
     timeAnchor: timeAnchor,
   );
 
-  Future<void> mount(WidgetTester tester, Todo todo, {VoidCallback? onToggle}) {
+  Future<void> mount(
+    WidgetTester tester,
+    Todo todo, {
+    VoidCallback? onToggle,
+    VoidCallback? onToggleInProgress,
+  }) {
     return tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.mobileLight(),
         home: Scaffold(
-          body: TodoTile(todo: todo, onToggle: onToggle),
+          body: TodoTile(
+            todo: todo,
+            onToggle: onToggle,
+            onToggleInProgress: onToggleInProgress,
+          ),
         ),
       ),
     );
@@ -61,6 +72,56 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('todo-tile-check')));
     await tester.pump();
     expect(toggled, 1);
+  });
+
+  group('진행중(세모) 버튼', () {
+    testWidgets('onToggleInProgress 배선 시 세모 버튼 노출', (tester) async {
+      await mount(tester, make(), onToggleInProgress: () {});
+      expect(find.byKey(const ValueKey('todo-tile-progress')), findsOneWidget);
+    });
+
+    testWidgets('onToggleInProgress 미배선 시 세모 버튼 미표시', (tester) async {
+      await mount(tester, make());
+      expect(find.byKey(const ValueKey('todo-tile-progress')), findsNothing);
+    });
+
+    testWidgets('세모 버튼 탭 → onToggleInProgress 호출', (tester) async {
+      var count = 0;
+      await mount(tester, make(), onToggleInProgress: () => count++);
+      await tester.tap(find.byKey(const ValueKey('todo-tile-progress')));
+      await tester.pump();
+      expect(count, 1);
+    });
+
+    testWidgets('진행중(startedAt) 이면 "진행중" 라벨 노출', (tester) async {
+      await mount(
+        tester,
+        make(startedAt: DateTime.utc(2026, 5, 27, 10)),
+        onToggleInProgress: () {},
+      );
+      expect(
+        find.byKey(const ValueKey('todo-tile-inprogress-label')),
+        findsOneWidget,
+      );
+      expect(find.text('진행중'), findsOneWidget);
+    });
+
+    testWidgets('미진행이면 "진행중" 라벨 미표시', (tester) async {
+      await mount(tester, make(), onToggleInProgress: () {});
+      expect(
+        find.byKey(const ValueKey('todo-tile-inprogress-label')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('note 는 콜백 있어도 세모 버튼 미표시', (tester) async {
+      await mount(
+        tester,
+        make(type: TodoType.note, title: '메모'),
+        onToggleInProgress: () {},
+      );
+      expect(find.byKey(const ValueKey('todo-tile-progress')), findsNothing);
+    });
   });
 
   testWidgets('note 타입 — 체크 아이콘 대신 sticky_note 아이콘', (tester) async {

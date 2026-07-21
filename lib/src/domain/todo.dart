@@ -22,6 +22,9 @@ enum TodoType {
 /// 할 일 한 건.
 ///
 /// - [doneAt] 가 null 이면 미체크, 값이 있으면 체크된 시각. ([type] = note 면 항상 null.)
+/// - [startedAt] 가 값이 있고 [doneAt] 가 null 이면 "진행중". 완료 시 [startedAt] 는
+///   제거된다 (완료 = 진행중 아님). **불변식: [startedAt] 와 [doneAt] 는 동시에
+///   세팅되지 않는다** — 미완료(둘 다 null) / 진행중(startedAt만) / 완료(doneAt) 3-상태.
 /// - [dueAt] 는 사용자가 지정한 일정 (Google Calendar 등록 대상).
 /// - [calendarEventId] 가 있으면 캘린더에 이벤트가 등록된 상태.
 /// - [createdAt] / [updatedAt] 은 Supabase last-write-wins 충돌 해소에 사용.
@@ -58,6 +61,9 @@ abstract class Todo with _$Todo {
     required Category category,
     DateTime? dueAt,
     DateTime? doneAt,
+    // 진행중(in-progress) 시작 시각. 값이 있고 doneAt 이 null 이면 "진행중" 상태.
+    // 완료(doneAt set) 시엔 null 로 비워진다. (note 는 항상 null.)
+    DateTime? startedAt,
     required DateTime createdAt,
     required DateTime updatedAt,
     String? calendarEventId,
@@ -114,6 +120,7 @@ abstract class Todo with _$Todo {
       category: category,
       dueAt: dueAt,
       doneAt: null,
+      startedAt: null,
       createdAt: n,
       updatedAt: n,
       calendarEventId: null,
@@ -139,15 +146,33 @@ abstract class Todo with _$Todo {
     return timeAnchor == 'end' ? TodoDateMode.endTime : TodoDateMode.startTime;
   }
 
-  /// 체크된 상태인지. note 는 항상 false (체크 개념 X).
+  /// 체크(완료)된 상태인지. note 는 항상 false (체크 개념 X).
   bool get isDone => type == TodoType.task && doneAt != null;
 
-  /// 체크 토글 — done 이면 미체크로, 미체크면 [at] (기본 now) 체크.
-  /// note 타입은 toggle 무시 (체크 개념 없음) — 호출자가 사전 분기하지 못한 케이스를 안전 처리.
+  /// 진행중 상태인지 — 시작했으나(startedAt) 아직 완료 안 됨(doneAt null). note 는 false.
+  bool get isInProgress =>
+      type == TodoType.task && doneAt == null && startedAt != null;
+
+  /// 완료 토글 — done 이면 미체크로, 미체크면 [now] (기본 now) 체크.
+  /// **완료 시 진행중 표식([startedAt])은 제거**한다 (완료 = 진행중 아님). 완료 해제는
+  /// 미완료(둘 다 null)로 되돌린다. note 타입은 toggle 무시 (체크 개념 없음).
   Todo toggleDone({DateTime Function()? now}) {
     if (type == TodoType.note) return this;
     final n = (now ?? DateTime.now)();
-    return copyWith(doneAt: isDone ? null : n, updatedAt: n);
+    return isDone
+        ? copyWith(doneAt: null, updatedAt: n)
+        : copyWith(doneAt: n, startedAt: null, updatedAt: n);
+  }
+
+  /// 진행중 토글 — 진행중이면 미완료로, 아니면 진행중으로. 완료였던 항목을 진행중으로
+  /// 바꾸면 [doneAt] 는 해제된다 (불변식: startedAt/doneAt 동시 세팅 금지).
+  /// note 타입은 무시 (체크·진행 개념 없음).
+  Todo toggleInProgress({DateTime Function()? now}) {
+    if (type == TodoType.note) return this;
+    final n = (now ?? DateTime.now)();
+    return isInProgress
+        ? copyWith(startedAt: null, updatedAt: n)
+        : copyWith(startedAt: n, doneAt: null, updatedAt: n);
   }
 
   /// 캘린더 이벤트 id 갱신.

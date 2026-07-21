@@ -6,17 +6,19 @@ import '../../core/theme.dart';
 
 /// 오늘 화면 상단 진척 요약 카드 — 원형 진행 링 + "오늘 N/M 완료" 텍스트.
 ///
-/// [total] 은 오늘 task(메모 제외) 수, [done] 은 그중 완료 수. total 이 0 이면
-/// (오늘 task 가 없음) 호출 쪽에서 아예 렌더하지 않는 게 권장이지만, 안전망으로
-/// 0 일 때는 빈 위젯을 반환한다.
+/// [total] 은 오늘 task(메모 제외) 수, [done] 은 그중 완료 수, [inProgress] 는 진행중 수.
+/// **링은 완료만 진하게 채우고, 진행중은 옅은 세그먼트로 별도 표기**(대표님 확정 — 완료율
+/// 정직 유지 + 진행 가시화). total 이 0 이면 (오늘 task 가 없음) 안전망으로 빈 위젯.
 class TodayProgressSummary extends StatelessWidget {
   const TodayProgressSummary({
     super.key,
     required this.done,
     required this.total,
+    this.inProgress = 0,
   });
 
   final int done;
+  final int inProgress;
   final int total;
 
   @override
@@ -28,6 +30,10 @@ class TodayProgressSummary extends StatelessWidget {
     final isComplete = done >= total;
     final remaining = total - done;
     final ratio = total == 0 ? 0.0 : done / total;
+    // 진행중 세그먼트 — 완료 arc 뒤에 이어 옅게 그린다. 완료+진행중이 total 을 넘지 않도록 클램프.
+    final inProgressRatio = total == 0
+        ? 0.0
+        : (inProgress.clamp(0, total - done)) / total;
 
     // 완료 시 성공 그린(= daily 카테고리 hue), 진행 중엔 accent 블루.
     const successColor = Color(0xFF10B981);
@@ -53,6 +59,7 @@ class TodayProgressSummary extends StatelessWidget {
         children: [
           _ProgressRing(
             ratio: ratio,
+            inProgressRatio: inProgressRatio,
             color: ringColor,
             track: scheme.outline,
             isComplete: isComplete,
@@ -78,7 +85,11 @@ class TodayProgressSummary extends StatelessWidget {
                 ),
                 const SizedBox(height: AppTokens.space2),
                 Text(
-                  isComplete ? '깔끔하게 비웠어요. 잘하셨어요 🎉' : '$remaining개 남았어요',
+                  isComplete
+                      ? '깔끔하게 비웠어요. 잘하셨어요 🎉'
+                      : inProgress > 0
+                      ? '$remaining개 남음 · 진행중 $inProgress'
+                      : '$remaining개 남았어요',
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -102,6 +113,7 @@ class TodayProgressSummary extends StatelessWidget {
 class _ProgressRing extends StatelessWidget {
   const _ProgressRing({
     required this.ratio,
+    required this.inProgressRatio,
     required this.color,
     required this.track,
     required this.isComplete,
@@ -111,6 +123,7 @@ class _ProgressRing extends StatelessWidget {
   });
 
   final double ratio;
+  final double inProgressRatio;
   final Color color;
   final Color track;
   final bool isComplete;
@@ -125,7 +138,12 @@ class _ProgressRing extends StatelessWidget {
       width: size,
       height: size,
       child: CustomPaint(
-        painter: _RingPainter(ratio: ratio, color: color, track: track),
+        painter: _RingPainter(
+          ratio: ratio,
+          inProgressRatio: inProgressRatio,
+          color: color,
+          track: track,
+        ),
         child: Center(
           child: isComplete
               ? Icon(Icons.check_rounded, size: 24, color: color)
@@ -137,9 +155,15 @@ class _ProgressRing extends StatelessWidget {
 }
 
 class _RingPainter extends CustomPainter {
-  _RingPainter({required this.ratio, required this.color, required this.track});
+  _RingPainter({
+    required this.ratio,
+    required this.inProgressRatio,
+    required this.color,
+    required this.track,
+  });
 
   final double ratio;
+  final double inProgressRatio;
   final Color color;
   final Color track;
 
@@ -148,6 +172,8 @@ class _RingPainter extends CustomPainter {
     const stroke = 6.0;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = (size.width - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    const start = -math.pi / 2;
 
     final trackPaint = Paint()
       ..style = PaintingStyle.stroke
@@ -156,23 +182,34 @@ class _RingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawCircle(center, radius, trackPaint);
 
-    final sweep = (ratio.clamp(0.0, 1.0)) * 2 * math.pi;
-    if (sweep <= 0) return;
-    final progressPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..color = color
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      sweep,
-      false,
-      progressPaint,
-    );
+    final doneSweep = (ratio.clamp(0.0, 1.0)) * 2 * math.pi;
+    final ipSweep = (inProgressRatio.clamp(0.0, 1.0)) * 2 * math.pi;
+
+    // 진행중 세그먼트 — 완료 arc 뒤에 옅은 색으로 먼저(아래 레이어) 그린다.
+    if (ipSweep > 0) {
+      final ipPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = color.withValues(alpha: 0.28)
+        ..strokeCap = StrokeCap.butt;
+      canvas.drawArc(rect, start + doneSweep, ipSweep, false, ipPaint);
+    }
+
+    // 완료 arc — 진한 색.
+    if (doneSweep > 0) {
+      final progressPaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = color
+        ..strokeCap = StrokeCap.round;
+      canvas.drawArc(rect, start, doneSweep, false, progressPaint);
+    }
   }
 
   @override
   bool shouldRepaint(_RingPainter old) =>
-      old.ratio != ratio || old.color != color || old.track != track;
+      old.ratio != ratio ||
+      old.inProgressRatio != inProgressRatio ||
+      old.color != color ||
+      old.track != track;
 }
