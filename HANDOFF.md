@@ -145,13 +145,13 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | Supabase **Exposed schemas** 에 `solo_todo` 추가 | ✅ |
 | Supabase Email Templates (`Confirm signup` + `Magic Link`) 가 `{{ .Token }}` 표시 | ✅ |
 | `.env.local` (SUPABASE_URL / ANON / GOOGLE OAuth desktop + Android) | ✅ |
-| Android debug SHA-1 | `F8:EC:9C:48:5D:79:DB:8B:D3:41:42:4C:65:33:14:EB:71:35:AE:DC` |
+| Android debug SHA-1 | `76:EC:F3:83:39:76:2F:86:E8:1E:A9:8A:C3:F3:A3:1D:51:9C:3F:B2` (2026-08-09 확인. 옛 기록 `F8:EC:9C:...:AE:DC` 는 keystore 재생성 전 지문 — 콘솔 불일치의 원인이었음) |
 | Supabase OTP length | 8자리 (앱은 6~10 가변 허용) |
 | **Supabase v1.1+v1.2 마이그레이션 (parent_id/type/sort_order/description + categories)** | ✅ 완료 — schema.sql 실행 + 동기화 검증됨 (`b246b64` 수정본 기준) |
 | **Supabase fast-tasks 마이그레이션 (todos.end_at/is_all_day/time_anchor + groups + categories.group_id)** | ⚠️ **대표님 액션 필요** — `make sql` → Supabase SQL Editor 에 schema.sql 재실행. 전체 idempotent. 미실행 시 신규 필드 동기화에서 PGRST204. |
 | **Supabase 진행중 3-상태 마이그레이션 (todos.started_at)** | ⚠️ **대표님 액션 필요 (2026-07-18)** — `make sql` → schema.sql 재실행(§21 started_at + notify pgrst). idempotent. 미실행 시 진행중 상태가 기기 간 동기화 안 됨. |
-| **Google Cloud Console — Android OAuth client + calendar scope + 테스트 사용자** | ⚠️ **대표님 액션 필요** (Task 3). 아래 § 3 참조. 미설정 시 갤S24 캘린더 동의 차단. |
-| `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ⚠️ Android OAuth client id 채워야 Calendar provider 활성 (실제 매칭은 SHA-1). |
+| **Google Cloud Console — Android OAuth client + calendar scope** | ✅ **완료 (2026-08-09)** — `SoloTodo - 안드로이드` 클라이언트의 SHA-1 을 현 keystore 지문(`76:EC:F3:...`)으로 교체 저장. calendar/calendar.events 범위 등록 확인. 게시 상태 프로덕션(외부)이라 테스트 사용자 불필요 — 동의 시 "확인되지 않은 앱" 경고는 고급→이동으로 통과. SHA-1 반영까지 최대 몇 시간 걸릴 수 있음. |
+| `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ✅ 채워짐 (`431288523948-6u98...`). serverClientId(`-n9pn...` 웹) 도 있음. |
 | 갤럭시 S24 (SM S921N) release APK 설치 | ✅ (단 fast-tasks 변경분은 재빌드·재설치 필요) |
 | 로컬 DB 백업 | `~/solo_todo_db_backup/solo_todo_*.sqlite` (1회성, 이제 클라우드 동기화되므로 불필요시 삭제 가능) |
 
@@ -164,13 +164,9 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 ### ⚠️ 대표님 즉시 액션 (fast-tasks 활성화)
 
 1. **Supabase schema.sql 재실행** — `make sql` 로 클립보드 복사 → Supabase SQL Editor 붙여넣고 실행. todos 날짜컬럼 3개 + groups 테이블 + categories.group_id 추가, 끝에서 `notify pgrst` 캐시 갱신. (idempotent, 안전)
-2. **Google Cloud Console (Android 캘린더 권한, Task 3)**:
-   - 사용자 인증 정보 → OAuth 클라이언트 ID 만들기 → 유형 **Android**, 패키지명 `com.goldenplanet.solo_todo`, **SHA-1** 등록 (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android` 의 SHA1).
-   - OAuth **동의 화면 → 범위 추가**: `https://www.googleapis.com/auth/calendar.events`.
-   - 앱이 "테스트" 상태면 **테스트 사용자**에 `dlwlstjq410@gmail.com` 추가.
-   - 만든 Android client id 를 `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` 에 기입.
+2. ~~**Google Cloud Console (Android 캘린더 권한, Task 3)**~~ — ✅ **완료 (2026-08-09, Claude 브라우저 자동화로 처리)**. 원인은 콘솔 SHA-1 이 keystore 재생성 전 옛 지문이었던 것. 현 지문으로 교체 저장 완료. 범위·client id 는 이미 정상이었음. §2 표 참조.
 3. **갤S24 재빌드·재설치** — fast-tasks 변경분 반영. `make build-apk` 후 `flutter install` (또는 `make run-android`).
-   - 첫 캘린더 등록 시 **계정 동의 팝업이 떠야 정상**. 팝업 없이 거부되면 위 2번 콘솔 설정 누락.
+   - 첫 캘린더 등록 시 **계정 동의 팝업이 떠야 정상**. "확인되지 않은 앱" 경고가 뜨면 고급 → 이동(안전하지 않음) 으로 진행 (개인용 미인증 앱의 정상 동작). SHA-1 변경 반영까지 최대 몇 시간 걸릴 수 있음.
 
 ### 미해결 / v1.3 후보 (대표님 결정 필요)
 
