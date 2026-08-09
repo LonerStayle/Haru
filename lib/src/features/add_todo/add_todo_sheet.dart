@@ -1321,6 +1321,13 @@ class _GroupAccordionHeader extends StatelessWidget {
                 ),
               ),
             ),
+            // 화살표는 그룹명 바로 옆 — 오른쪽 끝으로 밀면 넓은 시트에서 어색.
+            const SizedBox(width: AppTokens.space2),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+              color: scheme.onSurface.withValues(alpha: 0.55),
+            ),
             if (selectedHint != null) ...[
               const SizedBox(width: AppTokens.space8),
               Flexible(
@@ -1333,12 +1340,6 @@ class _GroupAccordionHeader extends StatelessWidget {
                 ),
               ),
             ],
-            const Spacer(),
-            Icon(
-              expanded ? Icons.expand_less : Icons.expand_more,
-              size: 18,
-              color: scheme.onSurface.withValues(alpha: 0.55),
-            ),
           ],
         ),
       ),
