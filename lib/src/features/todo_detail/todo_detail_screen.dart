@@ -6,12 +6,14 @@ import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/in_progress_triangle.dart';
 import '../../ui/widgets/skeleton.dart';
+import '../../ui/widgets/sort_mode_button.dart';
 import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
+import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
 
 /// 기능 M — 하위 체크리스트 드릴다운 상세 화면.
@@ -31,6 +33,8 @@ class TodoDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncAll = ref.watch(allTodosProvider);
     final asyncChildren = ref.watch(childrenOfProvider(parent.id));
+    // 카테고리 화면의 정렬 버튼과 같은 전역 상태 — 하위 목록도 함께 일정순으로 보인다.
+    final sortMode = ref.watch(sortModeProvider);
 
     final allTodos = asyncAll.asData?.value ?? const <Todo>[];
     // parent 최신 상태 — 삭제되었으면 진입 스냅샷으로 fallback (pop 처리는 아래).
@@ -60,6 +64,12 @@ class TodoDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(live.title, overflow: TextOverflow.ellipsis),
         actions: [
+          // 하위 목록 정렬 토글 — 카테고리 화면의 "일정순" 버튼과 같은 설정.
+          SortModeIconButton(
+            mode: sortMode,
+            accent: live.category.color,
+            onPressed: () => ref.read(sortModeProvider.notifier).toggle(),
+          ),
           // 진행중(세모) 토글 — 완료 체크 왼쪽. note 는 진행 개념 없음 → 미표시.
           if (!isNote)
             IconButton(
@@ -169,6 +179,7 @@ class TodoDetailScreen extends ConsumerWidget {
                   onReorderSiblings: actions.reorderSiblings,
                   onStopRecurrence: (t) =>
                       confirmStopRecurrence(context, ref, t),
+                  sortMode: sortMode,
                 ),
               ),
             ],

@@ -51,6 +51,8 @@ dependencies:
   json_annotation: ^4.12.0
   path: ^1.9.1
   http: ^1.6.0
+  # 사용자 설정(정렬 모드 등) 영속 — macOS / Android 공통.
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

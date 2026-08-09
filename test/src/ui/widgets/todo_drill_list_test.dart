@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/ui/widgets/todo_drill_list.dart';
 
@@ -13,11 +14,12 @@ void main() {
     String? parentId,
     TodoType type = TodoType.task,
     DateTime? doneAt,
+    DateTime? dueAt,
   }) => Todo(
     id: id,
     title: title,
     category: Category.work,
-    dueAt: null,
+    dueAt: dueAt,
     doneAt: doneAt,
     createdAt: DateTime.utc(2026, 5, 30),
     updatedAt: DateTime.utc(2026, 5, 30),
@@ -32,6 +34,7 @@ void main() {
     required List<Todo> allTodos,
     void Function(Todo)? onDrillDown,
     void Function(Todo)? onEdit,
+    TodoSortMode sortMode = TodoSortMode.manual,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -49,6 +52,7 @@ void main() {
                 onCopy: (_) {},
                 onDelete: (_) {},
                 onReorderSiblings: (_, _, _) {},
+                sortMode: sortMode,
               ),
             ],
           ),
@@ -56,6 +60,18 @@ void main() {
       ),
     );
     await tester.pump();
+  }
+
+  /// 화면에 그려진 순서대로 제목을 수집 (세로 위치 기준).
+  List<String> visibleTitles(WidgetTester tester, List<String> candidates) {
+    final found = <(double, String)>[];
+    for (final title in candidates) {
+      final finder = find.text(title);
+      if (finder.evaluate().isEmpty) continue;
+      found.add((tester.getTopLeft(finder).dy, title));
+    }
+    found.sort((a, b) => a.$1.compareTo(b.$1));
+    return [for (final e in found) e.$2];
   }
 
   testWidgets('자식 있는 항목 탭 → onDrillDown 호출 (onEdit 아님)', (tester) async {
@@ -168,5 +184,100 @@ void main() {
     expect(find.text('진행중 A'), findsOneWidget);
     expect(find.text('진행중 B'), findsOneWidget);
     expect(find.byKey(const ValueKey('drill-done-toggle')), findsNothing);
+  });
+
+  testWidgets('일정순 모드 — 일정이 빠른 순으로 그려지고 날짜 없는 항목은 맨 뒤', (tester) async {
+    final late_ = make(
+      id: 'l',
+      title: '늦은 일',
+      dueAt: DateTime.utc(2026, 8, 20, 9),
+    );
+    final none = make(id: 'n', title: '날짜 없는 일');
+    final early = make(
+      id: 'e',
+      title: '빠른 일',
+      dueAt: DateTime.utc(2026, 8, 3, 9),
+    );
+    final items = [late_, none, early];
+
+    // 수동 모드는 들어온 순서 그대로.
+    await mount(tester, items: items, allTodos: items);
+    expect(visibleTitles(tester, ['늦은 일', '날짜 없는 일', '빠른 일']), [
+      '늦은 일',
+      '날짜 없는 일',
+      '빠른 일',
+    ]);
+
+    // 일정순 모드는 dueAt 오름차순 + 날짜 없는 항목 뒤로.
+    await mount(
+      tester,
+      items: items,
+      allTodos: items,
+      sortMode: TodoSortMode.dueDate,
+    );
+    expect(visibleTitles(tester, ['늦은 일', '날짜 없는 일', '빠른 일']), [
+      '빠른 일',
+      '늦은 일',
+      '날짜 없는 일',
+    ]);
+  });
+
+  testWidgets('일정순 모드에서는 드래그 재정렬이 꺼진다', (tester) async {
+    final a = make(id: 'a', title: 'A', dueAt: DateTime.utc(2026, 8, 3));
+    final b = make(id: 'b', title: 'B', dueAt: DateTime.utc(2026, 8, 5));
+
+    await mount(tester, items: [a, b], allTodos: [a, b]);
+    expect(find.byType(ReorderableDelayedDragStartListener), findsNWidgets(2));
+
+    await mount(
+      tester,
+      items: [a, b],
+      allTodos: [a, b],
+      sortMode: TodoSortMode.dueDate,
+    );
+    expect(find.byType(ReorderableDelayedDragStartListener), findsNothing);
+    // 항목 자체는 그대로 보인다.
+    expect(find.text('A'), findsOneWidget);
+    expect(find.text('B'), findsOneWidget);
+  });
+
+  testWidgets('일정순 모드 — 완료 섹션도 일정순으로 펼쳐진다', (tester) async {
+    final doneLate = make(
+      id: 'dl',
+      title: '늦게 끝낼 일',
+      dueAt: DateTime.utc(2026, 8, 20),
+      doneAt: DateTime.utc(2026, 8, 21),
+    );
+    final doneEarly = make(
+      id: 'de',
+      title: '먼저 끝낼 일',
+      dueAt: DateTime.utc(2026, 8, 2),
+      doneAt: DateTime.utc(2026, 8, 3),
+    );
+    final active = make(
+      id: 'a',
+      title: '남은 일',
+      dueAt: DateTime.utc(2026, 8, 5),
+    );
+    final items = [doneLate, active, doneEarly];
+
+    await mount(
+      tester,
+      items: items,
+      allTodos: items,
+      sortMode: TodoSortMode.dueDate,
+    );
+
+    // 완료는 접힌 채로 활성 항목만 보인다.
+    expect(find.text('남은 일'), findsOneWidget);
+    expect(find.text('완료 2개'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
+    await tester.pump();
+
+    expect(visibleTitles(tester, ['먼저 끝낼 일', '늦게 끝낼 일']), [
+      '먼저 끝낼 일',
+      '늦게 끝낼 일',
+    ]);
   });
 }

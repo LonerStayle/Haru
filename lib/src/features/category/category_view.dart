@@ -3,13 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../domain/category.dart';
+import '../../domain/policies/todo_sort_policy.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/skeleton.dart';
+import '../../ui/widgets/sort_mode_button.dart';
 import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
+import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'category_providers.dart';
@@ -23,6 +26,8 @@ class CategoryView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final asyncTodos = ref.watch(watchTodosByCategoryProvider(category));
+    // 정렬 모드는 전역 — 여기서 켜면 하위 상세(체크리스트)에도 그대로 적용된다.
+    final sortMode = ref.watch(sortModeProvider);
 
     return asyncTodos.when(
       loading: () => const TodoListSkeleton(),
@@ -30,6 +35,8 @@ class CategoryView extends ConsumerWidget {
       data: (todos) => _Loaded(
         category: category,
         todos: todos,
+        sortMode: sortMode,
+        onToggleSort: () => ref.read(sortModeProvider.notifier).toggle(),
         onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
         onToggleInProgress: (t) =>
             ref.read(todoActionsProvider).toggleInProgress(t),
@@ -72,6 +79,8 @@ class _Loaded extends StatefulWidget {
   const _Loaded({
     required this.category,
     required this.todos,
+    required this.sortMode,
+    required this.onToggleSort,
     required this.onToggle,
     required this.onToggleInProgress,
     required this.onDelete,
@@ -86,6 +95,12 @@ class _Loaded extends StatefulWidget {
 
   /// 이 카테고리에 속한 모든 todo (root + 자손). root 선별 + childCount 양쪽에 사용.
   final List<Todo> todos;
+
+  /// 현재 목록 정렬 방식 (수동 / 일정순).
+  final TodoSortMode sortMode;
+
+  /// 헤더의 정렬 버튼 탭 — 수동 ↔ 일정순 전환.
+  final VoidCallback onToggleSort;
   final void Function(Todo) onToggle;
   final void Function(Todo) onToggleInProgress;
   final void Function(Todo) onDelete;
@@ -135,6 +150,8 @@ class _LoadedState extends State<_Loaded> {
               inProgress: inProgress,
               done: done,
               noteCount: noteCount,
+              sortMode: widget.sortMode,
+              onToggleSort: widget.onToggleSort,
             ),
           ),
         ),
@@ -167,6 +184,7 @@ class _LoadedState extends State<_Loaded> {
               onAddChild: widget.onAddChild,
               onCopy: widget.onCopy,
               onReorderSiblings: widget.onReorderSiblings,
+              sortMode: widget.sortMode,
             ),
           ),
       ],
@@ -181,6 +199,8 @@ class _Header extends StatelessWidget {
     required this.inProgress,
     required this.done,
     required this.noteCount,
+    required this.sortMode,
+    required this.onToggleSort,
   });
 
   final Category category;
@@ -188,6 +208,8 @@ class _Header extends StatelessWidget {
   final int inProgress;
   final int done;
   final int noteCount;
+  final TodoSortMode sortMode;
+  final VoidCallback onToggleSort;
 
   @override
   Widget build(BuildContext context) {
@@ -215,6 +237,13 @@ class _Header extends StatelessWidget {
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            // 정렬 토글 — 이 카테고리 목록과 그 하위 체크리스트를 일정순으로 본다.
+            SortModeButton(
+              mode: sortMode,
+              accent: category.color,
+              onPressed: onToggleSort,
             ),
           ],
         ),

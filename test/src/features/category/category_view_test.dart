@@ -6,14 +6,28 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/features/category/category_providers.dart';
 import 'package:solo_todo/src/features/category/category_view.dart';
+import 'package:solo_todo/src/features/settings/sort_mode_controller.dart';
+
+/// 정렬 모드 인메모리 저장소 — shared_preferences 플랫폼 채널 없이 화면을 띄운다.
+class _MemorySortModeStore implements SortModePreference {
+  TodoSortMode stored = TodoSortMode.manual;
+
+  @override
+  Future<TodoSortMode> load() async => stored;
+
+  @override
+  Future<void> save(TodoSortMode mode) async => stored = mode;
+}
 
 void main() {
   Future<StreamController<List<Todo>>> mount(
     WidgetTester tester, {
     required Category category,
+    SortModePreference? sortStore,
   }) async {
     final controller = StreamController<List<Todo>>();
     addTearDown(controller.close);
@@ -24,6 +38,9 @@ void main() {
           watchTodosByCategoryProvider(
             category,
           ).overrideWith((_) => controller.stream),
+          sortModePreferenceProvider.overrideWithValue(
+            sortStore ?? _MemorySortModeStore(),
+          ),
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -41,18 +58,31 @@ void main() {
     DateTime? doneAt,
     TodoType type = TodoType.task,
     String? description,
+    DateTime? dueAt,
   }) => Todo(
     id: id,
     title: title,
     category: category,
     type: type,
-    dueAt: null,
+    dueAt: dueAt,
     doneAt: doneAt,
     createdAt: DateTime.utc(2026, 5, 27),
     updatedAt: DateTime.utc(2026, 5, 27),
     calendarEventId: null,
     description: description,
   );
+
+  /// 화면에 그려진 순서대로 제목을 수집 (세로 위치 기준).
+  List<String> visibleTitles(WidgetTester tester, List<String> candidates) {
+    final found = <(double, String)>[];
+    for (final title in candidates) {
+      final finder = find.text(title);
+      if (finder.evaluate().isEmpty) continue;
+      found.add((tester.getTopLeft(finder).dy, title));
+    }
+    found.sort((a, b) => a.$1.compareTo(b.$1));
+    return [for (final e in found) e.$2];
+  }
 
   testWidgets('빈 list → "{label}에 할 일이 없어요"', (tester) async {
     final controller = await mount(tester, category: Category.work);
@@ -181,5 +211,75 @@ void main() {
     // 둘 다 제목 노출.
     expect(find.text('할 일 항목'), findsOneWidget);
     expect(find.text('노트 항목'), findsOneWidget);
+  });
+
+  testWidgets('헤더의 "일정순" 버튼 → 목록이 일정 빠른 순으로 재배치', (tester) async {
+    final store = _MemorySortModeStore();
+    final controller = await mount(
+      tester,
+      category: Category.work,
+      sortStore: store,
+    );
+    controller.add([
+      todo(
+        id: '1',
+        category: Category.work,
+        title: '늦은 일',
+        dueAt: DateTime.utc(2026, 8, 20, 9),
+      ),
+      todo(id: '2', category: Category.work, title: '날짜 없는 일'),
+      todo(
+        id: '3',
+        category: Category.work,
+        title: '빠른 일',
+        dueAt: DateTime.utc(2026, 8, 3, 9),
+      ),
+    ]);
+    await tester.pump();
+
+    const titles = ['늦은 일', '날짜 없는 일', '빠른 일'];
+    // 기본은 수동(들어온) 순서.
+    expect(visibleTitles(tester, titles), titles);
+
+    await tester.tap(find.byKey(const ValueKey('sort-mode-button')));
+    await tester.pump();
+
+    expect(visibleTitles(tester, titles), ['빠른 일', '늦은 일', '날짜 없는 일']);
+    // 선택은 저장된다 (다음 실행에도 유지).
+    expect(store.stored, TodoSortMode.dueDate);
+
+    // 다시 누르면 수동 순서로 복귀.
+    await tester.tap(find.byKey(const ValueKey('sort-mode-button')));
+    await tester.pump();
+
+    expect(visibleTitles(tester, titles), titles);
+    expect(store.stored, TodoSortMode.manual);
+  });
+
+  testWidgets('저장된 일정순 설정은 화면 진입 시 그대로 복원된다', (tester) async {
+    final store = _MemorySortModeStore()..stored = TodoSortMode.dueDate;
+    final controller = await mount(
+      tester,
+      category: Category.work,
+      sortStore: store,
+    );
+    controller.add([
+      todo(
+        id: '1',
+        category: Category.work,
+        title: '늦은 일',
+        dueAt: DateTime.utc(2026, 8, 20, 9),
+      ),
+      todo(
+        id: '2',
+        category: Category.work,
+        title: '빠른 일',
+        dueAt: DateTime.utc(2026, 8, 3, 9),
+      ),
+    ]);
+    // 저장값 복원(비동기) 후 리스트 반영.
+    await tester.pumpAndSettle();
+
+    expect(visibleTitles(tester, ['늦은 일', '빠른 일']), ['빠른 일', '늦은 일']);
   });
 }
