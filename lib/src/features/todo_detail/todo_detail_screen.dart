@@ -10,6 +10,7 @@ import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../todo_actions/todo_actions_controller.dart';
@@ -96,6 +97,8 @@ class TodoDetailScreen extends ConsumerWidget {
               initialTodo: live,
               onSubmit: (_) {},
               onUpdate: (updated) => actions.update(updated),
+              onRequestMove: (item) =>
+                  showMoveTodoSheet(context, ref, item: item),
             ),
           ),
         ],
@@ -152,10 +155,13 @@ class TodoDetailScreen extends ConsumerWidget {
                     initialTodo: leaf,
                     onSubmit: (_) {},
                     onUpdate: (updated) => actions.update(updated),
+                    onRequestMove: (item) =>
+                        showMoveTodoSheet(context, ref, item: item),
                   ),
                   onToggle: actions.toggle,
                   onToggleInProgress: actions.toggleInProgress,
                   onAddChild: (p) => showAddChildSheet(context, ref, parent: p),
+                  onMove: (t) => showMoveTodoSheet(context, ref, item: t),
                   onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
                   onDelete: (t) async {
                     await actions.delete(t);

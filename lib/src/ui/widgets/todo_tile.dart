@@ -17,6 +17,7 @@ class TodoTile extends StatelessWidget {
     this.onToggleInProgress,
     this.onTap,
     this.onAddChild,
+    this.onMove,
     this.onCopy,
     this.onEditItem,
     this.onDelete,
@@ -35,6 +36,10 @@ class TodoTile extends StatelessWidget {
   final VoidCallback? onToggleInProgress;
 
   final VoidCallback? onTap;
+
+  /// 더보기(⋮) 메뉴 — 이 항목을 다른 위치로 이동 (다른 항목의 하위 / 최상위).
+  /// 서브트리가 통째로 따라간다. null 이면 메뉴에서 '이동' 항목 미표시.
+  final VoidCallback? onMove;
 
   /// 더보기(⋮) 메뉴 — 이 항목을 복사 (제목·내용·카테고리·날짜/종류를 채운 새 항목 시트).
   /// null 이면 메뉴에서 '복사' 항목 미표시.
@@ -374,8 +379,9 @@ class TodoTile extends StatelessWidget {
                   ),
                   tooltip: isDone ? '완료 취소' : '완료',
                 ),
-              // 더보기(⋮) 메뉴 — 복사 / 편집 / 반복중지 / 삭제. 하나라도 있으면 노출.
-              if (onCopy != null ||
+              // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집 / 반복중지 / 삭제. 하나라도 있으면 노출.
+              if (onMove != null ||
+                  onCopy != null ||
                   onEditItem != null ||
                   onDelete != null ||
                   (onStopRecurrence != null && todo.isInRecurringSeries))
@@ -390,6 +396,8 @@ class TodoTile extends StatelessWidget {
                   padding: EdgeInsets.zero,
                   onSelected: (action) {
                     switch (action) {
+                      case _TileMenuAction.move:
+                        onMove?.call();
                       case _TileMenuAction.copy:
                         onCopy?.call();
                       case _TileMenuAction.edit:
@@ -401,6 +409,20 @@ class TodoTile extends StatelessWidget {
                     }
                   },
                   itemBuilder: (context) => [
+                    // 이동 — 하위↔하위 / 상위→하위 / 하위→상위 모두 이 한 항목으로.
+                    if (onMove != null)
+                      const PopupMenuItem(
+                        value: _TileMenuAction.move,
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            Icons.drive_file_move_outline,
+                            size: 18,
+                          ),
+                          title: Text('이동'),
+                        ),
+                      ),
                     if (onCopy != null)
                       const PopupMenuItem(
                         value: _TileMenuAction.copy,
@@ -460,4 +482,4 @@ class TodoTile extends StatelessWidget {
 }
 
 /// [TodoTile] 의 더보기(⋮) 메뉴 액션.
-enum _TileMenuAction { copy, edit, stopRecurrence, delete }
+enum _TileMenuAction { move, copy, edit, stopRecurrence, delete }

@@ -10,6 +10,7 @@ import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'category_providers.dart';
@@ -51,6 +52,8 @@ class CategoryView extends ConsumerWidget {
             onSubmit: (_) {},
             onUpdate: (updated) =>
                 ref.read(todoActionsProvider).update(updated),
+            onRequestMove: (item) =>
+                showMoveTodoSheet(context, ref, item: item),
           );
         },
         onDrillDown: (folder) => Navigator.of(context).push(
@@ -59,6 +62,7 @@ class CategoryView extends ConsumerWidget {
           ),
         ),
         onAddChild: (parent) => showAddChildSheet(context, ref, parent: parent),
+        onMove: (t) => showMoveTodoSheet(context, ref, item: t),
         onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
         onReorderSiblings: (siblings, oldIndex, newIndex) => ref
             .read(todoActionsProvider)
@@ -78,6 +82,7 @@ class _Loaded extends StatefulWidget {
     required this.onEdit,
     required this.onDrillDown,
     required this.onAddChild,
+    required this.onMove,
     required this.onCopy,
     required this.onReorderSiblings,
   });
@@ -92,6 +97,7 @@ class _Loaded extends StatefulWidget {
   final void Function(Todo) onEdit;
   final void Function(Todo) onDrillDown;
   final void Function(Todo) onAddChild;
+  final void Function(Todo) onMove;
   final void Function(Todo) onCopy;
   final void Function(List<Todo> siblings, int oldIndex, int newIndex)
   onReorderSiblings;
@@ -165,6 +171,7 @@ class _LoadedState extends State<_Loaded> {
               onEdit: widget.onEdit,
               onDrillDown: widget.onDrillDown,
               onAddChild: widget.onAddChild,
+              onMove: widget.onMove,
               onCopy: widget.onCopy,
               onReorderSiblings: widget.onReorderSiblings,
             ),
