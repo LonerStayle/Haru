@@ -867,7 +867,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                       const SizedBox(height: AppTokens.space16),
                       _SectionLabel(text: '카테고리'),
                       const SizedBox(height: AppTokens.space8),
-                      _CategoryChips(
+                      _CategoryPicker(
                         categories: categories,
                         groups: groups,
                         selected: _category,
@@ -1047,6 +1047,125 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
+/// 접힘형 카테고리 선택기 — 평소엔 선택된 카테고리 1줄만 보여주고,
+/// 탭하면 그 자리에서 그룹별 칩 목록(_CategoryChips)이 펼쳐진다.
+/// 칩을 선택하면 자동으로 다시 접힌다.
+class _CategoryPicker extends StatefulWidget {
+  const _CategoryPicker({
+    required this.categories,
+    required this.groups,
+    required this.selected,
+    required this.onSelect,
+  });
+
+  final List<Category> categories;
+  final List<Group> groups;
+  final Category selected;
+  final ValueChanged<Category> onSelect;
+
+  @override
+  State<_CategoryPicker> createState() => _CategoryPickerState();
+}
+
+class _CategoryPickerState extends State<_CategoryPicker> {
+  bool _expanded = false;
+
+  String? get _groupLabel {
+    final gid = widget.selected.groupId;
+    if (gid == null) return null;
+    for (final g in widget.groups) {
+      if (g.id == gid) return g.label;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final selected = widget.selected;
+    final groupLabel = _groupLabel;
+
+    final header = Material(
+      color: scheme.surfaceContainerHighest,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      ),
+      child: InkWell(
+        key: const ValueKey('category-picker-header'),
+        onTap: () => setState(() => _expanded = !_expanded),
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space12,
+            vertical: AppTokens.space12,
+          ),
+          child: Row(
+            children: [
+              Icon(selected.icon, size: 18, color: selected.color),
+              const SizedBox(width: AppTokens.space8),
+              Flexible(
+                child: Text(
+                  selected.label,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: scheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (groupLabel != null) ...[
+                const SizedBox(width: AppTokens.space8),
+                Flexible(
+                  child: Text(
+                    '· $groupLabel',
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              Icon(
+                _expanded ? Icons.expand_less : Icons.expand_more,
+                size: 20,
+                color: scheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        header,
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: _expanded
+              ? Padding(
+                  padding: const EdgeInsets.only(top: AppTokens.space8),
+                  child: _CategoryChips(
+                    categories: widget.categories,
+                    groups: widget.groups,
+                    selected: selected,
+                    onSelect: (c) {
+                      setState(() => _expanded = false);
+                      widget.onSelect(c);
+                    },
+                  ),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+}
+
 class _CategoryChips extends StatelessWidget {
   const _CategoryChips({
     required this.categories,
@@ -1070,6 +1189,7 @@ class _CategoryChips extends StatelessWidget {
       children: [
         for (final c in items)
           _CategoryChip(
+            key: ValueKey('category-chip-${c.id}'),
             category: c,
             // 전체 동등 비교는 DB 인스턴스 ↔ const 차이로 어긋날 수 있어 id 로 비교.
             selected: c.id == selected.id,
@@ -1161,6 +1281,7 @@ class _GroupSectionLabel extends StatelessWidget {
 
 class _CategoryChip extends StatelessWidget {
   const _CategoryChip({
+    super.key,
     required this.category,
     required this.selected,
     required this.onTap,

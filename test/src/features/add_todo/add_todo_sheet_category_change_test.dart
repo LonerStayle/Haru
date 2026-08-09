@@ -90,7 +90,9 @@ void main() {
         groups: const [groupX],
       );
 
-      // 그룹 칩 묶음(J) — '코기토' 칩을 탭해 선택.
+      // 접힘형 선택기 — 헤더를 탭해 펼친 뒤 '코기토' 칩을 탭해 선택.
+      await tester.tap(find.byKey(const ValueKey('category-picker-header')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('코기토'));
       await tester.pumpAndSettle();
 
