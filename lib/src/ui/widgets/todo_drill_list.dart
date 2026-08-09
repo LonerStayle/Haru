@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../domain/policies/todo_sort_policy.dart';
 import '../../domain/todo.dart';
 import 'dismissible_todo_tile.dart';
 
@@ -20,6 +21,10 @@ import 'dismissible_todo_tile.dart';
 /// 모은다 (기본 접힘, 세션 단위 — 화면 재진입 시 접힘으로 초기화). 브라우징 화면에 완료가
 /// 쌓여 가독성을 해치는 문제를 막는다. 오늘 화면은 이 위젯을 쓰지 않으므로(당일 완료 유지)
 /// 영향받지 않는다. reorder 는 활성 항목끼리만 (완료는 재정렬 대상 아님).
+///
+/// **정렬 모드**: [sortMode] 가 [TodoSortMode.dueDate] 면 이 레벨(과 완료 섹션)을 일정
+/// 빠른 순으로 다시 늘어놓는다. 화면이 계산한 순서와 드래그 결과가 어긋나므로 이때
+/// 드래그 재정렬은 꺼진다 — 수동 순서로 되돌리면 다시 켜진다.
 class TodoDrillListSliver extends StatefulWidget {
   const TodoDrillListSliver({
     super.key,
@@ -35,6 +40,7 @@ class TodoDrillListSliver extends StatefulWidget {
     required this.onReorderSiblings,
     this.hiddenCountBySeries = const {},
     this.onStopRecurrence,
+    this.sortMode = TodoSortMode.manual,
   });
 
   /// 이 레벨에서 한 줄씩 보일 형제 list (이미 dao 정렬 순서).
@@ -73,6 +79,9 @@ class TodoDrillListSliver extends StatefulWidget {
   /// date-repeat (FR-6) — 반복 항목의 ⋮ 메뉴 '반복 중지' 콜백.
   final void Function(Todo)? onStopRecurrence;
 
+  /// 목록 정렬 방식. 기본은 사용자가 드래그로 정한 수동 순서.
+  final TodoSortMode sortMode;
+
   @override
   State<TodoDrillListSliver> createState() => _TodoDrillListSliverState();
 }
@@ -97,15 +106,19 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
     final counts = _childCounts();
 
     // 완료 = 체크된 task. note(체크 개념 없음) 등은 활성 목록에 유지.
+    // 정렬 모드는 활성 / 완료 각각에 적용한다 (완료가 위로 섞여 올라오지 않게).
+    final ordered = TodoSortPolicy.apply(widget.items, widget.sortMode);
     final active = <Todo>[];
     final done = <Todo>[];
-    for (final t in widget.items) {
+    for (final t in ordered) {
       if (t.type == TodoType.task && t.isDone) {
         done.add(t);
       } else {
         active.add(t);
       }
     }
+    // 일정순으로 보는 동안은 드래그 재정렬을 끈다 — 드롭한 자리와 화면 순서가 어긋난다.
+    final canReorder = widget.sortMode == TodoSortMode.manual;
 
     Widget tile(Todo todo, {required bool reorderable, required int index}) {
       final childCount = counts[todo.id] ?? 0;
@@ -150,12 +163,20 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
       );
     }
 
-    final activeSliver = SliverReorderableList(
-      itemCount: active.length,
-      onReorder: (oldIndex, newIndex) =>
-          widget.onReorderSiblings(active, oldIndex, newIndex),
-      itemBuilder: (context, i) => tile(active[i], reorderable: true, index: i),
-    );
+    final activeSliver = canReorder
+        ? SliverReorderableList(
+            itemCount: active.length,
+            onReorder: (oldIndex, newIndex) =>
+                widget.onReorderSiblings(active, oldIndex, newIndex),
+            itemBuilder: (context, i) =>
+                tile(active[i], reorderable: true, index: i),
+          )
+        : SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, i) => tile(active[i], reorderable: false, index: i),
+              childCount: active.length,
+            ),
+          );
 
     if (done.isEmpty) return activeSliver;
 

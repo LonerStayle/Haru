@@ -7,9 +7,22 @@ import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/local/local_todo_repository.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
+import 'package:solo_todo/src/features/settings/sort_mode_controller.dart';
 import 'package:solo_todo/src/features/todo_detail/todo_detail_screen.dart';
+
+/// 정렬 모드 인메모리 저장소 — shared_preferences 플랫폼 채널 없이 화면을 띄운다.
+class _MemorySortModeStore implements SortModePreference {
+  TodoSortMode stored = TodoSortMode.manual;
+
+  @override
+  Future<TodoSortMode> load() async => stored;
+
+  @override
+  Future<void> save(TodoSortMode mode) async => stored = mode;
+}
 
 void main() {
   late AppDatabase db;
@@ -30,11 +43,12 @@ void main() {
     String? parentId,
     TodoType type = TodoType.task,
     DateTime? doneAt,
+    DateTime? dueAt,
   }) => Todo(
     id: id,
     title: title,
     category: Category.work,
-    dueAt: null,
+    dueAt: dueAt,
     doneAt: doneAt,
     createdAt: now,
     updatedAt: now,
@@ -42,6 +56,18 @@ void main() {
     parentId: parentId,
     type: type,
   );
+
+  /// 화면에 그려진 순서대로 제목을 수집 (세로 위치 기준).
+  List<String> visibleTitles(WidgetTester tester, List<String> candidates) {
+    final found = <(double, String)>[];
+    for (final title in candidates) {
+      final finder = find.text(title);
+      if (finder.evaluate().isEmpty) continue;
+      found.add((tester.getTopLeft(finder).dy, title));
+    }
+    found.sort((a, b) => a.$1.compareTo(b.$1));
+    return [for (final e in found) e.$2];
+  }
 
   /// [children] = parent 직속 자식, [allTodos] = childCount 판정용 전체.
   /// watch provider 는 plain Stream override (Drift 타이머 leak 회피), 액션 콜백은
@@ -51,6 +77,7 @@ void main() {
     Todo parent, {
     List<Todo> children = const [],
     List<Todo>? allTodos,
+    SortModePreference? sortStore,
   }) async {
     final repoOverride = LocalTodoRepository(db.todosDao);
     await tester.pumpWidget(
@@ -58,6 +85,9 @@ void main() {
         overrides: [
           nowProvider.overrideWithValue(() => now),
           todoRepositoryProvider.overrideWithValue(repoOverride),
+          sortModePreferenceProvider.overrideWithValue(
+            sortStore ?? _MemorySortModeStore(),
+          ),
           allTodosProvider.overrideWith(
             (_) => Stream.value(allTodos ?? [parent, ...children]),
           ),
@@ -186,5 +216,65 @@ void main() {
     );
 
     expect(find.byKey(const ValueKey('detail-progress')), findsNothing);
+  });
+
+  testWidgets('하위 목록도 AppBar 정렬 버튼으로 일정 빠른 순 정렬', (tester) async {
+    final parent = make(id: 'p', title: '부모');
+    final late_ = make(
+      id: 'c1',
+      title: '늦은 하위',
+      parentId: 'p',
+      dueAt: DateTime.utc(2026, 6, 20, 9),
+    );
+    final none = make(id: 'c2', title: '날짜 없는 하위', parentId: 'p');
+    final early = make(
+      id: 'c3',
+      title: '빠른 하위',
+      parentId: 'p',
+      dueAt: DateTime.utc(2026, 6, 2, 9),
+    );
+    final store = _MemorySortModeStore();
+
+    await mount(
+      tester,
+      parent,
+      children: [late_, none, early],
+      sortStore: store,
+    );
+
+    const titles = ['늦은 하위', '날짜 없는 하위', '빠른 하위'];
+    expect(visibleTitles(tester, titles), titles);
+
+    await tester.tap(find.byKey(const ValueKey('sort-mode-icon-button')));
+    await tester.pump();
+
+    expect(visibleTitles(tester, titles), ['빠른 하위', '늦은 하위', '날짜 없는 하위']);
+    expect(store.stored, TodoSortMode.dueDate);
+  });
+
+  testWidgets('저장된 일정순 설정은 하위 상세 화면에도 그대로 적용된다', (tester) async {
+    final parent = make(id: 'p', title: '부모');
+    final late_ = make(
+      id: 'c1',
+      title: '늦은 하위',
+      parentId: 'p',
+      dueAt: DateTime.utc(2026, 6, 20, 9),
+    );
+    final early = make(
+      id: 'c2',
+      title: '빠른 하위',
+      parentId: 'p',
+      dueAt: DateTime.utc(2026, 6, 2, 9),
+    );
+
+    await mount(
+      tester,
+      parent,
+      children: [late_, early],
+      sortStore: _MemorySortModeStore()..stored = TodoSortMode.dueDate,
+    );
+    await tester.pumpAndSettle();
+
+    expect(visibleTitles(tester, ['늦은 하위', '빠른 하위']), ['빠른 하위', '늦은 하위']);
   });
 }
