@@ -49,7 +49,14 @@ class TodoActionsController {
   /// Task B — 대표님 요구: 시트 편집 시 그 항목을 **맨 위로** (수정 기준 최신 위로).
   /// 같은 형제(현재 category+parentId) min sortOrder - 1 로 bump. 형제가 자기 자신뿐이면
   /// 그대로 유지된다 (min == 자기 sortOrder → min-1 로 살짝 위, 무해).
+  ///
+  /// **단, 진짜 바뀐 게 있을 때만 올린다.** 목록에서 항목을 탭하면 편집 시트가 열리므로
+  /// (= 열람 경로), 아무것도 고치지 않고 저장만 눌러도 bump 되면 조회만으로 자리가 튄다.
+  /// 내용이 그대로면 [_isUnchanged] 가 잡아내 아무것도 쓰지 않는다 (updatedAt 도 보존).
   Future<Todo> update(Todo updated) async {
+    final current = await _repo.getById(updated.id);
+    if (current != null && _isUnchanged(current, updated)) return current;
+
     final minSibling = await _repo.minSiblingSortOrder(
       categoryId: updated.category.id,
       parentId: updated.parentId,
@@ -58,6 +65,21 @@ class TodoActionsController {
     final synced = updated.copyWith(updatedAt: _now(), sortOrder: bumped);
     await _repo.upsert(synced);
     return synced;
+  }
+
+  /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.
+  ///
+  /// 순서·동기화 메타(sortOrder / updatedAt)는 비교에서 제외한다 — 판정의 목적이
+  /// "이 둘을 갱신할지" 이기 때문. 카테고리는 **id 만** 본다 (label/색/아이콘은 조회
+  /// 시점의 categories join 으로 복원되는 표시 속성이라 내용 변경이 아니다).
+  bool _isUnchanged(Todo current, Todo updated) {
+    if (updated.category.id != current.category.id) return false;
+    return updated.copyWith(
+          sortOrder: current.sortOrder,
+          updatedAt: current.updatedAt,
+          category: current.category,
+        ) ==
+        current;
   }
 
   /// Task B — 같은 부모의 형제들 사이 순서 재정렬 (within-sibling).

@@ -421,26 +421,60 @@ void main() {
     });
   });
 
-  group('Task B — 정렬 키 (sortOrder asc, updatedAt desc, createdAt desc)', () {
-    test('같은 sortOrder 면 updatedAt 최신이 위', () async {
+  group('Task B — 정렬 키 (sortOrder asc, createdAt desc, id asc)', () {
+    test('같은 sortOrder 면 최근 생성이 위 (updatedAt 은 무관)', () async {
+      // updatedAt 을 createdAt 과 반대 방향으로 줘서, 키에서 빠졌는지 확인한다.
       await repo.upsert(
         make(
-          id: 'old',
+          id: 'first',
           sortOrder: 0,
           createdAt: DateTime.utc(2026, 5, 27, 8),
-          updatedAt: DateTime.utc(2026, 5, 27, 8),
+          updatedAt: DateTime.utc(2026, 5, 27, 20),
         ),
       );
       await repo.upsert(
         make(
-          id: 'new',
+          id: 'second',
           sortOrder: 0,
-          createdAt: DateTime.utc(2026, 5, 27, 8),
-          updatedAt: DateTime.utc(2026, 5, 27, 12),
+          createdAt: DateTime.utc(2026, 5, 27, 9),
+          updatedAt: DateTime.utc(2026, 5, 27, 10),
         ),
       );
       final list = await repo.watchAll().first;
-      expect(list.map((t) => t.id), ['new', 'old']);
+      expect(list.map((t) => t.id), ['second', 'first']);
+    });
+
+    test('updatedAt 만 갱신되면 순서가 바뀌지 않는다', () async {
+      final a = make(
+        id: 'a',
+        sortOrder: 0,
+        createdAt: DateTime.utc(2026, 5, 27, 8),
+        updatedAt: DateTime.utc(2026, 5, 27, 8),
+      );
+      final b = make(
+        id: 'b',
+        sortOrder: 0,
+        createdAt: DateTime.utc(2026, 5, 27, 9),
+        updatedAt: DateTime.utc(2026, 5, 27, 9),
+      );
+      await repo.upsert(a);
+      await repo.upsert(b);
+      expect((await repo.watchAll().first).map((t) => t.id), ['b', 'a']);
+
+      // a 를 한참 뒤에 건드려도(동기화·토글 등) 자리는 그대로.
+      await repo.upsert(a.copyWith(updatedAt: DateTime.utc(2026, 5, 28, 15)));
+      expect((await repo.watchAll().first).map((t) => t.id), ['b', 'a']);
+    });
+
+    test('sortOrder·createdAt 이 모두 같으면 id 로 결정 (조회마다 동일)', () async {
+      final stamp = DateTime.utc(2026, 5, 27, 8);
+      for (final id in ['c', 'a', 'b']) {
+        await repo.upsert(
+          make(id: id, sortOrder: 0, createdAt: stamp, updatedAt: stamp),
+        );
+      }
+      expect((await repo.watchAll().first).map((t) => t.id), ['a', 'b', 'c']);
+      expect((await repo.watchAll().first).map((t) => t.id), ['a', 'b', 'c']);
     });
 
     test('작은 sortOrder 가 위 (음수 포함)', () async {

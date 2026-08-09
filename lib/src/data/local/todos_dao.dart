@@ -40,13 +40,19 @@ class TodosDao extends DatabaseAccessor<AppDatabase> with _$TodosDaoMixin {
     return (delete(todos)..where((t) => t.id.equals(id))).go();
   }
 
-  /// Task B 정렬 키 — `sortOrder asc, updatedAt desc, createdAt desc`.
-  /// 불변식: **작은 sortOrder = 위쪽**. 같은 sortOrder 면 최근 수정/생성이 위로.
+  /// Task B 정렬 키 — `sortOrder asc, createdAt desc, id asc`.
+  /// 불변식: **작은 sortOrder = 위쪽**. 같은 sortOrder 면 최근 생성이 위로.
   /// today 등에서 '미체크 먼저' 가 필요하면 호출자가 doneAt term 을 앞에 prepend.
+  ///
+  /// updatedAt 은 **의도적으로 키에서 뺐다** — 체크/진행중 토글이나 동기화 반영 같은
+  /// 사소한 갱신만으로 sortOrder 동률 그룹(마이그레이션 이전 데이터는 전부 0) 안에서
+  /// 자리가 튀었다. 순서는 드래그 재정렬 · 신규 추가 · 실제 내용 편집으로만 바뀐다.
+  /// 마지막 id asc 는 createdAt 까지 같을 때의 결정적 tie-break — 없으면 같은 조회를
+  /// 반복해도 SQLite 가 순서를 보장하지 않아 목록이 조회마다 뒤바뀔 수 있다.
   List<OrderingTerm> _sortKey() => [
     OrderingTerm(expression: todos.sortOrder, mode: OrderingMode.asc),
-    OrderingTerm(expression: todos.updatedAt, mode: OrderingMode.desc),
     OrderingTerm(expression: todos.createdAt, mode: OrderingMode.desc),
+    OrderingTerm(expression: todos.id, mode: OrderingMode.asc),
   ];
 
   /// 미체크 우선 + Task B 정렬 키.
@@ -91,7 +97,7 @@ class TodosDao extends DatabaseAccessor<AppDatabase> with _$TodosDaoMixin {
   }
 
   /// 특정 parent 의 직속 자식들 stream — outline view 의 펼침에 사용.
-  /// 정렬: Task B 키 (sortOrder asc → updatedAt desc → createdAt desc). note 포함.
+  /// 정렬: Task B 키 (sortOrder asc → createdAt desc → id asc). note 포함.
   Stream<List<domain.Todo>> watchChildrenOf(String parentId) {
     final q = _joined()
       ..where(todos.parentId.equals(parentId))

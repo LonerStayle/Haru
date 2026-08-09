@@ -126,6 +126,62 @@ void main() {
       expect(list.map((t) => t.id).first, 'c', reason: '편집한 항목이 맨 위로');
     });
 
+    test('진행중 토글 — sortOrder 동률 그룹 안에서도 순서가 안 바뀐다', () async {
+      // 마이그레이션 이전 데이터는 sortOrder 가 전부 0 이라 동률 그룹이 크다.
+      final a = make('a');
+      final b = make('b');
+      final c = make('c');
+      for (final t in [a, b, c]) {
+        await repo.upsert(t);
+      }
+      final before = (await repo.watchByCategory(Category.work).first)
+          .map((t) => t.id)
+          .toList();
+
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      await controller.toggleInProgress(c);
+
+      final after = (await repo.watchByCategory(Category.work).first)
+          .map((t) => t.id)
+          .toList();
+      expect(after, before, reason: '세모 토글은 updatedAt 만 건드림 → 자리 유지');
+    });
+
+    test('update — 바뀐 게 없으면 자리 유지 (열어보고 저장만 눌러도 안 움직임)', () async {
+      await repo.upsert(make('a', sortOrder: 0));
+      await repo.upsert(make('b', sortOrder: 1));
+      final c = make('c', sortOrder: 2);
+      await repo.upsert(c);
+
+      // 편집 시트를 열었다가 아무것도 고치지 않고 저장한 상황.
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      final result = await controller.update(c);
+
+      expect(result.sortOrder, 2, reason: '내용 동일 → bump 없음');
+      expect(result.updatedAt, created, reason: '내용 동일 → updatedAt 도 보존');
+
+      final list = await repo.watchByCategory(Category.work).first;
+      expect(list.map((t) => t.id).toList(), ['a', 'b', 'c']);
+    });
+
+    test('update — 카테고리 id 가 같으면 label/색 차이는 변경으로 보지 않는다', () async {
+      final t = make('a', sortOrder: 3);
+      await repo.upsert(t);
+
+      // 같은 id 인데 표시용 label/색만 다른 Category 객체 (join 복원 편차).
+      final restyled = t.copyWith(
+        category: Category.work.copyWith(label: '업무', colorValue: 0xFF112233),
+      );
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      final result = await controller.update(restyled);
+
+      expect(result.sortOrder, 3);
+      expect(result.updatedAt, created);
+    });
+
     test('reorderSiblings — 새 순서대로 연속 sortOrder 재부여 (min 기준)', () async {
       // 시각 순서 [a(0), b(1), c(2)] 에서 c 를 맨 앞으로.
       final a = make('a', sortOrder: 0);
