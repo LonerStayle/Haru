@@ -27,6 +27,7 @@ List<Widget> todayCategorySectionSlivers({
   required void Function(Todo) onToggle,
   void Function(Todo)? onToggleInProgress,
   required void Function(Todo parent) onAddChild,
+  required void Function(Todo) onMove,
   required void Function(Todo) onCopy,
   required void Function(Todo) onDelete,
   required void Function(List<Todo> siblings, int oldIndex, int newIndex)
@@ -127,7 +128,8 @@ List<Widget> todayCategorySectionSlivers({
                   onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
                   // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.
                   onAddChild: () => onAddChild(todo),
-                  // 더보기(⋮) 메뉴 — 복사 / 편집(이 항목 자체) / 삭제.
+                  // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
+                  onMove: () => onMove(todo),
                   onCopy: () => onCopy(todo),
                   onEditItem: () => onEdit(todo),
                   drillChildCount: hasChildren ? childCount : null,

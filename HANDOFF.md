@@ -244,6 +244,8 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 - **Todo.category 는 todos 테이블에 id 만 저장** — label/color/icon 은 categories 테이블에 있으므로 **TodosDao 가 categories 와 join** 해서 복원. `Category.fromId` 는 builtin 만 알아 사용자 카테고리에 throw → join + placeholder fallback 으로 해소. SupabaseTodosApi._fromRow 도 tryFromId+placeholder (로컬 저장은 id 만 쓰므로 안전).
 - **AddTodoSheet 는 ConsumerStatefulWidget** — categoriesProvider watch. 카테고리 선택 비교는 **id 기준** (freezed 전체 동등은 DB 인스턴스↔const 차이로 어긋남).
 - **모바일 FAB 는 endFloat** — endContained 는 NavigationBar 에 도킹돼 destination 을 덮음. endFloat 가 바 위로 띄운다.
+- **할 일 이동 = parentId + 서브트리 category 동시 갱신** — 자식은 부모 카테고리를 상속하는 구조라, 본인만 옮기면 자손이 옛 카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다. `TodoActionsController.moveTo` / `update` 가 `MovePolicy.descendants` 로 자손 category 를 함께 맞춘다. 새 이동 경로를 만들 때 이 동기화를 빼먹지 말 것.
+- **이동 목적지는 자기 자신·자손 금지** — 자기 밑으로 들어간 노드는 어느 root 에서도 도달 불가라 화면에서 통째로 사라진다. `MovePolicy.canMove` 가 단일 출처(컨트롤러 + 시트 비활성 표시 양쪽이 같은 규칙을 쓴다).
 
 ---
 
