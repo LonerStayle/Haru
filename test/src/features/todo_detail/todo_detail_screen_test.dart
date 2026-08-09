@@ -187,4 +187,50 @@ void main() {
 
     expect(find.byKey(const ValueKey('detail-progress')), findsNothing);
   });
+
+  group('상태별 보기 필터', () {
+    /// 직속 자식 2건(미완료 c1 / 완료 c2) + c1 아래 완료 손자 1건.
+    /// "칩 카운트·필터가 직속이 아니라 자손 전체 기준" 인지 보는 구성.
+    Todo parent() => make(id: 'p', title: '부모 폴더');
+    final c1 = make(id: 'c1', title: '진행 폴더', parentId: 'p');
+    final c2 = make(id: 'c2', title: '끝난 자식', parentId: 'p', doneAt: now);
+    final g1 = make(id: 'g1', title: '끝난 손자', parentId: 'c1', doneAt: now);
+
+    testWidgets('칩 카운트는 손자까지 센다', (tester) async {
+      final p = parent();
+      await mount(tester, p, children: [c1, c2], allTodos: [p, c1, c2, g1]);
+
+      expect(find.text('전체 3'), findsOneWidget);
+      expect(find.text('미완료 1'), findsOneWidget);
+      expect(find.text('완료 2'), findsOneWidget);
+    });
+
+    testWidgets('완료 칩 탭 → 직속이 아닌 손자 완료까지 나온다', (tester) async {
+      final p = parent();
+      await mount(tester, p, children: [c1, c2], allTodos: [p, c1, c2, g1]);
+
+      // 기본(전체) 에서는 직속 자식만.
+      expect(find.text('끝난 손자'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-done')));
+      await tester.pump();
+
+      expect(find.text('끝난 자식'), findsOneWidget);
+      expect(find.text('끝난 손자'), findsOneWidget);
+      // 미완료 폴더는 타일에서 빠지고 손자의 부모 경로 라벨로만 남는다.
+      final crumb = find.byKey(const ValueKey('todo-tile-breadcrumb'));
+      expect(crumb, findsOneWidget);
+      expect(tester.widget<Text>(crumb).data, '진행 폴더');
+    });
+
+    testWidgets('해당 상태가 0건이면 안내 행', (tester) async {
+      final p = parent();
+      await mount(tester, p, children: [c1, c2], allTodos: [p, c1, c2, g1]);
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-inProgress')));
+      await tester.pump();
+
+      expect(find.text('진행중 항목이 없어요'), findsOneWidget);
+    });
+  });
 }

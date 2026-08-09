@@ -26,6 +26,7 @@ class DismissibleTodoTile extends StatelessWidget {
     this.drillChildCount,
     this.hiddenSeriesCount = 0,
     this.onStopRecurrence,
+    this.breadcrumb,
   });
 
   /// 실수 swipe 방지를 위한 dismiss threshold. 0.4 (40%) 는 의도치 않은 살짝 swipe 으로도
@@ -68,6 +69,9 @@ class DismissibleTodoTile extends StatelessWidget {
   /// date-repeat (FR-6) — ⋮ 메뉴 '반복 중지' 콜백. TodoTile 로 전달.
   final VoidCallback? onStopRecurrence;
 
+  /// 상태별 보기 — 평탄 목록에서의 부모 경로. TodoTile 로 그대로 전달.
+  final String? breadcrumb;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -108,6 +112,7 @@ class DismissibleTodoTile extends StatelessWidget {
         drillChildCount: drillChildCount,
         hiddenSeriesCount: hiddenSeriesCount,
         onStopRecurrence: onStopRecurrence,
+        breadcrumb: breadcrumb,
       ),
     );
   }

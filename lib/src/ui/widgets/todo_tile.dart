@@ -26,6 +26,7 @@ class TodoTile extends StatelessWidget {
     this.drillChildCount,
     this.hiddenSeriesCount = 0,
     this.onStopRecurrence,
+    this.breadcrumb,
   });
 
   final Todo todo;
@@ -72,6 +73,10 @@ class TodoTile extends StatelessWidget {
   /// date-repeat (FR-6) — 더보기(⋮) 메뉴의 '반복 중지'. 반복 시리즈 항목일 때만
   /// 메뉴에 노출된다(null 이거나 비반복이면 미표시). 누르면 시리즈 마스터를 삭제한다.
   final VoidCallback? onStopRecurrence;
+
+  /// 상태별 보기 — 계층이 평탄해진 목록에서 "이 항목이 어디 소속인지" 알려주는
+  /// 부모 경로 (`상위 › 그 하위`). null 이면 미표시(기본 트리 뷰).
+  final String? breadcrumb;
 
   @override
   Widget build(BuildContext context) {
@@ -150,6 +155,24 @@ class TodoTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 상태별 보기 — 계층이 평탄해진 목록에서 소속을 잃지 않도록
+                    // 제목 위에 부모 경로 한 줄 (한 줄 넘치면 ellipsis).
+                    if ((breadcrumb ?? '').isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: AppTokens.space2,
+                        ),
+                        child: Text(
+                          breadcrumb!,
+                          key: const ValueKey('todo-tile-breadcrumb'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.55),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     Row(
                       children: [
                         // §13 — note 는 "메모" 라벨 칩으로 명시 구분한다. 한글은 italic
