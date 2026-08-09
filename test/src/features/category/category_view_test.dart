@@ -282,4 +282,102 @@ void main() {
 
     expect(visibleTitles(tester, ['늦은 일', '빠른 일']), ['빠른 일', '늦은 일']);
   });
+
+  group('상태별 보기 필터', () {
+    /// 미완료 root / 진행중 root / 완료 자식 / 메모 — 4상태를 모두 덮는 세트.
+    List<Todo> sample() => [
+      todo(id: 'u', category: Category.work, title: '미완료 할일'),
+      Todo(
+        id: 'p',
+        title: '진행중 할일',
+        category: Category.work,
+        startedAt: DateTime.utc(2026, 8, 1, 9),
+        createdAt: DateTime.utc(2026, 8, 1),
+        updatedAt: DateTime.utc(2026, 8, 1),
+      ),
+      Todo(
+        id: 'd',
+        title: '완료된 하위',
+        category: Category.work,
+        parentId: 'u',
+        doneAt: DateTime.utc(2026, 8, 1, 12),
+        createdAt: DateTime.utc(2026, 8, 1),
+        updatedAt: DateTime.utc(2026, 8, 1),
+      ),
+      todo(
+        id: 'n',
+        category: Category.work,
+        title: '메모 항목',
+        type: TodoType.note,
+      ),
+    ];
+
+    testWidgets('기본은 전체 — 칩 카운트는 자손까지 센다', (tester) async {
+      final controller = await mount(tester, category: Category.work);
+      controller.add(sample());
+      await tester.pump();
+
+      expect(find.text('전체 4'), findsOneWidget);
+      expect(find.text('미완료 1'), findsOneWidget);
+      expect(find.text('진행중 1'), findsOneWidget);
+      expect(find.text('완료 1'), findsOneWidget);
+      expect(find.text('메모 1'), findsOneWidget);
+      // 전체 = 기존 트리 — root 만 보이고 완료 자손은 드릴다운 안쪽.
+      expect(find.text('미완료 할일'), findsOneWidget);
+      expect(find.text('완료된 하위'), findsNothing);
+    });
+
+    testWidgets('완료 칩 탭 → 완료 항목만 (자손 포함, 칩 카운트와 일치)', (tester) async {
+      final controller = await mount(tester, category: Category.work);
+      controller.add(sample());
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-done')));
+      await tester.pump();
+
+      expect(find.text('완료된 하위'), findsOneWidget);
+      expect(find.text('진행중 할일'), findsNothing);
+      expect(find.text('메모 항목'), findsNothing);
+      // 부모('미완료 할일')는 타일이 아니라 부모 경로 라벨로만 남는다.
+      final crumb = find.byKey(const ValueKey('todo-tile-breadcrumb'));
+      expect(crumb, findsOneWidget);
+      expect(tester.widget<Text>(crumb).data, '미완료 할일');
+    });
+
+    testWidgets('진행중 칩 탭 → 진행중만, 다시 전체 칩 탭 → 원래 목록', (tester) async {
+      final controller = await mount(tester, category: Category.work);
+      controller.add(sample());
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-inProgress')));
+      await tester.pump();
+      expect(find.text('진행중 할일'), findsOneWidget);
+      expect(find.text('미완료 할일'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-all')));
+      await tester.pump();
+      expect(find.text('미완료 할일'), findsOneWidget);
+      expect(find.text('진행중 할일'), findsOneWidget);
+    });
+
+    testWidgets('메모 칩 탭 → note 만', (tester) async {
+      final controller = await mount(tester, category: Category.work);
+      controller.add(sample());
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-note')));
+      await tester.pump();
+
+      expect(find.text('메모 항목'), findsOneWidget);
+      expect(find.text('미완료 할일'), findsNothing);
+    });
+
+    testWidgets('빈 카테고리에서는 칩 줄을 감춘다', (tester) async {
+      final controller = await mount(tester, category: Category.work);
+      controller.add(<Todo>[]);
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('status-filter-all')), findsNothing);
+    });
+  });
 }

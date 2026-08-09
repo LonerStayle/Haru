@@ -9,6 +9,7 @@ import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/sort_mode_button.dart';
 import '../../ui/widgets/todo_drill_list.dart';
+import '../../ui/widgets/todo_status_filter.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
@@ -116,6 +117,9 @@ class _Loaded extends StatefulWidget {
 }
 
 class _LoadedState extends State<_Loaded> {
+  /// 상태별 보기 — 현재 선택된 칩. 세션 비영속(화면 재진입 시 '전체'로 초기화).
+  TodoStatusFilter _filter = TodoStatusFilter.all;
+
   /// 이 카테고리의 root (parentId null). 자식은 드릴다운 상세 화면에서 본다.
   List<Todo> get _roots =>
       widget.todos.where((t) => t.parentId == null).toList();
@@ -127,12 +131,8 @@ class _LoadedState extends State<_Loaded> {
     // 미완료/진행중/완료 카운트는 **task 만** 센다. note(메모) 는 체크 개념이 없어
     // isDone 이 항상 false → 예전엔 모두 '미체크'로 잘못 잡혔다 (이슈 수정).
     // 진행중 3-상태 — '미완료'는 순수 미완료(진행중 제외), 진행중은 별도 칩.
-    final tasks = todos.where((t) => t.type == TodoType.task);
-    final inProgress = tasks.where((t) => t.isInProgress).length;
-    final undone = tasks.where((t) => !t.isDone && !t.isInProgress).length;
-    final done = tasks.where((t) => t.isDone).length;
-    // §14-B — 메모 개수 보조 카운트 (0 이면 헤더에서 생략).
-    final noteCount = todos.where((t) => t.type == TodoType.note).length;
+    // 자손까지 모두 세므로 칩 카운트 = 그 칩을 눌렀을 때 실제로 보이는 건수.
+    final counts = TodoStatusCounts.of(todos);
 
     return CustomScrollView(
       slivers: [
@@ -146,10 +146,11 @@ class _LoadedState extends State<_Loaded> {
           sliver: SliverToBoxAdapter(
             child: _Header(
               category: category,
-              undone: undone,
-              inProgress: inProgress,
-              done: done,
-              noteCount: noteCount,
+              counts: counts,
+              filter: _filter,
+              // 빈 카테고리에서는 전부 0 인 칩 줄이 의미 없어 감춘다.
+              showFilters: todos.isNotEmpty,
+              onFilterChanged: (f) => setState(() => _filter = f),
               sortMode: widget.sortMode,
               onToggleSort: widget.onToggleSort,
             ),
@@ -176,6 +177,9 @@ class _LoadedState extends State<_Loaded> {
             sliver: TodoDrillListSliver(
               items: _roots,
               allTodos: todos,
+              // 필터가 걸리면 root 뿐 아니라 자손까지 평탄하게 (칩 카운트와 일치).
+              filter: _filter,
+              filterPool: todos,
               onToggle: widget.onToggle,
               onToggleInProgress: widget.onToggleInProgress,
               onDelete: widget.onDelete,
@@ -195,19 +199,19 @@ class _LoadedState extends State<_Loaded> {
 class _Header extends StatelessWidget {
   const _Header({
     required this.category,
-    required this.undone,
-    required this.inProgress,
-    required this.done,
-    required this.noteCount,
+    required this.counts,
+    required this.filter,
+    required this.showFilters,
+    required this.onFilterChanged,
     required this.sortMode,
     required this.onToggleSort,
   });
 
   final Category category;
-  final int undone;
-  final int inProgress;
-  final int done;
-  final int noteCount;
+  final TodoStatusCounts counts;
+  final TodoStatusFilter filter;
+  final bool showFilters;
+  final ValueChanged<TodoStatusFilter> onFilterChanged;
   final TodoSortMode sortMode;
   final VoidCallback onToggleSort;
 
@@ -247,69 +251,18 @@ class _Header extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppTokens.space12),
-        // 진행중 3-상태 — 미완료 / 진행중 / 완료 (+ 메모). 칩이 4개까지 늘 수 있어
-        // 좁은 모바일 폭에서 넘치지 않도록 Wrap 으로 감싼다.
-        Wrap(
-          spacing: AppTokens.space8,
-          runSpacing: AppTokens.space8,
-          children: [
-            _StatChip(
-              label: '미완료',
-              count: undone,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
-            ),
-            // 진행중은 카테고리색으로 강조 (세모 버튼과 같은 색 언어).
-            _StatChip(label: '진행중', count: inProgress, color: category.color),
-            _StatChip(
-              label: '완료',
-              count: done,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
-            ),
-            // §14-B — 메모가 있을 때만 "메모 N" 보조 카운트.
-            if (noteCount > 0)
-              _StatChip(
-                label: '메모',
-                count: noteCount,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.45),
-              ),
-          ],
-        ),
+        // 상태별 보기 — 카운트 배지이자 필터 버튼. 누르면 그 상태만 목록에 남는다.
+        // (기존 미완료/진행중/완료/메모 통계 칩을 그대로 클릭 가능하게 승격 + '전체'.)
+        if (showFilters) ...[
+          const SizedBox(height: AppTokens.space12),
+          TodoStatusFilterBar(
+            counts: counts,
+            selected: filter,
+            onSelected: onFilterChanged,
+            accent: category.color,
+          ),
+        ],
       ],
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  final String label;
-  final int count;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space12,
-        vertical: AppTokens.space4,
-      ),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-      ),
-      child: Text(
-        '$label $count',
-        style: theme.textTheme.labelLarge?.copyWith(
-          color: color,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 }
