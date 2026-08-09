@@ -322,44 +322,57 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   bool get _canSubmit =>
       !_submitted && _titleCtrl.text.trim().isNotEmpty && !_rangeInvalid;
 
-  void _submit() {
-    if (_submitted || _titleCtrl.text.trim().isEmpty || _rangeInvalid) return;
-    _submitted = true;
+  /// edit 모드 — 현재 입력값으로 updated Todo 를 만들어 [AddTodoSheet.onUpdate] 에
+  /// 전달한다. pop 은 하지 않는다 — 저장 버튼 경로는 [_submit] 이, 배경 탭/드래그/Esc
+  /// 등 닫힘 경로는 build 의 PopScope 훅이 각각 책임진다.
+  void _applyEdit() {
+    final initial = widget.initialTodo;
+    if (initial == null) return;
     final isNote = _type == TodoType.note;
     final trimmedDesc = _descriptionCtrl.text.trim();
     final descOrNull = trimmedDesc.isEmpty ? null : trimmedDesc;
     final date = _serializeDate();
+    // 카테고리를 바꿨고 이 항목이 하위(자식)였다면 → 부모에서 분리해 새 카테고리의
+    // 최상위로 올린다. (자식은 parentId 로 부모 밑에 고정되므로, 분리하지 않으면
+    // 카테고리만 바뀌고 화면상 부모 아래 그대로 남아 "이동이 안 되는" 것처럼 보인다.)
+    final movedCategory = _category.id != initial.category.id;
+    final detach = movedCategory && initial.parentId != null;
+    final updated = initial.copyWith(
+      title: _titleCtrl.text.trim(),
+      category: _category,
+      dueAt: date.dueAt,
+      endAt: date.endAt,
+      isAllDay: date.isAllDay,
+      timeAnchor: date.timeAnchor,
+      type: _type,
+      description: descOrNull,
+      parentId: detach ? null : initial.parentId,
+      // §14-C — task→note 전환 시 doneAt/calendar 제거. note 는 체크·일정 개념이
+      // 없어 옛 doneAt 이 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
+      // (dueAt/isAllDay 는 _serializeDate 가 note 일 때 이미 null/false 로 비운다.)
+      doneAt: isNote ? null : initial.doneAt,
+      // 진행중 표식도 note 전환 시 제거 (note 는 진행 개념 없음).
+      startedAt: isNote ? null : initial.startedAt,
+      calendarEventId: isNote ? null : initial.calendarEventId,
+    );
+    widget.onUpdate?.call(updated);
+  }
+
+  void _submit() {
+    if (_submitted || _titleCtrl.text.trim().isEmpty || _rangeInvalid) return;
+    _submitted = true;
 
     // edit 모드 — onUpdate 콜백 호출 (updatedAt 갱신은 호출자/Controller 책임).
-    final initial = widget.initialTodo;
-    if (_isEditMode && initial != null) {
-      // 카테고리를 바꿨고 이 항목이 하위(자식)였다면 → 부모에서 분리해 새 카테고리의
-      // 최상위로 올린다. (자식은 parentId 로 부모 밑에 고정되므로, 분리하지 않으면
-      // 카테고리만 바뀌고 화면상 부모 아래 그대로 남아 "이동이 안 되는" 것처럼 보인다.)
-      final movedCategory = _category.id != initial.category.id;
-      final detach = movedCategory && initial.parentId != null;
-      final updated = initial.copyWith(
-        title: _titleCtrl.text.trim(),
-        category: _category,
-        dueAt: date.dueAt,
-        endAt: date.endAt,
-        isAllDay: date.isAllDay,
-        timeAnchor: date.timeAnchor,
-        type: _type,
-        description: descOrNull,
-        parentId: detach ? null : initial.parentId,
-        // §14-C — task→note 전환 시 doneAt/calendar 제거. note 는 체크·일정 개념이
-        // 없어 옛 doneAt 이 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
-        // (dueAt/isAllDay 는 _serializeDate 가 note 일 때 이미 null/false 로 비운다.)
-        doneAt: isNote ? null : initial.doneAt,
-        // 진행중 표식도 note 전환 시 제거 (note 는 진행 개념 없음).
-        startedAt: isNote ? null : initial.startedAt,
-        calendarEventId: isNote ? null : initial.calendarEventId,
-      );
-      widget.onUpdate?.call(updated);
+    if (_isEditMode) {
+      _applyEdit();
       Navigator.of(context).maybePop();
       return;
     }
+
+    final isNote = _type == TodoType.note;
+    final trimmedDesc = _descriptionCtrl.text.trim();
+    final descOrNull = trimmedDesc.isEmpty ? null : trimmedDesc;
+    final date = _serializeDate();
 
     // date-repeat — 반복 규칙(추가 모드 + task + 주기 선택 시). dueAt 없으면 무의미.
     final recurrence =
@@ -742,214 +755,228 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       });
     }
 
-    return Material(
-      color: scheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(AppTokens.radiusL),
+    return PopScope(
+      // edit 모드 자동 저장 — 배경 탭 / 아래로 드래그 / Esc / 뒤로가기 등 어떤 경로로
+      // 닫혀도 입력값을 저장한다 (저장 버튼은 확인용일 뿐). 신규 추가 모드는 기존대로
+      // 닫힘 = 취소. 빈 제목·잘못된 기간이면 저장할 수 없으므로 취소로 처리한다.
+      // 무변경 닫힘은 TodoActionsController.update 의 _isUnchanged 가 no-op 으로
+      // 걸러주므로 순서 bump / updatedAt 갱신이 일어나지 않는다.
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop || !_isEditMode || _submitted) return;
+        if (_titleCtrl.text.trim().isEmpty || _rangeInvalid) return;
+        _submitted = true;
+        _applyEdit();
+      },
+      child: Material(
+        color: scheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppTokens.radiusL),
+          ),
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Shortcuts(
-          shortcuts: <ShortcutActivator, Intent>{
-            const SingleActivator(LogicalKeyboardKey.escape):
-                const _DismissIntent(),
-          },
-          child: Actions(
-            actions: <Type, Action<Intent>>{
-              _DismissIntent: CallbackAction<_DismissIntent>(
-                onInvoke: (_) {
-                  Navigator.of(context).maybePop();
-                  return null;
-                },
-              ),
+        child: SafeArea(
+          top: false,
+          child: Shortcuts(
+            shortcuts: <ShortcutActivator, Intent>{
+              const SingleActivator(LogicalKeyboardKey.escape):
+                  const _DismissIntent(),
             },
-            // 상세 메모를 펼치면 내용이 길어져 화면을 넘어설 수 있다. SingleChildScrollView
-            // 로 감싸 bottom overflow 방지 — 모달 바텀시트는 이미 화면 높이로 max 가
-            // 제한되므로 내부 스크롤로 안전. (unbounded 환경에선 content 로 shrink-wrap.)
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                AppTokens.space24,
-                AppTokens.space16,
-                AppTokens.space24,
-                AppTokens.space24,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _Grabber(color: scheme.outline),
-                  const SizedBox(height: AppTokens.space16),
-                  Text(
-                    _isEditMode
-                        ? '할 일 편집'
-                        : (_isChildMode ? '하위 항목 추가' : '새 할 일'),
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
+            child: Actions(
+              actions: <Type, Action<Intent>>{
+                _DismissIntent: CallbackAction<_DismissIntent>(
+                  onInvoke: (_) {
+                    Navigator.of(context).maybePop();
+                    return null;
+                  },
+                ),
+              },
+              // 상세 메모를 펼치면 내용이 길어져 화면을 넘어설 수 있다. SingleChildScrollView
+              // 로 감싸 bottom overflow 방지 — 모달 바텀시트는 이미 화면 높이로 max 가
+              // 제한되므로 내부 스크롤로 안전. (unbounded 환경에선 content 로 shrink-wrap.)
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTokens.space24,
+                  AppTokens.space16,
+                  AppTokens.space24,
+                  AppTokens.space24,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _Grabber(color: scheme.outline),
+                    const SizedBox(height: AppTokens.space16),
+                    Text(
+                      _isEditMode
+                          ? '할 일 편집'
+                          : (_isChildMode ? '하위 항목 추가' : '새 할 일'),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: AppTokens.space16),
-                  TextField(
-                    key: const ValueKey('add-todo-title'),
-                    controller: _titleCtrl,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    // multi-line 허용 — 메모장 → 앱 멀티라인 paste 가 \n 그대로 들어와
-                    // [_onTitleChanged] 가 bulk paste 로 감지. 평소 1줄 입력 시각은 minLines.
-                    minLines: 1,
-                    maxLines: 5,
-                    maxLength: 1000,
-                    keyboardType: TextInputType.multiline,
-                    // edit 모드에서는 bulk paste 가 의미 없으므로 단순 setState 만.
-                    onChanged: _isEditMode
-                        ? (_) => setState(() {})
-                        : _onTitleChanged,
-                    onSubmitted: (_) => _submit(),
-                    decoration: InputDecoration(
-                      hintText: _isEditMode
-                          ? '제목을 입력하세요'
-                          : '무엇을 할까요?  (여러 줄 paste = 일괄 추가)',
-                      counterText: '',
-                    ),
-                  ),
-                  const SizedBox(height: AppTokens.space12),
-                  // v1.2 — 상세 메모 토글 + multi-line TextField.
-                  _DescriptionToggle(
-                    expanded: _showDescription,
-                    onToggle: () =>
-                        setState(() => _showDescription = !_showDescription),
-                  ),
-                  if (_showDescription) ...[
-                    const SizedBox(height: AppTokens.space8),
+                    const SizedBox(height: AppTokens.space16),
                     TextField(
-                      key: const ValueKey('add-todo-description'),
-                      controller: _descriptionCtrl,
-                      minLines: 3,
-                      maxLines: 8,
-                      maxLength: 5000,
+                      key: const ValueKey('add-todo-title'),
+                      controller: _titleCtrl,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      // multi-line 허용 — 메모장 → 앱 멀티라인 paste 가 \n 그대로 들어와
+                      // [_onTitleChanged] 가 bulk paste 로 감지. 평소 1줄 입력 시각은 minLines.
+                      minLines: 1,
+                      maxLines: 5,
+                      maxLength: 1000,
                       keyboardType: TextInputType.multiline,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: '상세 메모 (선택)',
-                        border: OutlineInputBorder(),
+                      // edit 모드에서는 bulk paste 가 의미 없으므로 단순 setState 만.
+                      onChanged: _isEditMode
+                          ? (_) => setState(() {})
+                          : _onTitleChanged,
+                      onSubmitted: (_) => _submit(),
+                      decoration: InputDecoration(
+                        hintText: _isEditMode
+                            ? '제목을 입력하세요'
+                            : '무엇을 할까요?  (여러 줄 paste = 일괄 추가)',
                         counterText: '',
                       ),
                     ),
-                  ],
-                  // Task C — "하위 추가" 모드는 부모 category 로 고정 → 선택 UI 숨김.
-                  if (!_isChildMode) ...[
-                    const SizedBox(height: AppTokens.space16),
-                    _SectionLabel(text: '카테고리'),
-                    const SizedBox(height: AppTokens.space8),
-                    _CategoryChips(
-                      categories: categories,
-                      groups: groups,
-                      selected: _category,
-                      // 사용자가 명시 선택 → 신뢰 표시 (자동 보정 대상에서 제외).
-                      onSelect: (c) => setState(() {
-                        _category = c;
-                        _categoryTrusted = true;
-                      }),
-                    ),
-                  ],
-                  const SizedBox(height: AppTokens.space16),
-                  _SectionLabel(text: '종류'),
-                  const SizedBox(height: AppTokens.space8),
-                  _TypeToggle(selected: _type, onSelect: _setType),
-                  const SizedBox(height: AppTokens.space16),
-                  // note 면 일정 영역 자체를 숨김 — 의미 없음.
-                  if (_type == TodoType.task) ...[
-                    _SectionLabel(text: '일정'),
-                    const SizedBox(height: AppTokens.space8),
-                    _DateModeSelector(
-                      selected: _dateMode,
-                      onSelect: _setDateMode,
-                    ),
                     const SizedBox(height: AppTokens.space12),
-                    if (_dateMode == _DateInputMode.range)
-                      _RangeSection(
-                        startAt: _dueAt,
-                        endAt: _endAt,
-                        allDay: _rangeAllDay,
-                        invalid: _rangeInvalid,
-                        onPickStartDate: _pickRangeStartDate,
-                        onPickStartTime: _pickRangeStartTime,
-                        onPickEndDate: _pickRangeEndDate,
-                        onPickEndTime: _pickRangeEndTime,
-                        onToggleAllDay: _toggleRangeAllDay,
-                      )
-                    else ...[
-                      // 단일 모드 (하루종일/시작/마감) — 기존 빠른 칩 + DueRow.
-                      _QuickDueChips(
-                        today: _today(),
-                        dueAt: _dueAt,
-                        allDay: _allDay,
-                        onSelectDate: _setQuickDate,
-                        onPickTime: _pickTime,
-                      ),
-                      const SizedBox(height: AppTokens.space8),
-                      _DueRow(
-                        dueAt: _dueAt,
-                        allDay: _allDay,
-                        onPickDate: _pickDueDate,
-                        onPickTime: _pickTime,
-                        onMakeAllDay: _makeAllDay,
-                        onClear: _clearDueAt,
-                      ),
-                    ],
-                    AnimatedSize(
-                      duration: AppTokens.motionFast,
-                      alignment: Alignment.topCenter,
-                      child: _dueAt == null
-                          ? const SizedBox.shrink()
-                          : Padding(
-                              padding: const EdgeInsets.only(
-                                top: AppTokens.space12,
-                              ),
-                              child: _CalendarToggle(
-                                value: _addToCalendar,
-                                onChanged: (v) =>
-                                    setState(() => _addToCalendar = v),
-                              ),
-                            ),
+                    // v1.2 — 상세 메모 토글 + multi-line TextField.
+                    _DescriptionToggle(
+                      expanded: _showDescription,
+                      onToggle: () =>
+                          setState(() => _showDescription = !_showDescription),
                     ),
-                    // date-repeat — 반복 규칙 (추가 모드 + 날짜 지정 시에만).
-                    // 편집 모드에서 규칙 수정은 별도 동작이라 노출하지 않는다 (PRD FR-6).
-                    if (!_isEditMode && _dueAt != null) ...[
-                      const SizedBox(height: AppTokens.space16),
-                      _SectionLabel(text: '반복'),
+                    if (_showDescription) ...[
                       const SizedBox(height: AppTokens.space8),
-                      _RecurrenceSection(
-                        freq: _recurrenceFreq,
-                        interval: _recurrenceInterval,
-                        weekdays: _recurrenceWeekdays,
-                        endAt: _recurrenceEndAt,
-                        onSelectFreq: _setRecurrenceFreq,
-                        onChangeInterval: _setRecurrenceInterval,
-                        onToggleWeekday: _toggleRecurrenceWeekday,
-                        onPickEnd: _pickRecurrenceEnd,
-                        onClearEnd: () =>
-                            setState(() => _recurrenceEndAt = null),
+                      TextField(
+                        key: const ValueKey('add-todo-description'),
+                        controller: _descriptionCtrl,
+                        minLines: 3,
+                        maxLines: 8,
+                        maxLength: 5000,
+                        keyboardType: TextInputType.multiline,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          hintText: '상세 메모 (선택)',
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
                       ),
                     ],
-                    // 편집 모드 + 반복 시리즈 항목 → 규칙 요약 + "반복 중지" (FR-6).
-                    // 규칙 자체 수정은 미지원이라 입력 UI 대신 정보+중지만 노출.
-                    if (_isEditMode &&
-                        (widget.initialTodo?.isInRecurringSeries ?? false)) ...[
+                    // Task C — "하위 추가" 모드는 부모 category 로 고정 → 선택 UI 숨김.
+                    if (!_isChildMode) ...[
                       const SizedBox(height: AppTokens.space16),
-                      _SectionLabel(text: '반복'),
+                      _SectionLabel(text: '카테고리'),
                       const SizedBox(height: AppTokens.space8),
-                      _RecurrenceEditInfo(item: widget.initialTodo!),
+                      _CategoryChips(
+                        categories: categories,
+                        groups: groups,
+                        selected: _category,
+                        // 사용자가 명시 선택 → 신뢰 표시 (자동 보정 대상에서 제외).
+                        onSelect: (c) => setState(() {
+                          _category = c;
+                          _categoryTrusted = true;
+                        }),
+                      ),
                     ],
+                    const SizedBox(height: AppTokens.space16),
+                    _SectionLabel(text: '종류'),
+                    const SizedBox(height: AppTokens.space8),
+                    _TypeToggle(selected: _type, onSelect: _setType),
+                    const SizedBox(height: AppTokens.space16),
+                    // note 면 일정 영역 자체를 숨김 — 의미 없음.
+                    if (_type == TodoType.task) ...[
+                      _SectionLabel(text: '일정'),
+                      const SizedBox(height: AppTokens.space8),
+                      _DateModeSelector(
+                        selected: _dateMode,
+                        onSelect: _setDateMode,
+                      ),
+                      const SizedBox(height: AppTokens.space12),
+                      if (_dateMode == _DateInputMode.range)
+                        _RangeSection(
+                          startAt: _dueAt,
+                          endAt: _endAt,
+                          allDay: _rangeAllDay,
+                          invalid: _rangeInvalid,
+                          onPickStartDate: _pickRangeStartDate,
+                          onPickStartTime: _pickRangeStartTime,
+                          onPickEndDate: _pickRangeEndDate,
+                          onPickEndTime: _pickRangeEndTime,
+                          onToggleAllDay: _toggleRangeAllDay,
+                        )
+                      else ...[
+                        // 단일 모드 (하루종일/시작/마감) — 기존 빠른 칩 + DueRow.
+                        _QuickDueChips(
+                          today: _today(),
+                          dueAt: _dueAt,
+                          allDay: _allDay,
+                          onSelectDate: _setQuickDate,
+                          onPickTime: _pickTime,
+                        ),
+                        const SizedBox(height: AppTokens.space8),
+                        _DueRow(
+                          dueAt: _dueAt,
+                          allDay: _allDay,
+                          onPickDate: _pickDueDate,
+                          onPickTime: _pickTime,
+                          onMakeAllDay: _makeAllDay,
+                          onClear: _clearDueAt,
+                        ),
+                      ],
+                      AnimatedSize(
+                        duration: AppTokens.motionFast,
+                        alignment: Alignment.topCenter,
+                        child: _dueAt == null
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(
+                                  top: AppTokens.space12,
+                                ),
+                                child: _CalendarToggle(
+                                  value: _addToCalendar,
+                                  onChanged: (v) =>
+                                      setState(() => _addToCalendar = v),
+                                ),
+                              ),
+                      ),
+                      // date-repeat — 반복 규칙 (추가 모드 + 날짜 지정 시에만).
+                      // 편집 모드에서 규칙 수정은 별도 동작이라 노출하지 않는다 (PRD FR-6).
+                      if (!_isEditMode && _dueAt != null) ...[
+                        const SizedBox(height: AppTokens.space16),
+                        _SectionLabel(text: '반복'),
+                        const SizedBox(height: AppTokens.space8),
+                        _RecurrenceSection(
+                          freq: _recurrenceFreq,
+                          interval: _recurrenceInterval,
+                          weekdays: _recurrenceWeekdays,
+                          endAt: _recurrenceEndAt,
+                          onSelectFreq: _setRecurrenceFreq,
+                          onChangeInterval: _setRecurrenceInterval,
+                          onToggleWeekday: _toggleRecurrenceWeekday,
+                          onPickEnd: _pickRecurrenceEnd,
+                          onClearEnd: () =>
+                              setState(() => _recurrenceEndAt = null),
+                        ),
+                      ],
+                      // 편집 모드 + 반복 시리즈 항목 → 규칙 요약 + "반복 중지" (FR-6).
+                      // 규칙 자체 수정은 미지원이라 입력 UI 대신 정보+중지만 노출.
+                      if (_isEditMode &&
+                          (widget.initialTodo?.isInRecurringSeries ??
+                              false)) ...[
+                        const SizedBox(height: AppTokens.space16),
+                        _SectionLabel(text: '반복'),
+                        const SizedBox(height: AppTokens.space8),
+                        _RecurrenceEditInfo(item: widget.initialTodo!),
+                      ],
+                    ],
+                    const SizedBox(height: AppTokens.space20),
+                    _Actions(
+                      canSubmit: _canSubmit,
+                      onSubmit: _submit,
+                      submitLabel: _isEditMode ? '저장' : '추가',
+                    ),
                   ],
-                  const SizedBox(height: AppTokens.space20),
-                  _Actions(
-                    canSubmit: _canSubmit,
-                    onSubmit: _submit,
-                    submitLabel: _isEditMode ? '저장' : '추가',
-                  ),
-                ],
+                ),
               ),
             ),
           ),
