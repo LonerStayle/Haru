@@ -90,8 +90,11 @@ void main() {
         groups: const [groupX],
       );
 
-      // 접힘형 선택기 — 헤더를 탭해 펼친 뒤 '코기토' 칩을 탭해 선택.
-      await tester.tap(find.byKey(const ValueKey('category-picker-header')));
+      // 아코디언(J) — 초기 선택(일상)은 미분류 섹션이라 '사이드' 그룹은 접혀 있다.
+      // 그룹 헤더를 탭해 펼친 뒤 '코기토' 칩을 탭해 선택.
+      await tester.tap(
+        find.byKey(const ValueKey('category-group-header-group-x')),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('코기토'));
       await tester.pumpAndSettle();
@@ -110,6 +113,36 @@ void main() {
       );
     },
   );
+
+  testWidgets('아코디언 — 디폴트는 선택 카테고리 섹션만 펼침, 헤더 탭으로 전환', (tester) async {
+    await mount(
+      tester,
+      categories: const [daily, cogito],
+      groups: const [groupX],
+    );
+
+    // 그룹 헤더는 항상 전부 보인다.
+    expect(
+      find.byKey(const ValueKey('category-group-header-ungrouped')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('category-group-header-group-x')),
+      findsOneWidget,
+    );
+
+    // 디폴트: 선택(일상)이 속한 미분류만 펼침 → 일상 칩 보임, 코기토 칩 숨김.
+    expect(find.byKey(const ValueKey('category-chip-daily')), findsOneWidget);
+    expect(find.byKey(const ValueKey('category-chip-cogito')), findsNothing);
+
+    // '사이드' 그룹 헤더 탭 → 코기토 칩이 보이고 미분류 칩은 접힌다.
+    await tester.tap(
+      find.byKey(const ValueKey('category-group-header-group-x')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('category-chip-cogito')), findsOneWidget);
+    expect(find.byKey(const ValueKey('category-chip-daily')), findsNothing);
+  });
 
   testWidgets(
     'categoriesProvider 가 코기토를 포함하지 않는 fallback 이어도 사용자 선택을 덮어쓰지 않음',

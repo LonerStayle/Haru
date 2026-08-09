@@ -867,7 +867,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                       const SizedBox(height: AppTokens.space16),
                       _SectionLabel(text: '카테고리'),
                       const SizedBox(height: AppTokens.space8),
-                      _CategoryPicker(
+                      _CategoryChips(
                         categories: categories,
                         groups: groups,
                         selected: _category,
@@ -1047,126 +1047,10 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-/// 접힘형 카테고리 선택기 — 평소엔 선택된 카테고리 1줄만 보여주고,
-/// 탭하면 그 자리에서 그룹별 칩 목록(_CategoryChips)이 펼쳐진다.
-/// 칩을 선택하면 자동으로 다시 접힌다.
-class _CategoryPicker extends StatefulWidget {
-  const _CategoryPicker({
-    required this.categories,
-    required this.groups,
-    required this.selected,
-    required this.onSelect,
-  });
-
-  final List<Category> categories;
-  final List<Group> groups;
-  final Category selected;
-  final ValueChanged<Category> onSelect;
-
-  @override
-  State<_CategoryPicker> createState() => _CategoryPickerState();
-}
-
-class _CategoryPickerState extends State<_CategoryPicker> {
-  bool _expanded = false;
-
-  String? get _groupLabel {
-    final gid = widget.selected.groupId;
-    if (gid == null) return null;
-    for (final g in widget.groups) {
-      if (g.id == gid) return g.label;
-    }
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final selected = widget.selected;
-    final groupLabel = _groupLabel;
-
-    final header = Material(
-      color: scheme.surfaceContainerHighest,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppTokens.radiusM),
-      ),
-      child: InkWell(
-        key: const ValueKey('category-picker-header'),
-        onTap: () => setState(() => _expanded = !_expanded),
-        borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTokens.space12,
-            vertical: AppTokens.space12,
-          ),
-          child: Row(
-            children: [
-              Icon(selected.icon, size: 18, color: selected.color),
-              const SizedBox(width: AppTokens.space8),
-              Flexible(
-                child: Text(
-                  selected.label,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (groupLabel != null) ...[
-                const SizedBox(width: AppTokens.space8),
-                Flexible(
-                  child: Text(
-                    '· $groupLabel',
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.55),
-                    ),
-                  ),
-                ),
-              ],
-              const Spacer(),
-              Icon(
-                _expanded ? Icons.expand_less : Icons.expand_more,
-                size: 20,
-                color: scheme.onSurface.withValues(alpha: 0.6),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        header,
-        AnimatedSize(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: _expanded
-              ? Padding(
-                  padding: const EdgeInsets.only(top: AppTokens.space8),
-                  child: _CategoryChips(
-                    categories: widget.categories,
-                    groups: widget.groups,
-                    selected: selected,
-                    onSelect: (c) {
-                      setState(() => _expanded = false);
-                      widget.onSelect(c);
-                    },
-                  ),
-                )
-              : const SizedBox(width: double.infinity),
-        ),
-      ],
-    );
-  }
-}
-
-class _CategoryChips extends StatelessWidget {
+/// 그룹 아코디언형 카테고리 선택 — 그룹 헤더('미분류' 포함)는 항상 전부 보이고,
+/// 카테고리 칩은 펼쳐진 한 그룹의 것만 노출한다. 항상 정확히 한 그룹만 펼침
+/// (디폴트 = 선택된 카테고리가 속한 그룹). 그룹이 없으면 평면 나열 유지.
+class _CategoryChips extends StatefulWidget {
   const _CategoryChips({
     required this.categories,
     required this.groups,
@@ -1182,6 +1066,18 @@ class _CategoryChips extends StatelessWidget {
   final Category selected;
   final ValueChanged<Category> onSelect;
 
+  @override
+  State<_CategoryChips> createState() => _CategoryChipsState();
+}
+
+/// '미분류' 섹션의 아코디언 key — 실제 그룹 id 와 충돌하지 않는 sentinel.
+const String _kUngroupedSectionKey = 'ungrouped';
+
+class _CategoryChipsState extends State<_CategoryChips> {
+  /// 사용자가 마지막으로 펼친 섹션 key (그룹 id 또는 [_kUngroupedSectionKey]).
+  /// null 이거나 현재 섹션 목록에 없으면 build 에서 선택 카테고리 기준으로 보정.
+  String? _expandedKey;
+
   Widget _wrap(List<Category> items) {
     return Wrap(
       spacing: AppTokens.space8,
@@ -1192,8 +1088,8 @@ class _CategoryChips extends StatelessWidget {
             key: ValueKey('category-chip-${c.id}'),
             category: c,
             // 전체 동등 비교는 DB 인스턴스 ↔ const 차이로 어긋날 수 있어 id 로 비교.
-            selected: c.id == selected.id,
-            onTap: () => onSelect(c),
+            selected: c.id == widget.selected.id,
+            onTap: () => widget.onSelect(c),
           ),
       ],
     );
@@ -1202,11 +1098,11 @@ class _CategoryChips extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 그룹이 하나도 없으면 기존처럼 평면 한 줄 Wrap (불필요한 헤더 미노출).
-    if (groups.isEmpty) return _wrap(categories);
+    if (widget.groups.isEmpty) return _wrap(widget.categories);
 
     final ungrouped = <Category>[];
     final byGroup = <String, List<Category>>{};
-    for (final c in categories) {
+    for (final c in widget.categories) {
       final gid = c.groupId;
       if (gid == null) {
         ungrouped.add(c);
@@ -1215,7 +1111,7 @@ class _CategoryChips extends StatelessWidget {
       }
     }
     // 존재하지 않는 그룹에 매인 카테고리는 미분류로 흡수.
-    final groupIds = groups.map((g) => g.id).toSet();
+    final groupIds = widget.groups.map((g) => g.id).toSet();
     for (final entry in byGroup.entries.toList()) {
       if (!groupIds.contains(entry.key)) {
         ungrouped.addAll(entry.value);
@@ -1223,58 +1119,143 @@ class _CategoryChips extends StatelessWidget {
       }
     }
 
-    final sections = <Widget>[];
-    if (ungrouped.isNotEmpty) {
-      sections.add(const _GroupSectionLabel(label: '미분류'));
-      sections.add(const SizedBox(height: AppTokens.space8));
-      sections.add(_wrap(ungrouped));
-    }
-    for (final g in groups) {
-      final items = byGroup[g.id] ?? const <Category>[];
-      if (items.isEmpty) continue;
-      if (sections.isNotEmpty) {
-        sections.add(const SizedBox(height: AppTokens.space12));
-      }
-      sections.add(_GroupSectionLabel(label: g.label, color: g.color));
-      sections.add(const SizedBox(height: AppTokens.space8));
-      sections.add(_wrap(items));
+    // 노출할 섹션 (빈 그룹 제외).
+    final sections =
+        <({String key, String label, Color? color, List<Category> items})>[
+          if (ungrouped.isNotEmpty)
+            (
+              key: _kUngroupedSectionKey,
+              label: '미분류',
+              color: null,
+              items: ungrouped,
+            ),
+          for (final g in widget.groups)
+            if ((byGroup[g.id] ?? const <Category>[]).isNotEmpty)
+              (
+                key: g.id,
+                label: g.label,
+                color: g.color,
+                items: byGroup[g.id]!,
+              ),
+        ];
+    if (sections.isEmpty) return const SizedBox.shrink();
+
+    // 펼칠 섹션 보정 — 반드시 하나는 펼침. 디폴트는 선택 카테고리가 속한 섹션.
+    var expanded = _expandedKey;
+    if (expanded == null || !sections.any((s) => s.key == expanded)) {
+      expanded = sections
+          .firstWhere(
+            (s) => s.items.any((c) => c.id == widget.selected.id),
+            orElse: () => sections.first,
+          )
+          .key;
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: sections,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (i, s) in sections.indexed) ...[
+          if (i > 0) const SizedBox(height: AppTokens.space4),
+          _GroupAccordionHeader(
+            key: ValueKey('category-group-header-${s.key}'),
+            label: s.label,
+            color: s.color,
+            expanded: s.key == expanded,
+            // 접힌 섹션에 선택 칩이 숨어 있으면 헤더에 이름을 흘려 표시 (가시성).
+            selectedHint:
+                s.key != expanded &&
+                    s.items.any((c) => c.id == widget.selected.id)
+                ? widget.selected.label
+                : null,
+            onTap: () => setState(() => _expandedKey = s.key),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: s.key == expanded
+                ? Padding(
+                    padding: const EdgeInsets.only(
+                      top: AppTokens.space4,
+                      bottom: AppTokens.space4,
+                    ),
+                    child: _wrap(s.items),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+      ],
     );
   }
 }
 
-/// J — 카테고리 칩 섹션 헤더 (그룹명/'미분류' + 색 dot).
-class _GroupSectionLabel extends StatelessWidget {
-  const _GroupSectionLabel({required this.label, this.color});
+/// J — 아코디언 그룹 헤더 (그룹명/'미분류' + 색 dot + 펼침 화살표).
+class _GroupAccordionHeader extends StatelessWidget {
+  const _GroupAccordionHeader({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.expanded,
+    required this.onTap,
+    this.selectedHint,
+  });
 
   final String label;
   final Color? color;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  /// 접힘 상태에서 이 그룹 안에 숨어 있는 "선택된 카테고리" 이름 (없으면 null).
+  final String? selectedHint;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final dot = color ?? scheme.onSurface.withValues(alpha: 0.4);
-    return Row(
-      children: [
-        Icon(Icons.circle, size: 9, color: dot),
-        const SizedBox(width: AppTokens.space8),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.6),
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.4,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppTokens.radiusS),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppTokens.space8),
+        child: Row(
+          children: [
+            Icon(Icons.circle, size: 9, color: dot),
+            const SizedBox(width: AppTokens.space8),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurface.withValues(
+                    alpha: expanded ? 0.85 : 0.6,
+                  ),
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.4,
+                ),
+              ),
             ),
-          ),
+            if (selectedHint != null) ...[
+              const SizedBox(width: AppTokens.space8),
+              Flexible(
+                child: Text(
+                  '· $selectedHint',
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurface.withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
+            ],
+            const Spacer(),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 18,
+              color: scheme.onSurface.withValues(alpha: 0.55),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

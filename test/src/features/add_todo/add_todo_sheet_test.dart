@@ -94,11 +94,9 @@ void main() {
     final submissions = await mount(tester);
 
     await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
-    // 접힘형 선택기 — 헤더 탭으로 펼친 뒤 칩 선택.
-    await tester.tap(find.byKey(const ValueKey('category-picker-header')));
-    await tester.pumpAndSettle();
+    // 그룹 없음 → 평면 나열이라 칩이 바로 보인다.
     await tester.tap(find.text('개인개발'));
-    await tester.pumpAndSettle();
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, '추가'));
     await tester.pump();
 
@@ -110,11 +108,7 @@ void main() {
     await mount(tester);
     await tester.pump();
 
-    // 접힘형 선택기 — 헤더를 펼쳐야 칩이 보인다.
-    await tester.tap(find.byKey(const ValueKey('category-picker-header')));
-    await tester.pumpAndSettle();
-
-    // selected chip("일상")의 Material — 칩 key 로 특정 (헤더의 "일상" 텍스트와 구분).
+    // selected chip("일상")의 Material — 칩 key 로 특정.
     final materialFinder = find.descendant(
       of: find.byKey(const ValueKey('category-chip-daily')),
       matching: find.byType(Material),
