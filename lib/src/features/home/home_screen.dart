@@ -18,6 +18,7 @@ import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../recurrence/recurrence_manage_screen.dart';
@@ -126,6 +127,8 @@ class HomeScreen extends ConsumerWidget {
               onUpdate: (updated) {
                 ref.read(todoActionsProvider).update(updated);
               },
+              onRequestMove: (item) =>
+                  showMoveTodoSheet(context, ref, item: item),
             );
           },
           // 기능 M — 하위 있는 root tap → 상세 화면(드릴다운) push.
@@ -137,6 +140,7 @@ class HomeScreen extends ConsumerWidget {
           // Task C — ＋ 하위 추가.
           onAddChild: (parent) =>
               showAddChildSheet(context, ref, parent: parent),
+          onMove: (t) => showMoveTodoSheet(context, ref, item: t),
           onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
           // Task B — 형제 드래그 재정렬.
           onReorderSiblings: (siblings, oldIndex, newIndex) => ref
@@ -169,6 +173,7 @@ class _Loaded extends StatefulWidget {
     required this.onEdit,
     required this.onDrillDown,
     required this.onAddChild,
+    required this.onMove,
     required this.onCopy,
     required this.onReorderSiblings,
     required this.onStopRecurrence,
@@ -203,6 +208,7 @@ class _Loaded extends StatefulWidget {
   final void Function(Todo) onEdit;
   final void Function(Todo) onDrillDown;
   final void Function(Todo) onAddChild;
+  final void Function(Todo) onMove;
   final void Function(Todo) onCopy;
   final void Function(List<Todo> siblings, int oldIndex, int newIndex)
   onReorderSiblings;
@@ -292,6 +298,7 @@ class _LoadedState extends State<_Loaded> {
             onEdit: widget.onEdit,
             onDrillDown: widget.onDrillDown,
             onAddChild: widget.onAddChild,
+            onMove: widget.onMove,
             onCopy: widget.onCopy,
             onReorderSiblings: widget.onReorderSiblings,
             hiddenCountBySeries: widget.hiddenCountBySeries,

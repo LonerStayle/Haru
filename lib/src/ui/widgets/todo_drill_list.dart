@@ -4,6 +4,7 @@ import '../../core/theme.dart';
 import '../../domain/policies/todo_sort_policy.dart';
 import '../../domain/todo.dart';
 import 'dismissible_todo_tile.dart';
+import 'todo_status_filter.dart';
 
 /// 기능 M — "평면 + 드릴다운" 한 단계 리스트 Sliver.
 ///
@@ -25,6 +26,13 @@ import 'dismissible_todo_tile.dart';
 /// **정렬 모드**: [sortMode] 가 [TodoSortMode.dueDate] 면 이 레벨(과 완료 섹션)을 일정
 /// 빠른 순으로 다시 늘어놓는다. 화면이 계산한 순서와 드래그 결과가 어긋나므로 이때
 /// 드래그 재정렬은 꺼진다 — 수동 순서로 되돌리면 다시 켜진다.
+///
+/// **상태별 보기**: [filter] 가 `all` 이 아니면 위 트리 렌더를 접고, [filterPool] (이
+/// 스코프의 **자손 포함** 전체) 에서 조건에 맞는 항목만 **평탄한 한 겹 목록**으로 그린다.
+/// 칩 카운트("완료 3")와 실제로 보이는 건수를 일치시키기 위한 선택이다 — root 만 걸러내면
+/// 자손에 있는 완료 항목이 안 보여 카운트와 어긋난다. 평탄 목록에서는 소속을 알 수 있도록
+/// 각 타일에 부모 경로(breadcrumb)를 얹고, 순서가 의미를 잃으므로 재정렬은 끈다.
+/// 평탄 목록에도 [sortMode] 는 그대로 적용된다(일정순으로 보는 중이면 필터 결과도 일정순).
 class TodoDrillListSliver extends StatefulWidget {
   const TodoDrillListSliver({
     super.key,
@@ -35,12 +43,16 @@ class TodoDrillListSliver extends StatefulWidget {
     required this.onToggle,
     this.onToggleInProgress,
     required this.onAddChild,
+    required this.onMove,
     required this.onCopy,
     required this.onDelete,
     required this.onReorderSiblings,
     this.hiddenCountBySeries = const {},
     this.onStopRecurrence,
     this.sortMode = TodoSortMode.manual,
+    this.filter = TodoStatusFilter.all,
+    this.filterPool,
+    this.breadcrumbRootId,
   });
 
   /// 이 레벨에서 한 줄씩 보일 형제 list (이미 dao 정렬 순서).
@@ -63,6 +75,9 @@ class TodoDrillListSliver extends StatefulWidget {
   /// "＋ 하위 추가" — 그 항목을 부모로 자식 생성 sheet 를 연다.
   final void Function(Todo parent) onAddChild;
 
+  /// 더보기(⋮) 메뉴 '이동' — 그 항목(서브트리 통째)의 위치를 옮기는 시트를 연다.
+  final void Function(Todo) onMove;
+
   /// 더보기(⋮) 메뉴 '복사' — 그 항목을 prefill 한 새 항목 시트를 연다.
   final void Function(Todo) onCopy;
 
@@ -82,6 +97,18 @@ class TodoDrillListSliver extends StatefulWidget {
   /// 목록 정렬 방식. 기본은 사용자가 드래그로 정한 수동 순서.
   final TodoSortMode sortMode;
 
+  /// 상태별 보기 필터. `all` (기본) 이면 기존 트리 렌더 그대로.
+  final TodoStatusFilter filter;
+
+  /// [filter] 가 `all` 이 아닐 때 평탄 나열할 대상 — 이 스코프의 **자손 포함** 전체
+  /// (카테고리 화면 = 그 카테고리 전체, 상세 화면 = 그 항목의 모든 자손).
+  /// null 이면 [items] 만 걸러낸다.
+  final List<Todo>? filterPool;
+
+  /// 부모 경로(breadcrumb) 를 어디서 끊을지 — 이 id 위로는 올라가지 않는다.
+  /// 상세 화면처럼 그 항목이 이미 화면 제목인 경우 경로에서 빼기 위한 것.
+  final String? breadcrumbRootId;
+
   @override
   State<TodoDrillListSliver> createState() => _TodoDrillListSliverState();
 }
@@ -99,6 +126,25 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
       counts[pid] = (counts[pid] ?? 0) + 1;
     }
     return counts;
+  }
+
+  /// [todo] 의 부모 경로 문자열 (`상위 › 그 하위`). root 면 null.
+  ///
+  /// [TodoDrillListSliver.breadcrumbRootId] 에 도달하면 그 항목은 빼고 walk 를 멈춘다
+  /// (이미 화면 제목인 부모를 경로에 또 쓰지 않기 위해).
+  /// dangling parentId (동기화 race) 나 사이클을 만나도 거기서 멈춘다.
+  String? _breadcrumbOf(Todo todo, Map<String, Todo> byId) {
+    if (todo.parentId == null) return null;
+    final titles = <String>[];
+    final visited = <String>{todo.id};
+    var current = byId[todo.parentId];
+    while (current != null && current.id != widget.breadcrumbRootId) {
+      if (!visited.add(current.id)) break;
+      titles.insert(0, current.title);
+      final pid = current.parentId;
+      current = pid == null ? null : byId[pid];
+    }
+    return titles.isEmpty ? null : titles.join(' › ');
   }
 
   @override
@@ -120,7 +166,12 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
     // 일정순으로 보는 동안은 드래그 재정렬을 끈다 — 드롭한 자리와 화면 순서가 어긋난다.
     final canReorder = widget.sortMode == TodoSortMode.manual;
 
-    Widget tile(Todo todo, {required bool reorderable, required int index}) {
+    Widget tile(
+      Todo todo, {
+      required bool reorderable,
+      required int index,
+      String? breadcrumb,
+    }) {
       final childCount = counts[todo.id] ?? 0;
       final hasChildren = childCount > 0;
       final sid = todo.seriesId;
@@ -139,7 +190,8 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
             hasChildren ? widget.onDrillDown(todo) : widget.onEdit(todo),
         // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관하게 ＋하위 추가 노출.
         onAddChild: () => widget.onAddChild(todo),
-        // 더보기(⋮) 메뉴 — 복사 / 편집(이 항목 자체) / 삭제.
+        // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
+        onMove: () => widget.onMove(todo),
         onCopy: () => widget.onCopy(todo),
         onEditItem: () => widget.onEdit(todo),
         // 드릴 가능 표시 — chevron_right + 자식 개수 배지.
@@ -149,6 +201,7 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
         onStopRecurrence: widget.onStopRecurrence == null
             ? null
             : () => widget.onStopRecurrence!(todo),
+        breadcrumb: breadcrumb,
       );
       return Padding(
         key: ValueKey('drill-node-${todo.id}'),
@@ -160,6 +213,33 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
                 child: tileWidget,
               )
             : tileWidget,
+      );
+    }
+
+    // 상태별 보기 — 트리를 접고 조건에 맞는 항목만 평탄하게. 재정렬·완료접기 없음.
+    // 정렬 모드는 여기서도 존중한다 (일정순으로 보는 중이면 필터 결과도 일정순).
+    if (widget.filter != TodoStatusFilter.all) {
+      final pool = widget.filterPool ?? widget.items;
+      final matched = TodoSortPolicy.apply(
+        pool.where(widget.filter.matches).toList(),
+        widget.sortMode,
+      );
+      if (matched.isEmpty) {
+        return SliverToBoxAdapter(
+          child: _FilterEmptyRow(filter: widget.filter),
+        );
+      }
+      final byId = {for (final t in widget.allTodos) t.id: t};
+      return SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, i) => tile(
+            matched[i],
+            reorderable: false,
+            index: i,
+            breadcrumb: _breadcrumbOf(matched[i], byId),
+          ),
+          childCount: matched.length,
+        ),
       );
     }
 
@@ -198,6 +278,48 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 상태별 보기에서 해당 상태가 0건일 때의 안내 행 — 목록이 빈 채로 끝나는 것보다
+/// "왜 비었는지" 를 알려 준다. 다른 칩으로 옮기라는 힌트까지 한 줄.
+class _FilterEmptyRow extends StatelessWidget {
+  const _FilterEmptyRow({required this.filter});
+
+  final TodoStatusFilter filter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      key: const ValueKey('drill-filter-empty'),
+      padding: const EdgeInsets.symmetric(vertical: AppTokens.space32),
+      child: Column(
+        children: [
+          Icon(
+            Icons.filter_alt_off_outlined,
+            size: 28,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: AppTokens.space8),
+          Text(
+            '${filter.label} 항목이 없어요',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: AppTokens.space4),
+          Text(
+            '위 칩에서 다른 상태를 눌러 보세요.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -32,6 +32,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     this.initialDueAt,
     this.initialAllDay = true,
     this.parentId,
+    this.onRequestMove,
   });
 
   final Category initialCategory;
@@ -63,6 +64,11 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   /// _descriptionCtrl / _category / _dueAt / _type 가 모두 prefill 된다.
   final Todo? initialTodo;
 
+  /// edit 모드의 "위치" 섹션 — 이동 버튼 콜백. 이 시트를 닫은 뒤 호출자의 context 로
+  /// 이동 시트를 열게 한다 (시트 안에서 시트를 여는 대신 호출자에게 위임).
+  /// null 이면 위치 섹션에 이동 버튼을 노출하지 않는다.
+  final void Function(Todo item)? onRequestMove;
+
   /// 복사(duplicate) 용 prefill 출처. [initialTodo] 와 달리 edit 모드로 전환하지
   /// 않고 add 모드 (onSubmit) 그대로 동작하되, 제목·상세·카테고리·날짜/시간·종류 등
   /// 모든 입력값만 이 todo 로 미리 채운다. 저장 시 새 id 의 별개 todo 가 생성된다.
@@ -87,6 +93,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     Todo? initialTodo,
     Todo? prefillFrom,
     String? parentId,
+    void Function(Todo item)? onRequestMove,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -103,6 +110,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
           initialTodo: initialTodo,
           prefillFrom: prefillFrom,
           parentId: parentId,
+          onRequestMove: onRequestMove,
         ),
       ),
     );
@@ -720,6 +728,16 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     return DateTime(now.year, now.month, now.day);
   }
 
+  /// "위치" 섹션의 이동 버튼 — 이 시트를 닫고 호출자가 이동 시트를 열게 한다.
+  /// 편집 중이던 입력값은 저장하지 않는다 (이동은 위치만 바꾸는 별개 동작).
+  void _requestMove() {
+    final initial = widget.initialTodo;
+    final callback = widget.onRequestMove;
+    if (initial == null || callback == null) return;
+    Navigator.of(context).maybePop();
+    callback(initial);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -860,6 +878,17 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                           border: OutlineInputBorder(),
                           counterText: '',
                         ),
+                      ),
+                    ],
+                    // 편집 모드 — 지금 이 항목이 트리 어디에 있는지 + 다른 곳으로 이동.
+                    // (전체보기·타임라인처럼 ⋮ 메뉴가 없는 화면의 이동 진입점이기도 하다.)
+                    if (_isEditMode && widget.onRequestMove != null) ...[
+                      const SizedBox(height: AppTokens.space16),
+                      _SectionLabel(text: '위치'),
+                      const SizedBox(height: AppTokens.space8),
+                      _LocationRow(
+                        item: widget.initialTodo!,
+                        onMove: _requestMove,
                       ),
                     ],
                     // Task C — "하위 추가" 모드는 부모 category 로 고정 → 선택 UI 숨김.
@@ -1043,6 +1072,63 @@ class _SectionLabel extends StatelessWidget {
     return Text(
       text,
       style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+}
+
+/// 편집 모드의 "위치" 행 — `카테고리 › 부모 › 부모` 경로 + 이동 버튼.
+///
+/// 카테고리 칩만으로는 계층(하위 ↔ 상위)을 옮길 수 없어, 이동은 전용 시트로 넘긴다.
+class _LocationRow extends ConsumerWidget {
+  const _LocationRow({required this.item, required this.onMove});
+
+  final Todo item;
+  final VoidCallback onMove;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final all = ref.watch(allTodosProvider).asData?.value ?? const <Todo>[];
+    final path = computeTodoPath(item, all).map((p) => p.title);
+    final label = [item.category.label, ...path].join(' › ');
+
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppTokens.space16,
+          AppTokens.space8,
+          AppTokens.space8,
+          AppTokens.space8,
+        ),
+        child: Row(
+          children: [
+            Icon(
+              item.parentId == null
+                  ? Icons.folder_outlined
+                  : Icons.subdirectory_arrow_right_rounded,
+              size: 18,
+              color: item.category.color,
+            ),
+            const SizedBox(width: AppTokens.space12),
+            Expanded(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+            TextButton.icon(
+              key: const ValueKey('edit-move'),
+              onPressed: onMove,
+              icon: const Icon(Icons.drive_file_move_outline, size: 16),
+              label: const Text('이동'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

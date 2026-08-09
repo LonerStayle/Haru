@@ -2,7 +2,7 @@
 
 > ralph 자동 루프 + 사람 reader 모두 이 파일 하나로 컨텍스트 복원 가능하게 작성.
 > 매 iter 시작 시 CLAUDE.md / PROMPT.md / IMPLEMENTATION_PLAN.md 와 함께 이 파일도 읽는다.
-> 마지막 업데이트: **2026-07-18 (진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 + 완료율 링 진행중 세그먼트 + 카테고리 미완료/진행중/완료 3칩. drift v8→9 started_at)**
+> 마지막 업데이트: **2026-08-09 (상태별 보기 — 카테고리·상세 상단 5칩 필터: 전체/미완료/진행중/완료/메모. 스키마 변경 없음)**
 
 ---
 
@@ -33,6 +33,7 @@
 | **배치2 — 중첩 체크리스트 + 모바일 관리 + 정렬 + 전체보기 탭 + 카테고리 동기화 (`ca27c79`)** | ✅ 종료 | 402/402 PASS. **스키마 변경 없음**. 아래 "배치2 내역" 참조. 카테고리/그룹 cross-device 동기화 버그 수정 포함 |
 | **브랜딩 — 앱 이름 '하루' + 볼드 체크 아이콘 + macOS 로그인 자동실행 토글** | ✅ 종료 | 561/561 PASS. **스키마 변경 없음**. 아래 "브랜딩 내역" 참조. 대표님 직접 요청(아이콘·이름·자동실행) |
 | **진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 (2026-07-18)** | ✅ 종료 | 602/602 PASS. **DB 스키마 변경됨 (drift v8→9 `todos.started_at`) → Supabase schema.sql 재실행 필요.** 아래 "진행중 3-상태 내역" 참조. 대표님 직접 요청 |
+| **상태별 보기 — 카테고리·상세 5칩 필터 (2026-08-09)** | ✅ 종료 (워크트리 `상태별보기`, 미커밋) | 625/625 PASS. **스키마 변경 없음**. 아래 "상태별 보기 내역" 참조. 대표님 직접 요청 |
 
 ### 현 상태 (2026-06-06)
 
@@ -40,6 +41,18 @@
 - analyze clean / format clean / **flutter test 561/561 PASS** / **macOS 디버그 빌드 성공**
 - **데스크탑 ↔ 폰 Supabase 동기화 정상 작동 확인됨** (대표님 실기기에서 검증 완료)
 - 갤럭시 S24 (SM S921N) 에 release APK 설치 완료
+
+### 상태별 보기 내역 (카테고리·상세 5칩 필터) — 2026-08-09
+
+대표님 직접 요청: "카테고리마다 미완료별 / 할일별 / 메모별 / 완료별로 나뉘고, 버튼 누르면 맞는 목록만".
+
+- **필터 축**: `TodoStatusFilter` (`lib/src/ui/widgets/todo_status_filter.dart`) — `all / undone / inProgress / done / note`. 3-상태(미완료·진행중·완료)와 타입(메모)을 한 축으로 합쳤다. `undone` 은 note 를 타입으로 차단 (note 는 isDone 이 항상 false 라 그냥 두면 '미완료'로 샌다).
+- **UI**: 기존 카테고리 헤더의 통계 칩(미완료/진행중/완료/메모)을 **그대로 클릭 가능한 필터 버튼으로 승격** + '전체' 추가 → 5칩(`TodoStatusFilterBar`, 메모 0건이면 메모 칩 생략). 선택 칩은 진한 색 + 1.5px 테두리 + w700 (색 외 형태 신호 병행). 미선택도 같은 두께 투명 테두리라 선택 시 크기가 튀지 않는다.
+- **적용 화면**: 카테고리 화면(`category_view.dart`) + 상세/하위목록(`todo_detail_screen.dart` → `ConsumerStatefulWidget` 전환). **오늘·전체보기는 미적용**(대표님 확정 — 전체보기는 이미 체크리스트/메모 탭 보유).
+- **필터 렌더 규칙** (`TodoDrillListSliver.filter` / `filterPool`): 필터가 걸리면 트리를 접고 **스코프의 자손까지 평탄한 한 겹**으로 나열한다. 칩 카운트도 자손 기준이라 "완료 3" → 정확히 3건. root 만 거르면 자손 완료가 안 보여 카운트와 어긋나는 문제 회피. 평탄 뷰에선 재정렬·완료접기 행을 끄고, 각 타일에 **부모 경로(breadcrumb)** 를 얹는다(`TodoTile.breadcrumb`). 상세 화면은 `breadcrumbRootId` 로 화면 제목인 parent 를 경로에서 제외.
+- **상태 보존**: 선택 필터는 위젯 State (세션 비영속) — 화면 나가면 '전체'로 초기화. 저장 계층을 건드리지 않는다.
+- **검증**: analyze 0 / format 0 / **flutter test 625/625 PASS** (신규 23: 필터 enum·카운트·칩바 / 드릴리스트 필터 6 / 카테고리 5 / 상세 3).
+- ⚠️ 대표님 액션 없음 (스키마·빌드 설정 무변경). 워크트리 `상태별보기` 브랜치에 **미커밋 상태**로 있다.
 
 ### 진행중 3-상태 내역 (완료 체크 + 진행중 세모) — 2026-07-18
 
@@ -231,6 +244,8 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 - **Todo.category 는 todos 테이블에 id 만 저장** — label/color/icon 은 categories 테이블에 있으므로 **TodosDao 가 categories 와 join** 해서 복원. `Category.fromId` 는 builtin 만 알아 사용자 카테고리에 throw → join + placeholder fallback 으로 해소. SupabaseTodosApi._fromRow 도 tryFromId+placeholder (로컬 저장은 id 만 쓰므로 안전).
 - **AddTodoSheet 는 ConsumerStatefulWidget** — categoriesProvider watch. 카테고리 선택 비교는 **id 기준** (freezed 전체 동등은 DB 인스턴스↔const 차이로 어긋남).
 - **모바일 FAB 는 endFloat** — endContained 는 NavigationBar 에 도킹돼 destination 을 덮음. endFloat 가 바 위로 띄운다.
+- **할 일 이동 = parentId + 서브트리 category 동시 갱신** — 자식은 부모 카테고리를 상속하는 구조라, 본인만 옮기면 자손이 옛 카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다. `TodoActionsController.moveTo` / `update` 가 `MovePolicy.descendants` 로 자손 category 를 함께 맞춘다. 새 이동 경로를 만들 때 이 동기화를 빼먹지 말 것.
+- **이동 목적지는 자기 자신·자손 금지** — 자기 밑으로 들어간 노드는 어느 root 에서도 도달 불가라 화면에서 통째로 사라진다. `MovePolicy.canMove` 가 단일 출처(컨트롤러 + 시트 비활성 표시 양쪽이 같은 규칙을 쓴다).
 
 ---
 

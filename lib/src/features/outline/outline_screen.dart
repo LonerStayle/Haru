@@ -11,6 +11,7 @@ import '../../ui/widgets/in_progress_triangle.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'tree_providers.dart';
@@ -707,6 +708,7 @@ class _OutlineNode extends ConsumerWidget {
       initialTodo: node,
       onSubmit: (_) {},
       onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+      onRequestMove: (t) => showMoveTodoSheet(context, ref, item: t),
     );
 
     return InkWell(
@@ -1029,6 +1031,7 @@ class _NoteCard extends ConsumerWidget {
       initialTodo: note,
       onSubmit: (_) {},
       onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+      onRequestMove: (t) => showMoveTodoSheet(context, ref, item: t),
     );
 
     // §13 — TodoTile note 와 동일한 NoteVisual 토큰을 공유해 시각 언어 통일.

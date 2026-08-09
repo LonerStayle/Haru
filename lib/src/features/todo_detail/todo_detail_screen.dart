@@ -8,9 +8,11 @@ import '../../ui/widgets/in_progress_triangle.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/sort_mode_button.dart';
 import '../../ui/widgets/todo_drill_list.dart';
+import '../../ui/widgets/todo_status_filter.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_sheet.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../settings/sort_mode_controller.dart';
@@ -23,14 +25,26 @@ import '../todo_actions/todo_actions_controller.dart';
 /// AppBar 에 parent 제목 + 체크 토글 + ✎ 편집. 상단 헤더에 ＋하위추가.
 ///
 /// parent 가 watch 중 삭제되면(allTodos 에 사라지면) 자동으로 pop 한다 (dangling 방지).
-class TodoDetailScreen extends ConsumerWidget {
+///
+/// 상단에 카테고리 화면과 같은 **상태별 보기 칩**을 둔다 — 이 항목의 모든 자손 기준
+/// 카운트이고, 누르면 그 상태의 자손만 평탄하게 보여 준다 (세션 비영속).
+class TodoDetailScreen extends ConsumerStatefulWidget {
   const TodoDetailScreen({super.key, required this.parent});
 
   /// 진입 시점의 parent 스냅샷. 최신 상태는 [allTodosProvider] 에서 id 로 재조회.
   final Todo parent;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TodoDetailScreen> createState() => _TodoDetailScreenState();
+}
+
+class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
+  /// 상태별 보기 — 선택된 칩. 화면을 벗어나면 '전체'로 초기화된다.
+  TodoStatusFilter _filter = TodoStatusFilter.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final parent = widget.parent;
     final asyncAll = ref.watch(allTodosProvider);
     final asyncChildren = ref.watch(childrenOfProvider(parent.id));
     // 카테고리 화면의 정렬 버튼과 같은 전역 상태 — 하위 목록도 함께 일정순으로 보인다.
@@ -106,6 +120,8 @@ class TodoDetailScreen extends ConsumerWidget {
               initialTodo: live,
               onSubmit: (_) {},
               onUpdate: (updated) => actions.update(updated),
+              onRequestMove: (item) =>
+                  showMoveTodoSheet(context, ref, item: item),
             ),
           ),
         ],
@@ -131,6 +147,8 @@ class TodoDetailScreen extends ConsumerWidget {
                   : '아래 “하위 추가” 로 체크리스트를 만들어보세요.',
             );
           }
+          // 상태별 보기 — 이 항목의 모든 자손이 카운트·필터 대상 (직속 자식만이 아니라).
+          final descendants = _descendantsOf(live.id, allTodos);
           return CustomScrollView(
             slivers: [
               if (progress.taskCount > 0)
@@ -145,12 +163,32 @@ class TodoDetailScreen extends ConsumerWidget {
                   AppTokens.space16,
                   AppTokens.space16,
                   AppTokens.space16,
+                  0,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: TodoStatusFilterBar(
+                    counts: TodoStatusCounts.of(descendants),
+                    selected: _filter,
+                    onSelected: (f) => setState(() => _filter = f),
+                    accent: live.category.color,
+                  ),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTokens.space16,
+                  AppTokens.space16,
+                  AppTokens.space16,
                   // FAB 가 마지막 항목을 가리지 않도록 하단 여백 확보.
                   AppTokens.space48 + 40,
                 ),
                 sliver: TodoDrillListSliver(
                   items: children,
                   allTodos: allTodos,
+                  filter: _filter,
+                  filterPool: descendants,
+                  // 이 화면의 parent 는 이미 AppBar 제목 — 경로에서 제외.
+                  breadcrumbRootId: live.id,
                   onDrillDown: (folder) => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => TodoDetailScreen(parent: folder),
@@ -162,10 +200,13 @@ class TodoDetailScreen extends ConsumerWidget {
                     initialTodo: leaf,
                     onSubmit: (_) {},
                     onUpdate: (updated) => actions.update(updated),
+                    onRequestMove: (item) =>
+                        showMoveTodoSheet(context, ref, item: item),
                   ),
                   onToggle: actions.toggle,
                   onToggleInProgress: actions.toggleInProgress,
                   onAddChild: (p) => showAddChildSheet(context, ref, parent: p),
+                  onMove: (t) => showMoveTodoSheet(context, ref, item: t),
                   onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
                   onDelete: (t) async {
                     await actions.delete(t);
@@ -188,6 +229,32 @@ class TodoDetailScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// [rootId] 의 모든 자손을 트리 순서(깊이 우선, 형제는 입력 순서)로 평탄화한다.
+///
+/// 상태별 보기의 필터 대상 pool + 칩 카운트에 쓴다 — 직속 자식만 세면 "완료 5" 를
+/// 눌렀을 때 더 깊은 곳의 완료가 빠져 카운트와 목록이 어긋난다.
+/// dangling parentId / 사이클은 방문 집합으로 차단한다.
+List<Todo> _descendantsOf(String rootId, List<Todo> all) {
+  final byParent = <String, List<Todo>>{};
+  for (final t in all) {
+    final pid = t.parentId;
+    if (pid == null) continue;
+    (byParent[pid] ??= []).add(t);
+  }
+  final result = <Todo>[];
+  final visited = <String>{rootId};
+  void walk(String parentId) {
+    for (final child in byParent[parentId] ?? const <Todo>[]) {
+      if (!visited.add(child.id)) continue;
+      result.add(child);
+      walk(child.id);
+    }
+  }
+
+  walk(rootId);
+  return result;
 }
 
 /// §14 — 상세 화면 상단의 자손 task 진척 요약. `done/total 완료` + 진행 바.

@@ -11,6 +11,7 @@ import '../../ui/widgets/in_progress_triangle.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
+import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
 
@@ -55,6 +56,7 @@ class TimelineScreen extends ConsumerWidget {
         initialTodo: t,
         onSubmit: (_) {},
         onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+        onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
       );
     }
 
