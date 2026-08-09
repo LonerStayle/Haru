@@ -1,9 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../../core/date_format.dart';
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import 'in_progress_triangle.dart';
+
+/// 모바일 압축 모드의 trailing 버튼 터치 타겟.
+///
+/// 기본 [IconButton] 은 48dp 를 먹는데, 세모(진행중) + 체크(완료) + ⋮(더보기)
+/// 3개가 붙으면 좁은 폰 폭에서 제목이 쓸 폭이 거의 남지 않아 세로로 무한 wrap
+/// 되었다(대표님 리포트). 36dp 는 손가락으로 누르기엔 여전히 충분하면서
+/// 3버튼 합계를 144dp → 108dp 로 줄인다.
+/// (IconButton 의 `constraints` 만으로는 부족하다 — Material 3 는 그와 별개로
+/// 48dp tap target 패딩을 덧대므로 `tapTargetSize.shrinkWrap` 까지 필요하다.)
+const ButtonStyle _kCompactIconButtonStyle = ButtonStyle(
+  minimumSize: WidgetStatePropertyAll(Size(36, 36)),
+  fixedSize: WidgetStatePropertyAll(Size(36, 36)),
+  maximumSize: WidgetStatePropertyAll(Size(36, 36)),
+  padding: WidgetStatePropertyAll(EdgeInsets.zero),
+  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+);
 
 /// 한 줄짜리 Todo 카드 — 카테고리 컬러바 + 제목 + 시간 + 체크 아이콘.
 ///
@@ -85,6 +102,69 @@ class TodoTile extends StatelessWidget {
     final isNoteHeading = isNote && childCount > 0;
     // fast-tasks — 모드별 날짜 라벨. isAllDay 면 시간 미출력 (00:00 금지).
     final dateLabel = isNote ? null : TodoDateLabel.format(todo);
+    // 모바일 압축 레이아웃 — 폰 폭에서만 적용. 데스크탑은 폭이 넉넉하므로 현행 유지.
+    // (제목 2줄 clamp / trailing 36dp / 메타 칩 한 줄 Wrap)
+    final compact = AppPlatform.isMobile;
+
+    // 제목 아래 메타 조각들. 데스크탑은 지금처럼 세로로 쌓고, 모바일은 한 줄
+    // Wrap 으로 묶어 타일 높이를 줄인다. 정의는 여기 한 곳에서만 한다.
+    final inProgressChip = isInProgress
+        ? _MetaChip(
+            key: const ValueKey('todo-tile-inprogress-label'),
+            label: '진행중',
+            color: todo.category.color,
+            fontWeight: FontWeight.w700,
+          )
+        : null;
+    final seriesChip = hiddenSeriesCount > 0
+        ? _MetaChip(
+            key: const ValueKey('todo-tile-series-badge'),
+            label: '밀린 반복 외 $hiddenSeriesCount건',
+            color: todo.category.color,
+          )
+        : null;
+    // 기능 M — 드릴 가능 표시. "하위 N" + chevron_right. 탭하면 상세 화면 push.
+    // 데스크탑은 trailing 에, 모바일은 메타 줄에 놓는다(둘 중 하나만 렌더).
+    final drillBadge = drillChildCount != null
+        ? Row(
+            key: ValueKey('todo-tile-drill-${todo.id}'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTokens.space8,
+                  vertical: AppTokens.space2,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+                ),
+                child: Text(
+                  '하위 $drillChildCount',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurface.withValues(alpha: 0.7),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: scheme.onSurface.withValues(alpha: 0.5),
+              ),
+            ],
+          )
+        : null;
+    final dateText = dateLabel != null
+        ? Text(dateLabel, style: theme.textTheme.bodySmall)
+        : null;
+    // 모바일 한 줄 메타: 날짜 → 진행중 → 하위 → 반복묶음 순.
+    final compactMeta = <Widget>[
+      ?dateText,
+      ?inProgressChip,
+      ?drillBadge,
+      ?seriesChip,
+    ];
 
     return Card(
       // §13/§14 — note 는 카테고리색 틴트 배경(헤딩=진한 틴트 / leaf=연한 틴트),
@@ -98,8 +178,9 @@ class TodoTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppTokens.radiusM),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTokens.space16,
+          padding: EdgeInsets.symmetric(
+            // 모바일은 좌우 여백도 한 단계 좁혀 제목 폭을 8dp 더 확보.
+            horizontal: compact ? AppTokens.space12 : AppTokens.space16,
             vertical: AppTokens.space12,
           ),
           child: Row(
@@ -185,6 +266,11 @@ class TodoTile extends StatelessWidget {
                         Flexible(
                           child: Text(
                             todo.title,
+                            // 모바일은 최대 2줄 + 말줄임(대표님 확정). 좁은 폭에서
+                            // 제목이 한두 글자씩 끝없이 wrap 되던 문제를 끊는다.
+                            // 전체 제목은 타일 탭(편집 시트)에서 확인.
+                            maxLines: compact ? 2 : null,
+                            overflow: compact ? TextOverflow.ellipsis : null,
                             style: theme.textTheme.titleMedium?.copyWith(
                               // §14 — 헤딩 note 는 굵게(섹션 제목 강조).
                               fontWeight: isNoteHeading
@@ -224,29 +310,11 @@ class TodoTile extends StatelessWidget {
                     ),
                     // 진행중 3-상태 — 진행중이면 제목 아래 작은 "진행중" 라벨(문구 신호).
                     // 완료 취소선/흐림(isDone)과 상호배타 — 진행중은 취소선 없음.
-                    if (isInProgress)
+                    // (모바일은 아래 compact 메타 줄에서 한 줄로 묶어 표시한다.)
+                    if (!compact && inProgressChip != null)
                       Padding(
                         padding: const EdgeInsets.only(top: AppTokens.space4),
-                        child: Container(
-                          key: const ValueKey('todo-tile-inprogress-label'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTokens.space8,
-                            vertical: AppTokens.space2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: todo.category.color.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(
-                              AppTokens.radiusFull,
-                            ),
-                          ),
-                          child: Text(
-                            '진행중',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: todo.category.color,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+                        child: inProgressChip,
                       ),
                     // §13 — note 본문(description) 2줄 프리뷰. "정보=메모" 를 즉시 전달.
                     // task 는 미노출(위 힌트 아이콘 유지), 빈 description note 는 생략.
@@ -261,76 +329,38 @@ class TodoTile extends StatelessWidget {
                           style: theme.textTheme.bodySmall,
                         ),
                       ),
-                    if (dateLabel != null)
+                    if (!compact && dateText != null)
                       Padding(
                         padding: const EdgeInsets.only(top: AppTokens.space2),
-                        child: Text(
-                          dateLabel,
-                          style: theme.textTheme.bodySmall,
-                        ),
+                        child: dateText,
                       ),
                     // date-repeat (FR-4) — 같은 반복 미체크 누적 묶음 배지.
-                    if (hiddenSeriesCount > 0)
+                    if (!compact && seriesChip != null)
                       Padding(
                         padding: const EdgeInsets.only(top: AppTokens.space4),
-                        child: Container(
-                          key: const ValueKey('todo-tile-series-badge'),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: AppTokens.space8,
-                            vertical: AppTokens.space2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: todo.category.color.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(
-                              AppTokens.radiusFull,
-                            ),
-                          ),
-                          child: Text(
-                            '밀린 반복 외 $hiddenSeriesCount건',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: todo.category.color,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                        child: seriesChip,
+                      ),
+                    // 모바일 — 날짜/진행중/하위/반복 묶음을 한 줄 Wrap 으로 합쳐
+                    // 타일이 세로로 길어지는 것을 막는다.
+                    if (compact && compactMeta.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppTokens.space4),
+                        child: Wrap(
+                          spacing: AppTokens.space8,
+                          runSpacing: AppTokens.space4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: compactMeta,
                         ),
                       ),
                   ],
                 ),
               ),
               // 기능 M — 드릴 가능 표시. "자식 N" + chevron_right. 탭하면 상세 화면 push.
-              if (drillChildCount != null)
+              // (모바일은 제목 아래 메타 줄로 내려 trailing 폭을 비운다.)
+              if (!compact && drillBadge != null)
                 Padding(
-                  key: ValueKey('todo-tile-drill-${todo.id}'),
                   padding: const EdgeInsets.only(left: AppTokens.space4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppTokens.space8,
-                          vertical: AppTokens.space2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(
-                            AppTokens.radiusFull,
-                          ),
-                        ),
-                        child: Text(
-                          '하위 $drillChildCount',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: scheme.onSurface.withValues(alpha: 0.7),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 20,
-                        color: scheme.onSurface.withValues(alpha: 0.5),
-                      ),
-                    ],
-                  ),
+                  child: drillBadge,
                 ),
               // §14 — note 도 "섹션 헤딩" 으로 자식 보유 가능 → 타입 무관 ＋하위 추가.
               if (onAddChild != null)
@@ -340,7 +370,8 @@ class TodoTile extends StatelessWidget {
                   icon: const Icon(Icons.subdirectory_arrow_right_rounded),
                   iconSize: 18,
                   color: scheme.onSurface.withValues(alpha: 0.45),
-                  visualDensity: VisualDensity.compact,
+                  style: compact ? _kCompactIconButtonStyle : null,
+                  visualDensity: compact ? null : VisualDensity.compact,
                   tooltip: '하위 추가',
                 ),
               // 진행중 3-상태 — 완료 체크(원) 왼쪽에 진행중(세모) 버튼. onToggleInProgress
@@ -353,7 +384,8 @@ class TodoTile extends StatelessWidget {
                     active: isInProgress,
                     color: todo.category.color,
                   ),
-                  visualDensity: VisualDensity.compact,
+                  style: compact ? _kCompactIconButtonStyle : null,
+                  visualDensity: compact ? null : VisualDensity.compact,
                   tooltip: isInProgress ? '진행중 해제' : '진행중',
                 ),
               // §13 — note 는 trailing 을 비운다(체크 affordance 부재 명확화 — 메모는
@@ -372,6 +404,8 @@ class TodoTile extends StatelessWidget {
                         ? todo.category.color
                         : todo.category.color.withValues(alpha: 0.55),
                   ),
+                  iconSize: compact ? 22 : null,
+                  style: compact ? _kCompactIconButtonStyle : null,
                   tooltip: isDone ? '완료 취소' : '완료',
                 ),
               // 더보기(⋮) 메뉴 — 복사 / 편집 / 반복중지 / 삭제. 하나라도 있으면 노출.
@@ -388,6 +422,9 @@ class TodoTile extends StatelessWidget {
                   ),
                   tooltip: '더보기',
                   padding: EdgeInsets.zero,
+                  // PopupMenuButton 은 내부 IconButton 에 constraints 를 넘길 수
+                  // 없어 style 로 36dp 를 지정한다(기본 48dp tap target 해제).
+                  style: compact ? _kCompactIconButtonStyle : null,
                   onSelected: (action) {
                     switch (action) {
                       case _TileMenuAction.copy:
@@ -454,6 +491,42 @@ class TodoTile extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 제목 아래 메타 줄의 작은 pill 라벨 — "진행중" / "밀린 반복 외 N건".
+///
+/// 데스크탑은 세로로 쌓이고, 모바일은 날짜·하위 배지와 한 줄 Wrap 으로 묶인다.
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({
+    super.key,
+    required this.label,
+    required this.color,
+    this.fontWeight = FontWeight.w600,
+  });
+
+  final String label;
+  final Color color;
+  final FontWeight fontWeight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space8,
+        vertical: AppTokens.space2,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: color, fontWeight: fontWeight),
       ),
     );
   }
