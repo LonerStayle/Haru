@@ -9,6 +9,8 @@ import '../../domain/group.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart' show Todo, TodoDateMode, TodoType;
+import '../calendar/calendar_providers.dart';
+import '../calendar/calendar_settings.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../outline/tree_providers.dart';
@@ -199,6 +201,12 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     // prefill 시 description 이 비어있지 않으면 펼친 상태로 시작.
     _showDescription = (source?.description ?? '').isNotEmpty;
     _restoreDateMode(source);
+    // 캘린더 토글의 초기값 — 편집 모드는 이미 등록돼 있으면 켠 채로 열고,
+    // 새 항목은 마지막 선택([CalendarSettings.defaultAddToCalendar])을 이어간다.
+    // 시트를 열 때마다 매번 꺼져 있으면 등록하려던 걸 자주 놓친다.
+    _addToCalendar =
+        widget.initialTodo?.calendarEventId != null ||
+        ref.read(calendarSettingsProvider).defaultAddToCalendar;
   }
 
   /// edit 모드 — initialTodo 의 날짜·기간 필드로 모드/상태 복원.
@@ -355,14 +363,20 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       type: _type,
       description: descOrNull,
       parentId: detach ? null : initial.parentId,
-      // §14-C — task→note 전환 시 doneAt/calendar 제거. note 는 체크·일정 개념이
-      // 없어 옛 doneAt 이 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
+      // §14-C — task→note 전환 시 doneAt 제거. note 는 체크 개념이 없어 옛 doneAt 이
+      // 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
       // (dueAt/isAllDay 는 _serializeDate 가 note 일 때 이미 null/false 로 비운다.)
       doneAt: isNote ? null : initial.doneAt,
       // 진행중 표식도 note 전환 시 제거 (note 는 진행 개념 없음).
       startedAt: isNote ? null : initial.startedAt,
-      calendarEventId: isNote ? null : initial.calendarEventId,
+      // ⚠️ RISK(side-effect): note 전환 시에도 calendarEventId 를 **남긴다**.
+      // 여기서 미리 지우면 저장소 데코레이터가 링크를 못 봐서 삭제 작업을 만들지
+      // 못하고, 구글 캘린더에 고아 이벤트가 남는다 (기존 결함이 정확히 그것이었다).
+      // 링크 해제는 이벤트를 실제로 지운 뒤 동기화 서비스가 한다.
+      calendarEventId: initial.calendarEventId,
     );
+    // 이번 저장의 등록 의사를 데코레이터에 알린다 — 토글을 켜면 등록, 끄면 등록 안 함.
+    ref.read(calendarIntentProvider)(_addToCalendar);
     widget.onUpdate?.call(updated);
   }
 
@@ -963,8 +977,17 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                                 ),
                                 child: _CalendarToggle(
                                   value: _addToCalendar,
-                                  onChanged: (v) =>
-                                      setState(() => _addToCalendar = v),
+                                  onChanged: (v) {
+                                    setState(() => _addToCalendar = v);
+                                    // 다음에 시트를 열 때 이 선택을 이어간다.
+                                    ref
+                                        .read(calendarSettingsProvider.notifier)
+                                        .update(
+                                          (s) => s.copyWith(
+                                            defaultAddToCalendar: v,
+                                          ),
+                                        );
+                                  },
                                 ),
                               ),
                       ),

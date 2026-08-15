@@ -190,6 +190,13 @@ class CalendarSyncService {
         final eventId = op.eventId;
         if (eventId == null) return false;
         await gateway.deleteEvent(op.calendarId, eventId);
+        // 할 일이 아직 살아 있다면(날짜 제거·메모 전환 등) 끊어진 링크를 정리한다.
+        // 남겨두면 나중에 다시 날짜를 넣었을 때 이미 없는 이벤트를 갱신하려 든다.
+        if (todo != null && todo.calendarEventId == eventId) {
+          await repo.upsert(
+            todo.copyWith(calendarEventId: null, calendarId: null),
+          );
+        }
         return true;
 
       case 'create':

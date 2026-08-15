@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/calendar_aware_todo_repository.dart';
 import '../../data/local/local_todo_repository.dart';
 import '../../data/providers.dart';
 import '../../data/remote/supabase_todos_api.dart';
@@ -72,6 +73,17 @@ final calendarSyncSchedulerProvider = Provider<CalendarSyncScheduler?>((ref) {
   );
   ref.onDispose(scheduler.dispose);
   return scheduler;
+});
+
+/// "이번 저장은 캘린더에 등록할지" 를 데코레이터에 알린다.
+///
+/// 편집 시트의 토글이 저장 직전에 호출한다. 설정 기본값만으로는 "이 항목만
+/// 올리지 않기" 를 표현할 수 없어서 필요하다. 연동이 꺼져 있으면 아무 일도 하지
+/// 않는다 — 호출자가 연동 여부를 신경 쓰지 않아도 되게.
+final calendarIntentProvider = Provider<void Function(bool)>((ref) {
+  final repo = ref.read(todoRepositoryProvider);
+  if (repo is CalendarAwareTodoRepository) return repo.intendCalendar;
+  return (_) {};
 });
 
 /// 설정 화면의 "지금 동기화" 버튼이 쓰는 실행부.

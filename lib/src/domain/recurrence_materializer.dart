@@ -120,7 +120,10 @@ class RecurrenceMaterializer {
       doneAt: null,
       createdAt: stamp,
       updatedAt: stamp,
-      calendarEventId: null, // 캘린더는 마스터 RRULE 이 소유.
+      // 캘린더는 마스터 RRULE 이 소유한다. 인스턴스에 링크가 남으면 회차마다
+      // 이벤트를 갱신·생성하려 들어 캘린더가 중복으로 뒤덮인다.
+      calendarEventId: null,
+      calendarId: null,
       parentId: master.parentId,
       type: master.type,
       sortOrder: master.sortOrder,

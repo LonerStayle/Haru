@@ -125,28 +125,12 @@ class AddTodoController {
       }
     }
 
-    String? warning;
-    if (s.addToCalendar && s.dueAt != null) {
-      if (calendar == null) {
-        warning = 'Google Calendar 연동이 설정되지 않아 등록을 건너뛰었어요.';
-      } else {
-        try {
-          final eventId = await calendar!.createEventForTodo(
-            todo,
-            isAllDay: s.isAllDay,
-          );
-          if (eventId != null) {
-            todo = todo.withCalendarEvent(eventId, now: now);
-            await repo.upsert(todo);
-          } else {
-            warning = 'Google Calendar 권한이 거부됐어요. 등록을 건너뛰었어요.';
-          }
-        } catch (e) {
-          debugPrint('[solo_todo] Calendar 이벤트 생성 실패: $e');
-          warning = 'Google Calendar 등록에 실패했어요. (권한 또는 네트워크 확인)';
-        }
-      }
-    }
+    // 캘린더 등록은 저장소 데코레이터가 큐에 넣어 처리한다 (위 upsert 시점에 이미
+    // 판정됐다). 여기서 직접 이벤트를 만들면 데코레이터와 **둘 다** 만들어 이벤트가
+    // 두 개 생긴다. 연동이 아예 설정되지 않은 경우만 사용자에게 알린다.
+    final warning = (s.addToCalendar && s.dueAt != null && calendar == null)
+        ? 'Google Calendar 연동이 설정되지 않아 등록을 건너뛰었어요.'
+        : null;
     return AddTodoResult(todo: todo, calendarWarning: warning);
   }
 
@@ -184,21 +168,8 @@ class AddTodoController {
         // 첫 줄 = min - N (맨 위), 마지막 줄 = min - 1.
         sortOrder: min - (n - i),
       );
+      // 캘린더 등록은 저장소 데코레이터가 처리한다 — 여기서 또 만들면 이벤트가 둘이 된다.
       await repo.upsert(todo);
-      if (s.addToCalendar && s.dueAt != null && calendar != null) {
-        try {
-          final eventId = await calendar!.createEventForTodo(
-            todo,
-            isAllDay: s.isAllDay,
-          );
-          if (eventId != null) {
-            todo = todo.withCalendarEvent(eventId, now: now);
-            await repo.upsert(todo);
-          }
-        } catch (e) {
-          debugPrint('[solo_todo] Calendar 이벤트 생성 실패 (bulk): $e');
-        }
-      }
     }
   }
 }
