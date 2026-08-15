@@ -758,6 +758,14 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final initial = widget.initialTodo;
     final callback = widget.onRequestMove;
     if (initial == null || callback == null) return;
+    // 닫힘 자동 저장을 끈다 — 이 시트가 들고 있는 스냅샷은 **이동 전 위치**(옛
+    // parentId/category)라, 그 저장이 이동보다 늦게 도착하면 방금 옮긴 위치를
+    // 통째로 되돌린다. 두 저장이 같은 row 를 두고 경쟁하는 구조 자체를 없앤다.
+    // (실사용 증상: "⋮ 이동은 되는데 편집 시트의 이동 버튼으로는 제자리로 돌아온다")
+    //
+    // 저장을 끄는 것이 이 버튼의 원래 계약과도 맞는다 — 위 doc 처럼 이동은 입력값
+    // 저장과 무관한 동작이다.
+    _submitted = true;
     Navigator.of(context).maybePop();
     callback(initial);
   }

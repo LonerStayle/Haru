@@ -196,6 +196,81 @@ void main() {
     await disposeTree(tester);
   });
 
+  testWidgets('편집 시트의 이동 버튼은 닫힘 자동 저장을 발화시키지 않는다', (tester) async {
+    // 편집 시트는 "닫힘 = 저장" 이라, 이동 버튼이 닫으면서 저장을 함께 돌리면
+    // **이동 전 위치를 담은 저장**과 이동이 같은 row 를 두고 경쟁한다. 저장이
+    // 늦게 도착하면 방금 옮긴 parentId 가 통째로 되돌아간다 (실사용 증상).
+    // 경쟁 자체가 없도록 이 경로에서는 저장을 돌리지 않는 것이 계약이다.
+    await repo.upsert(node('a'));
+    await repo.upsert(node('b'));
+
+    var updates = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          activeCategoriesProvider.overrideWithValue(
+            const AsyncValue.data([Category.work, Category.daily]),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.mobileLight(),
+          home: Consumer(
+            builder: (context, ref, _) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  onPressed: () => AddTodoSheet.show(
+                    context,
+                    initialCategory: Category.work,
+                    initialTodo: node('b'),
+                    onSubmit: (_) {},
+                    onUpdate: (_) => updates++,
+                    onRequestMove: (t) =>
+                        showMoveTodoSheet(context, ref, item: t),
+                  ),
+                  child: const Text('편집'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('편집'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('edit-move')));
+    await tester.pumpAndSettle();
+
+    expect(updates, 0, reason: '이동 경로에서는 편집 저장이 돌면 안 된다');
+    expect(find.byKey(const ValueKey('move-confirm')), findsOneWidget);
+
+    await disposeTree(tester);
+  });
+
+  testWidgets('편집 시트 → 이동 → 다른 항목의 하위 (대표님 재현 경로)', (tester) async {
+    // "⋮ 이동은 되는데 편집 시트의 이동 버튼으로 하면 안 된다" 리포트.
+    // 편집 시트는 닫힘 = 자동 저장이라, 이동 버튼이 닫으면서 도는 저장이 옛
+    // parentId 를 들고 있다 — 그 저장이 이동을 덮는지 확인한다.
+    await repo.upsert(node('a'));
+    await repo.upsert(node('b'));
+
+    await openViaEditSheet(tester, node('b'));
+
+    await tester.tap(find.byKey(const ValueKey('move-target-a')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(
+      (await repo.getById('b'))!.parentId,
+      'a',
+      reason: '편집 시트 닫힘 저장이 이동 결과를 되돌리면 안 된다',
+    );
+
+    await disposeTree(tester);
+  });
+
   testWidgets('최상위 → 하위 — 다른 최상위 항목 밑으로 들어간다', (tester) async {
     // "최상위에서 하위로는 못 옮긴다" 는 제보 확인용. 시트 목록에서 다른 root 를
     // 골라 확정하는 경로가 DB 까지 닿는지 본다 (반대 방향만 검증돼 있었다).
