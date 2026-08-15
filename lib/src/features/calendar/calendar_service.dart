@@ -5,80 +5,16 @@ import 'package:googleapis/calendar/v3.dart' as gcal;
 import '../../domain/todo.dart';
 import 'google_auth_service.dart';
 
-/// Google Calendar API wrapper. Todo ↔ Event 매핑 단일 출처.
+/// Todo → Google Calendar Event 매핑의 **단일 출처**.
 ///
-/// 인증은 [CalendarAuth] 가 플랫폼별로(macOS=데스크톱 OAuth, Android=google_sign_in)
-/// 책임지고, 이 서비스는 인증된 [http.Client] 만 받아 Calendar API 를 호출한다.
+/// 예전에는 이 클래스가 API 호출까지 직접 했지만, 그러면 실제 구글 인증 없이는
+/// 한 줄도 테스트할 수 없었다. 호출은 `CalendarGateway` 로 옮기고 여기에는 매핑만
+/// 남겼다 — 동기화 서비스·큐·되가져오기가 전부 이 매핑을 공유한다.
 class CalendarService {
-  CalendarService(this._auth);
-
-  final CalendarAuth _auth;
+  const CalendarService();
 
   /// 기본 대상 캘린더. 사용자가 설정에서 고르기 전(또는 레거시 항목)의 값이다.
   static const defaultCalendarId = 'primary';
-
-  /// Todo 의 dueAt 기반 이벤트 생성. dueAt 이 null 이면 null 반환.
-  /// 사용자가 OAuth 인증을 거부/실패하면 null (호출자가 graceful 처리).
-  Future<String?> createEventForTodo(
-    Todo todo, {
-    bool isAllDay = false,
-    String calendarId = defaultCalendarId,
-  }) async {
-    if (todo.dueAt == null) return null;
-    final client = await _auth.authedClient();
-    if (client == null) return null;
-    try {
-      final api = gcal.CalendarApi(client);
-      final created = await api.events.insert(
-        _toEvent(todo, isAllDay: isAllDay),
-        calendarId,
-      );
-      return created.id;
-    } finally {
-      client.close();
-    }
-  }
-
-  /// 기존 캘린더 이벤트를 todo 의 최신 상태로 갱신. dueAt 이 null 이 되면 이벤트 삭제.
-  Future<void> updateEventForTodo(
-    Todo todo,
-    String eventId, {
-    String calendarId = defaultCalendarId,
-  }) async {
-    if (todo.dueAt == null) {
-      await deleteEvent(eventId, calendarId: calendarId);
-      return;
-    }
-    final client = await _auth.authedClient();
-    if (client == null) return;
-    try {
-      final api = gcal.CalendarApi(client);
-      await api.events.update(_toEvent(todo), calendarId, eventId);
-    } finally {
-      client.close();
-    }
-  }
-
-  /// 캘린더 이벤트 삭제. 이미 삭제된 (404/410) 경우 silent — 멱등.
-  Future<void> deleteEvent(
-    String eventId, {
-    String calendarId = defaultCalendarId,
-  }) async {
-    final client = await _auth.authedClient();
-    if (client == null) return;
-    try {
-      final api = gcal.CalendarApi(client);
-      await api.events.delete(calendarId, eventId);
-    } on gcal.DetailedApiRequestError catch (e) {
-      if (e.status == 404 || e.status == 410) return; // 이미 없음 — 멱등
-      rethrow;
-    } finally {
-      client.close();
-    }
-  }
-
-  gcal.Event _toEvent(Todo todo, {bool isAllDay = false}) =>
-      buildEvent(todo, isAllDayHint: isAllDay);
 
   /// fast-tasks — Todo 의 날짜·기간 모델을 Google Calendar Event 로 매핑. 단일 출처.
   ///
@@ -165,44 +101,9 @@ class CalendarService {
   }
 }
 
-/// CalendarService 인스턴스. CalendarAuth 미설정 시 null.
+/// 캘린더 연동이 **설정되어 있는가**의 신호. OAuth 키가 없으면 null.
+/// (호출 경로는 `CalendarGateway` 가 담당하므로 이 값은 게이트 용도로만 쓴다.)
 final calendarServiceProvider = Provider<CalendarService?>((ref) {
   final auth = ref.watch(calendarAuthProvider);
-  return auth == null ? null : CalendarService(auth);
+  return auth == null ? null : const CalendarService();
 });
-
-/// AddTodoController 가 호출하는 헬퍼. 실패는 fatal X — todo 자체는 저장되어야 한다.
-Future<String?> tryCreateCalendarEvent(Ref ref, Todo todo) async {
-  final svc = ref.read(calendarServiceProvider);
-  if (svc == null) return null;
-  try {
-    return await svc.createEventForTodo(todo);
-  } catch (e) {
-    debugPrint('[solo_todo] Calendar 이벤트 생성 실패: $e');
-    return null;
-  }
-}
-
-/// Todo 변경 시 (편집 흐름) 호출. eventId 가 있는 todo 만 처리.
-Future<void> tryUpdateCalendarEvent(Ref ref, Todo todo) async {
-  final eventId = todo.calendarEventId;
-  if (eventId == null) return;
-  final svc = ref.read(calendarServiceProvider);
-  if (svc == null) return;
-  try {
-    await svc.updateEventForTodo(todo, eventId);
-  } catch (e) {
-    debugPrint('[solo_todo] Calendar 이벤트 갱신 실패: $e');
-  }
-}
-
-Future<void> tryDeleteCalendarEvent(Ref ref, String? eventId) async {
-  if (eventId == null) return;
-  final svc = ref.read(calendarServiceProvider);
-  if (svc == null) return;
-  try {
-    await svc.deleteEvent(eventId);
-  } catch (e) {
-    debugPrint('[solo_todo] Calendar 이벤트 삭제 실패: $e');
-  }
-}

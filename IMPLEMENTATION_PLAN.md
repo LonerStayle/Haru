@@ -59,9 +59,17 @@
 
 ### 8. Google Calendar
 - [x] google_sign_in OAuth 셋업 (desktop + Android 클라이언트 id 분리)
-- [x] `CalendarService.createEventForTodo` (Todo → Event 매핑)
-- [x] `CalendarService.updateEventForTodo` / `deleteEvent` (Todo 변경/삭제 시 캘린더 동기)
+- [x] `CalendarService.buildEvent` (Todo → Event 매핑 단일 출처)
+- [x] Todo 변경/삭제 시 캘린더 동기 — 저장소 데코레이터 + 큐로 전 경로 커버
 - [x] AddTodoSheet 의 "Calendar 등록" 토글 UX — 토글 1번이면 자동 등록 (UX 최우선)
+- [x] **양방향 동기화** (2026-08-15) — 캘린더에서 고친 내용 되가져오기, 새 일정 유입,
+      출처별 삭제 규칙, echo 차단, 증분 수신, 자동 동기화, 설정 화면
+      → `docs/features/2026-08-15-google-calendar-sync/`
+
+> 정정 기록: 위 3번째 항목은 오랫동안 `[x]` 로 표시돼 있었지만 실제로는
+> `updateEventForTodo` / `deleteEvent` 가 **어디서도 호출되지 않는 dead code** 였다.
+> 편집 시트에서 날짜를 바꿔도 캘린더는 옛날 그대로였고, 할 일을 지워도 이벤트가
+> 남았다. 2026-08-15 양방향 동기화 작업에서 실제로 배선되면서 해소됐다.
 
 ### 9. 품질 게이트 (PROJECT_DONE 조건)
 - [x] 콜드 스타트 < 1s 측정 (`lib/src/core/perf.dart` 의 stopwatch 로그)
