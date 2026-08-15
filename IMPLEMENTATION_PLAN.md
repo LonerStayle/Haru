@@ -266,6 +266,40 @@ v1.0 의 "5종 고정" 폐기 — 카테고리를 DB row 로 저장해 사용자
 - [x] 전환 시 자식 보존 검증 — 타입 전환은 id 불변 update 라 자식 parentId 가 그대로 부모를 가리켜 **깨지는 조합 없음**(dialog 가드 불필요). DB 레벨 통합 test 2건(task→note: 자식 parentId + 서브트리 진척 [1/2] 보존 / note→task 왕복 정합). 475/475 PASS.
 - [x] §14 종료 자가평가 — 디자인 9.6 / 편의성 9.7 (둘 다 ≥9). 비전 §3 "메모장 다층 구조" 충족 확인. 파일 끝에 "자가평가 — §14" 섹션 추가. 미달 없음 → 보강 불필요. §14 기획 10 task 전부 완료, 475/475 PASS.
 
+### 15. 앱 내 캘린더 화면 (워크트리 `앱내캘린더`)
+
+> 요구사항: `docs/features/2026-08-15-앱내캘린더/앱내캘린더-requirements.md`
+> 기술설계: `docs/features/2026-08-15-앱내캘린더/앱내캘린더-tech-design.md`
+> 기준선: `main @ 4ec4ac7`, 715 tests PASS
+
+**15-A. 기반 정지작업 (순수 함수 · 단일 파일 수정)**
+- [ ] T1 destination 교체 — `DestinationKind.timeline` → `calendar`, 라벨 '캘린더', `isTimeline`→`isCalendar`. `app_shell.dart` 3지점(`_MainArea`/`_Sidebar` index/모바일 nav 라벨) 치환. **슬롯 수·단축키 digit 불변.** 임시로 `TimelineScreen` 을 그대로 렌더. 기존 테스트 갱신
+- [ ] T2 `KoDate.monthTitle`(`"2026년 8월"`) / `KoDate.dayWithWeekday`(`"8월 15일 (토)"`) 추가 + 단위 테스트
+- [ ] T3 `CalendarEntry` sealed 계층 + `calendar_layout.dart` 순수 함수 (`monthGridDays` 42칸·일요일 시작, `bucketByDate`, `layoutWeekBars` 레인 배치) + 단위 테스트 (TDD)
+- [ ] T4 `calendar_drag.dart` — `applyDateDrop` (시각·`isAllDay` 보존, 기간 평행이동) 순수 함수 + 단위 테스트
+- [ ] T5 `TodoActionsController.setDueAt` 신설 — **sortOrder 보존** (`update()` 의 min-1 bump 부작용 차단) + 테스트
+- [ ] T6 `RecurrenceMaterializer.materializeOne` 신설 — 미래 1회차만 실체화, `instanceId` 결정성 유지 + 테스트
+- [ ] T7 `AddTodoSheet.show()` 에 `initialDueAt` / `initialAllDay` 전달 파라미터 추가 (기존 기본값 유지 → 무회귀) + 테스트
+
+**15-B. 데이터 조립**
+- [ ] T8 `calendar_providers.dart` — 로컬 엔트리(`!isSeriesMaster && dueAt != null && !archived`), 미래 반복 고스트 합성, 무날짜 목록. 전부 `Provider<AsyncValue<T>>` + `.whenData()` 관용구 + 테스트
+
+**15-C. 화면**
+- [ ] T9 월 그리드 — `calendar_day_cell` / `calendar_week_row` / `calendar_month_grid`. 오늘·선택 강조, 데스크탑 칩 3개+`외 N건` / 모바일 점 4개, 기간 막대 레인 + 위젯 테스트
+- [ ] T10 선택일 패널 — 목록·체크·편집 시트·`＋ 이 날짜로 추가` + 위젯 테스트
+- [ ] T11 화면 셸 `calendar_screen` — 세그먼트 `[달력]/[목록]`, 데스크탑 좌우 / 모바일 상하, 월 이동(스와이프·`←`/`→`·`‹ ›`·`T`). `_MainArea` 실제 연결 + 위젯 테스트
+- [ ] T12 "날짜 없음" 서랍 — 접기(기본 접힘, 세션 비영속) + 위젯 테스트
+
+**15-D. 인터랙션**
+- [ ] T13 드래그 앤 드롭 — 데스크탑 `Draggable<Todo>` / 모바일 `LongPressDraggable<Todo>` → 셀 `DragTarget<Todo>`. 고스트는 드롭 시 `materializeOne` 선행 + 위젯 테스트
+
+**15-E. 구글 이벤트 (읽기 전용)**
+- [ ] T14 `google_events_service.dart` **신규 파일만** — `events.list(singleEvents: true)`, client `close()` 보장, 실패 시 빈 리스트. `googleEventsProvider` family(현재 달 ±1) + 테스트. **기존 `calendar_service.dart` / `google_auth_service.dart` 수정 금지**
+- [ ] T15 구글 이벤트 렌더링 + 표시 on/off 토글 (편집 불가, 아웃라인 스타일로 로컬과 구분) + 위젯 테스트
+
+**15-F. 마감**
+- [ ] T16 모바일 압축(셀 최소 높이 48dp, 달력 접기) · 성능 점검 · §15 종료 자가평가(디자인·편의성 각 10점 만점)
+
 ---
 
 ## 점수 측정 프로토콜
