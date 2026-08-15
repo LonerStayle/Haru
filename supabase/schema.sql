@@ -26,6 +26,8 @@ create table if not exists solo_todo.todos (
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
   calendar_event_id text,
+  calendar_id       text,
+  calendar_origin   text not null default 'app',
   -- v1.1 — 트리 / 메모 모델 컬럼
   parent_id         text,                                       -- 부모 todo id, null = root
   type              text not null default 'task',               -- 'task' | 'note'
@@ -201,6 +203,13 @@ alter table solo_todo.groups     add column if not exists archived boolean not n
 -- 21) todos.started_at 컬럼 (진행중 3-상태 — v1.7)
 -- 값 있고 done_at 이 null 이면 '진행중'. 완료 시 앱이 null 로 비운다. 기본 null(미완료).
 alter table solo_todo.todos add column if not exists started_at timestamptz;
+
+-- 22) todos.calendar_id / calendar_origin 컬럼 (Google Calendar 양방향 동기화)
+-- calendar_id: 이벤트가 들어있는 캘린더 id ('primary' 하드코딩 제거).
+-- calendar_origin: 'app' | 'gcal' — 구글 캘린더에서 이벤트를 지웠을 때 todo 를
+-- 지울지 말지를 가르는 근거. 기본 'app' 이라 기존 row 는 앱 기원으로 간주.
+alter table solo_todo.todos add column if not exists calendar_id     text;
+alter table solo_todo.todos add column if not exists calendar_origin text not null default 'app';
 
 -- ─────────────────────────────────────────────────────────────────────
 -- v1.1 → v1.2 마이그레이션 (기존 환경 — schema.sql 이미 실행된 프로젝트)
