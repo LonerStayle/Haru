@@ -29,24 +29,52 @@ Future<void> showMoveTodoSheet(
   if (destination == null || !context.mounted) return;
 
   final all = ref.read(allTodosProvider).asData?.value ?? const <Todo>[];
+  // 시트를 여는 사이 그 row 가 바뀌었을 수 있다 (편집 시트의 '위치 변경' 은 닫히면서
+  // 자동 저장을 돌린다). 화면이 들고 있던 스냅샷으로 옮기면 그 저장이 통째로 되돌아가고,
+  // 판정(제자리/사이클)도 옛 값 기준이 되어 어긋난다 — 항상 최신 row 로 옮긴다.
+  final live = all.firstWhere((t) => t.id == item.id, orElse: () => item);
   final actions = ref.read(todoActionsProvider);
   // 되돌리기 스냅샷 — 이동으로 바뀌는 row 는 본인 + (카테고리가 달라지면) 자손 전부.
-  final snapshot = <Todo>[item, ...MovePolicy.descendants(item.id, all)];
+  final snapshot = <Todo>[live, ...MovePolicy.descendants(live.id, all)];
 
   final moved = await actions.moveTo(
-    item,
+    live,
     newParent: destination.parent,
     targetCategory: destination.category,
     all: all,
   );
-  if (!context.mounted || !moved) return;
+  if (!context.mounted) return;
 
   final parent = destination.parent;
+  // 거부됐는데 아무 말도 안 하면 "눌렀는데 그대로" 로만 보인다 — 왜 안 옮겨졌는지 알린다.
+  if (!moved) {
+    final blocked = !MovePolicy.canMove(
+      item: live,
+      newParentId: parent?.id,
+      all: all,
+    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            blocked
+                ? '자기 자신이나 그 하위로는 옮길 수 없어요'
+                : (parent == null
+                      ? '이미 ${destination.category.label} 최상위에 있어요'
+                      : '이미 "${parent.title}" 하위에 있어요'),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    return;
+  }
+
   showUndoSnackbar(
     context,
     message: parent == null
-        ? '"${item.title}" → ${destination.category.label} 최상위로 이동'
-        : '"${item.title}" → "${parent.title}" 하위로 이동',
+        ? '"${live.title}" → ${destination.category.label} 최상위로 이동'
+        : '"${live.title}" → "${parent.title}" 하위로 이동',
     onUndo: () => actions.restoreAll(snapshot),
   );
 }
@@ -90,10 +118,24 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
   @override
   void initState() {
     super.initState();
-    _category = widget.item.category;
+    // 호출자가 넘긴 스냅샷은 화면이 들고 있던 옛 값일 수 있다 (편집 시트의 '위치 변경'
+    // 은 닫히면서 자동 저장을 돌린다). 초기 선택·판정 모두 최신 row 기준이어야
+    // 확정 버튼은 켜져 있는데 실제로는 제자리라 아무 일도 안 일어나는 어긋남이 없다.
+    final live = _live();
+    _category = live.category;
     // 처음 열었을 때는 현재 부모가 선택된 상태 — "어디에 있는지" 부터 보여준다.
-    _parentId = widget.item.parentId;
+    _parentId = live.parentId;
     _searchCtrl = TextEditingController();
+  }
+
+  /// 이동 대상의 최신 상태. 아직 목록에 없으면 넘겨받은 스냅샷 그대로.
+  Todo _live([List<Todo>? all]) {
+    final list =
+        all ?? ref.read(allTodosProvider).asData?.value ?? const <Todo>[];
+    return list.firstWhere(
+      (t) => t.id == widget.item.id,
+      orElse: () => widget.item,
+    );
   }
 
   @override
@@ -117,6 +159,24 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
     widget.item.id,
     ...MovePolicy.descendants(widget.item.id, all).map((t) => t.id),
   };
+
+  /// 지금 선택이 실제 이동인가 (아무 변화 없으면 확정 버튼 비활성).
+  ///
+  /// 판정 기준은 **최신 row** — 호출자 스냅샷으로 재면 "버튼은 켜졌는데 눌러도
+  /// 제자리라 아무 일도 안 일어나는" 상태가 된다.
+  bool _canConfirmWith(List<Todo> all, Todo live) {
+    final dest = _destination(all);
+    final parentId = dest.parent?.id;
+    final categoryId = dest.parent?.category.id ?? dest.category.id;
+    if (!MovePolicy.canMove(item: live, newParentId: parentId, all: all)) {
+      return false;
+    }
+    return !MovePolicy.isNoop(
+      item: live,
+      newParentId: parentId,
+      newCategoryId: categoryId,
+    );
+  }
 
   /// 선택 카테고리의 트리를 DFS 로 평탄화한 행 목록.
   List<_TargetRow> _treeRows(List<Todo> all) {
@@ -198,25 +258,6 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
         : MoveDestination(parent: parent, category: parent.category);
   }
 
-  /// 지금 선택이 실제 이동인가 (아무 변화 없으면 확정 버튼 비활성).
-  bool _canConfirm(List<Todo> all) {
-    final dest = _destination(all);
-    final parentId = dest.parent?.id;
-    final categoryId = dest.parent?.category.id ?? dest.category.id;
-    if (!MovePolicy.canMove(
-      item: widget.item,
-      newParentId: parentId,
-      all: all,
-    )) {
-      return false;
-    }
-    return !MovePolicy.isNoop(
-      item: widget.item,
-      newParentId: parentId,
-      newCategoryId: categoryId,
-    );
-  }
-
   void _selectCategory(Category c) {
     setState(() {
       _category = c;
@@ -236,7 +277,8 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
         Category.builtinSeeds;
     final searching = _query.trim().isNotEmpty;
     final rows = searching ? _searchRows(all) : _treeRows(all);
-    final canConfirm = _canConfirm(all);
+    final live = _live(all);
+    final canConfirm = _canConfirmWith(all, live);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -292,7 +334,7 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
                             ),
                           ),
                           const SizedBox(height: AppTokens.space4),
-                          _MovingItemLine(item: widget.item),
+                          _MovingItemLine(item: live),
                           const SizedBox(height: AppTokens.space12),
                           TextField(
                             key: const ValueKey('move-search'),

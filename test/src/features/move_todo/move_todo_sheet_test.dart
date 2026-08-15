@@ -41,12 +41,19 @@ void main() {
   final all = [nexus, canvas, render, refactor, grocery];
 
   /// 시트를 modal 로 띄우고 결과를 담을 홀더를 돌려준다.
-  Future<List<MoveDestination?>> open(WidgetTester tester, Todo item) async {
+  ///
+  /// [todos] 를 주면 목록(=최신 상태)과 [item] (=호출자가 들고 있던 스냅샷) 을 일부러
+  /// 어긋나게 둘 수 있다 — stale 판정 회귀 검증용.
+  Future<List<MoveDestination?>> open(
+    WidgetTester tester,
+    Todo item, {
+    List<Todo>? todos,
+  }) async {
     final result = <MoveDestination?>[];
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          allTodosProvider.overrideWith((_) => Stream.value(all)),
+          allTodosProvider.overrideWith((_) => Stream.value(todos ?? all)),
           activeCategoriesProvider.overrideWithValue(
             const AsyncValue.data([Category.work, Category.daily]),
           ),
@@ -157,6 +164,26 @@ void main() {
       find.byKey(const ValueKey('move-confirm')),
     );
     expect(confirm.onPressed, isNull);
+  });
+
+  testWidgets('호출자가 옛 스냅샷을 넘겨도 최신 위치로 판정한다', (tester) async {
+    // 캔버스는 이미 최상위로 옮겨졌는데(목록=최신), 화면이 넘긴 item 은 아직 넥서스 하위.
+    // 옛 스냅샷으로 재면 "최상위로" 가 이동으로 보여 확정이 켜지지만, 실제로는 제자리라
+    // 눌러도 아무 일도 안 일어난다 — 확정은 최신 기준으로 꺼져 있어야 한다.
+    final movedCanvas = make(id: 'canvas', title: '캔버스');
+    await open(
+      tester,
+      canvas,
+      todos: [nexus, movedCanvas, render, refactor, grocery],
+    );
+
+    await tester.tap(find.byKey(const ValueKey('move-target-root')));
+    await tester.pumpAndSettle();
+
+    final confirm = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('move-confirm')),
+    );
+    expect(confirm.onPressed, isNull, reason: '최신 기준 이미 회사 최상위 → 제자리');
   });
 
   testWidgets('검색은 카테고리를 넘어 찾고 경로를 함께 보여 준다', (tester) async {
