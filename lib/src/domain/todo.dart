@@ -27,6 +27,7 @@ enum TodoType {
 ///   세팅되지 않는다** — 미완료(둘 다 null) / 진행중(startedAt만) / 완료(doneAt) 3-상태.
 /// - [dueAt] 는 사용자가 지정한 일정 (Google Calendar 등록 대상).
 /// - [calendarEventId] 가 있으면 캘린더에 이벤트가 등록된 상태.
+/// - [calendarId] / [calendarOrigin] — Google Calendar 양방향 동기화용 (아래 참조).
 /// - [createdAt] / [updatedAt] 은 Supabase last-write-wins 충돌 해소에 사용.
 /// - [parentId] 가 null 이면 카테고리 직속 root, set 이면 그 todo 의 자식 (트리 노드).
 /// - [type] — task / note (기본 task).
@@ -67,6 +68,17 @@ abstract class Todo with _$Todo {
     required DateTime createdAt,
     required DateTime updatedAt,
     String? calendarEventId,
+    // [calendarId] — calendarEventId 가 속한 Google Calendar id. null = 미등록
+    // 또는 레거시(과거엔 'primary' 하드코딩이었으므로 null 이면 primary 로 간주).
+    String? calendarId,
+    // [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 에서
+    // 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
+    // origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
+    // 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
+    // ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
+    // 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
+    // todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
+    @Default('app') String calendarOrigin,
     String? parentId,
     @Default(TodoType.task) TodoType type,
     @Default(0) int sortOrder,
@@ -112,6 +124,8 @@ abstract class Todo with _$Todo {
     String? recurrenceRule,
     DateTime? recurrenceEndAt,
     bool isSeriesMaster = false,
+    String? calendarId,
+    String calendarOrigin = 'app',
   }) {
     final n = (now ?? DateTime.now)();
     return Todo(
@@ -124,6 +138,8 @@ abstract class Todo with _$Todo {
       createdAt: n,
       updatedAt: n,
       calendarEventId: null,
+      calendarId: calendarId,
+      calendarOrigin: calendarOrigin,
       parentId: parentId,
       type: type,
       sortOrder: sortOrder,

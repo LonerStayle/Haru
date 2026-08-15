@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/category.dart' as domain;
+import 'calendar_ops_dao.dart';
 import 'categories_dao.dart';
 import 'groups_dao.dart';
 import 'outbox_dao.dart';
@@ -30,6 +31,11 @@ class Todos extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
   TextColumn get calendarEventId => text().nullable()();
+  // v10 — 연결된 Google Calendar id (예: 'primary'). null = 캘린더 미연동.
+  TextColumn get calendarId => text().nullable()();
+  // v10 — 이 todo 가 앱에서 만들어졌는지('app') Google Calendar 에서 들여온
+  // 것인지('gcal') 구분. 충돌 해소(어느 쪽이 우선인지) 판단에 사용.
+  TextColumn get calendarOrigin => text().withDefault(const Constant('app'))();
   // v1.1 — 트리 노드 부모 id. null = 카테고리 직속 root.
   // FK 제약은 두지 않음 — Supabase 양방향 동기화 도중 일시적 dangling 가능 + LWW 가 자정 처리.
   TextColumn get parentId => text().nullable()();
@@ -124,9 +130,41 @@ class OutboxEntries extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// v10 — Google Calendar 동기화 push 대기열.
+///
+/// [OutboxEntries] (Supabase 동기화) 와 별개 테이블 — 성질이 다르다:
+/// outbox 는 하나 실패하면 순서 보존을 위해 break 하지만, 이 큐는 항목 간
+/// 독립적으로 처리(하나 실패해도 다음 진행) + rate limit 대응 지수 백오프
+/// 재시도가 필요하다. Supabase user 와 무관 — 구글 연결만 있으면 실행된다.
+@DataClassName('CalendarOpRow')
+class CalendarOps extends Table {
+  TextColumn get id => text()(); // calendar op id (uuid)
+  // 'create' | 'update' | 'delete'
+  TextColumn get kind => text()();
+  // 대상 todo id.
+  TextColumn get todoId => text()();
+  // update/delete 시 대상 Google Calendar event id. create 전에는 null.
+  TextColumn get eventId => text().nullable()();
+  // 대상 Google Calendar id (예: 'primary').
+  TextColumn get calendarId => text()();
+  // create/update 시 스냅샷 JSON. delete 는 null.
+  TextColumn get payload => text().nullable()();
+  // 재시도 횟수 — 실패마다 증가, 지수 백오프 계산에 사용.
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+  // 마지막 실패 사유 — 설정 화면 "동기화 오류" 표시용.
+  TextColumn get lastError => text().nullable()();
+  // 지수 백오프 — 이 시각 이전에는 재시도하지 않음. null = 즉시 시도 가능.
+  DateTimeColumn get nextAttemptAt => dateTime().nullable()();
+  // FIFO 정렬 키.
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(
-  tables: [Todos, Categories, Groups, OutboxEntries],
-  daos: [TodosDao, CategoriesDao, GroupsDao, OutboxDao],
+  tables: [Todos, Categories, Groups, OutboxEntries, CalendarOps],
+  daos: [TodosDao, CategoriesDao, GroupsDao, OutboxDao, CalendarOpsDao],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openOnDisk());
@@ -135,7 +173,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   /// `storeDateTimeAsText: true` — DateTime 을 ISO 8601 text 로 저장.
   /// 기본 (unix int) 은 fetch 시 항상 local time 으로 변환되어 UTC↔local 구분을 잃는다.
@@ -158,6 +196,8 @@ class AppDatabase extends _$AppDatabase {
   ///   추가 (date-repeat — 날짜 반복). PRAGMA 가드로 idempotent.
   /// - v8: categories.archived / groups.archived 컬럼 추가 (보관 기능). 가드 idempotent.
   /// - v9: todos.started_at 컬럼 추가 (진행중 3-상태). PRAGMA 가드로 idempotent.
+  /// - v10: todos.calendar_id / todos.calendar_origin 컬럼 + calendar_ops 테이블
+  ///   신규 (Google Calendar 연동 push 큐). PRAGMA / sqlite_master 가드로 idempotent.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -260,6 +300,28 @@ class AppDatabase extends _$AppDatabase {
         final info = await customSelect("PRAGMA table_info('todos')").get();
         if (!info.any((r) => r.data['name'] == 'started_at')) {
           await m.addColumn(todos, todos.startedAt);
+        }
+      }
+      // 9 → 10: todos.calendar_id / todos.calendar_origin 추가 + calendar_ops
+      // 테이블 신규 (Google Calendar 연동 push 큐). PRAGMA / sqlite_master 가드로
+      // idempotent — 부분 적용된 중간 상태 DB 도 안전하게 복구.
+      // ⚠️ RISK(breaking): 이 분기는 위 schemaVersion(=10) 과 짝이다. 컬럼/테이블만
+      // 추가하고 버전을 올리지 않으면 onUpgrade 자체가 호출되지 않아 조용히 누락된다
+      // (v3 description 누락 사고 재발 경로). 스키마를 또 바꿀 땐 버전부터 올릴 것.
+      if (from < 10) {
+        final info = await customSelect("PRAGMA table_info('todos')").get();
+        bool hasCol(String name) => info.any((r) => r.data['name'] == name);
+        if (!hasCol('calendar_id')) {
+          await m.addColumn(todos, todos.calendarId);
+        }
+        if (!hasCol('calendar_origin')) {
+          await m.addColumn(todos, todos.calendarOrigin);
+        }
+        final tables = await customSelect(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_ops'",
+        ).get();
+        if (tables.isEmpty) {
+          await m.createTable(calendarOps);
         }
       }
     },

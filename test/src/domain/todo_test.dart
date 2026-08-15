@@ -400,6 +400,70 @@ void main() {
     );
   });
 
+  group('google-calendar-sync — calendarId / calendarOrigin', () {
+    test('Todo.create 기본값 — calendarId null, calendarOrigin app', () {
+      final t = Todo.create(
+        title: 'x',
+        category: Category.daily,
+        now: fixedNow,
+        idGen: fixedId,
+      );
+      expect(t.calendarId, isNull);
+      expect(t.calendarOrigin, 'app');
+    });
+
+    test('Todo.create — calendarId / calendarOrigin 전달 시 보존', () {
+      final t = Todo.create(
+        title: '구글에서 온 일정',
+        category: Category.work,
+        now: fixedNow,
+        idGen: fixedId,
+        calendarId: 'cal-xyz',
+        calendarOrigin: 'gcal',
+      );
+      expect(t.calendarId, 'cal-xyz');
+      expect(t.calendarOrigin, 'gcal');
+    });
+
+    test('JSON round-trip — calendarId / calendarOrigin 보존', () {
+      final original = Todo(
+        id: 'abc',
+        title: 'PR 리뷰',
+        category: Category.personalDev,
+        dueAt: null,
+        doneAt: null,
+        createdAt: DateTime.utc(2026, 5, 27, 9),
+        updatedAt: DateTime.utc(2026, 5, 27, 9),
+        calendarEventId: 'evt-xyz',
+        calendarId: 'cal-abc',
+        calendarOrigin: 'gcal',
+      );
+      final json = original.toJson();
+      expect(json['calendarId'], 'cal-abc');
+      expect(json['calendarOrigin'], 'gcal');
+
+      final restored = Todo.fromJson(json);
+      expect(restored, original);
+    });
+
+    test('JSON 역호환 — calendarId/calendarOrigin 누락 → null / app 으로 안전 복원', () {
+      // v1.x 시점 Supabase row 가 신규 컬럼 없이 client 에 내려오는 케이스.
+      final legacyJson = <String, dynamic>{
+        'id': 'legacy',
+        'title': '옛 todo',
+        'category': 'work',
+        'dueAt': null,
+        'doneAt': null,
+        'createdAt': '2026-05-01T09:00:00.000Z',
+        'updatedAt': '2026-05-01T09:00:00.000Z',
+        'calendarEventId': null,
+      };
+      final restored = Todo.fromJson(legacyJson);
+      expect(restored.calendarId, isNull);
+      expect(restored.calendarOrigin, 'app');
+    });
+  });
+
   group('fast-tasks — endAt / isAllDay / timeAnchor', () {
     Todo base({
       DateTime? dueAt,

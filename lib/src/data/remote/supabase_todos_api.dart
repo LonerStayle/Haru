@@ -67,6 +67,10 @@ class SupabaseTodosApi implements RemoteTodosApi {
     // updatedAt 은 LWW 키 — UTC 로 전송해 로컬 저장(UTC)과 round-trip 일치.
     'updated_at': t.updatedAt.toUtc().toIso8601String(),
     'calendar_event_id': t.calendarEventId,
+    // v10 — Google Calendar 양방향 동기화. calendar_origin 은 삭제 규칙의 근거이므로
+    // 반드시 원격에 함께 전파돼야 macOS/Android 양쪽이 같은 판단을 한다.
+    'calendar_id': t.calendarId,
+    'calendar_origin': t.calendarOrigin,
     // v1.1 — 트리 / 메모 모델
     'parent_id': t.parentId,
     'type': t.type.name,
@@ -101,6 +105,14 @@ class SupabaseTodosApi implements RemoteTodosApi {
     createdAt: _parseTime(row['created_at'])!,
     updatedAt: _parseTime(row['updated_at'])!,
     calendarEventId: row['calendar_event_id'] as String?,
+    // v10 — 옛 row (다른 기기가 아직 구버전 빌드라 컬럼 자체가 없는 경우 포함) 도
+    // 예외 없이 안전하게 복원해야 동기화 전체가 멈추지 않는다. calendarOrigin 은
+    // 삭제 규칙의 유일한 근거라 누락 시 'app' 으로 안전 폴백 (TodosDao 의 category
+    // placeholder 방어와 같은 톤).
+    calendarId: row['calendar_id'] as String?,
+    calendarOrigin: row['calendar_origin'] is String
+        ? row['calendar_origin'] as String
+        : 'app',
     // v1.1 — 옛 v1.0 row (컬럼 없음) 도 안전하게 기본값으로 복원.
     parentId: row['parent_id'] as String?,
     type: _parseType(row['type']),

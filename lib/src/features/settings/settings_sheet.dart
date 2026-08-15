@@ -5,6 +5,9 @@ import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../calendar/calendar_settings.dart';
+import '../calendar/calendar_settings_screen.dart';
+import '../calendar/google_auth_service.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import 'archive_screen.dart';
@@ -136,6 +139,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
               ],
               _archiveTile(theme, scheme),
               const Divider(height: AppTokens.hairline),
+              _calendarTile(theme, scheme),
+              const Divider(height: AppTokens.hairline),
               _infoTile(theme, scheme),
               const SizedBox(height: AppTokens.space8),
             ],
@@ -202,6 +207,79 @@ class _SettingsSheetState extends State<SettingsSheet> {
             ),
         ],
       ),
+    );
+  }
+
+  /// Google Calendar 연동 진입 — 연결 상태를 부제로 보여준다.
+  ///
+  /// OAuth 키가 빌드에 없으면 (`googleCalendarAvailableProvider == false`) 항목
+  /// 자체를 숨긴다. 눌러봐야 아무것도 할 수 없는 항목을 보여줄 이유가 없다.
+  Widget _calendarTile(ThemeData theme, ColorScheme scheme) {
+    return Consumer(
+      builder: (context, ref, _) {
+        if (!ref.watch(googleCalendarAvailableProvider)) {
+          return const SizedBox.shrink();
+        }
+        final connected = ref.watch(
+          calendarSettingsProvider.select((s) => s.connected),
+        );
+
+        return InkWell(
+          key: const ValueKey('calendar-entry'),
+          onTap: () => CalendarSettingsScreen.show(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTokens.space16,
+              vertical: AppTokens.space8,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.onSurface.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(AppTokens.radiusM),
+                  ),
+                  child: Icon(
+                    Icons.event_outlined,
+                    size: 22,
+                    color: scheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Google Calendar',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        connected
+                            ? '연결됨 · 할 일과 일정이 함께 움직여요'
+                            : '연결하면 일정이 함께 움직여요',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: scheme.onSurface.withValues(alpha: 0.4),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

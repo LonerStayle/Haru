@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:solo_todo/src/data/remote/supabase_todos_api.dart';
 import 'package:solo_todo/src/domain/category.dart';
@@ -203,6 +204,8 @@ void main() {
       'created_at',
       'updated_at',
       'calendar_event_id',
+      'calendar_id',
+      'calendar_origin',
       'parent_id',
       'type',
       'sort_order',
@@ -312,6 +315,97 @@ void main() {
       );
     });
   });
+
+  group('Task A3 — calendar_id / calendar_origin 매핑 (실 구현 검증)', () {
+    // 더미 SupabaseClient — rowForTest/todoFromRow 는 _toRow/_fromRow 순수 매핑만
+    // 타므로 lazy schema() 조차 호출 안 됨 (SupabaseCategoriesApi/SupabaseGroupsApi
+    // 테스트와 동일 패턴). 위 helper 기반(_toRowForCheck/_fromRowForCheck) 테스트와
+    // 달리 실제 SupabaseTodosApi._toRow/_fromRow 를 직접 호출해 검증한다.
+    late SupabaseTodosApi api;
+
+    setUp(() {
+      final client = SupabaseClient('https://example.supabase.co', 'anon');
+      api = SupabaseTodosApi(client);
+    });
+
+    test('rowForTest — calendarId(primary) + calendarOrigin(gcal)', () {
+      final row = api.rowForTest(
+        Todo(
+          id: 'g',
+          title: '구글에서 유입된 일정',
+          category: Category.work,
+          dueAt: null,
+          doneAt: null,
+          createdAt: DateTime.utc(2026, 5, 27, 9),
+          updatedAt: DateTime.utc(2026, 5, 27, 9),
+          calendarEventId: 'evt-1',
+          calendarId: 'primary',
+          calendarOrigin: 'gcal',
+        ),
+        'u',
+      );
+      expect(row['calendar_id'], 'primary');
+      expect(row['calendar_origin'], 'gcal');
+    });
+
+    test('rowForTest — 기본값 (calendarId null, calendarOrigin=app)', () {
+      final row = api.rowForTest(
+        Todo(
+          id: 'a',
+          title: '앱에서 만든 할 일',
+          category: Category.work,
+          dueAt: null,
+          doneAt: null,
+          createdAt: DateTime.utc(2026, 5, 27, 9),
+          updatedAt: DateTime.utc(2026, 5, 27, 9),
+          calendarEventId: null,
+        ),
+        'u',
+      );
+      expect(row['calendar_id'], isNull);
+      expect(row['calendar_origin'], 'app');
+    });
+
+    test(
+      'round-trip — rowForTest → todoFromRow 가 calendarId/calendarOrigin 보존',
+      () {
+        final original = Todo(
+          id: 'rt',
+          title: '캘린더 왕복',
+          category: Category.idea,
+          dueAt: DateTime.utc(2026, 5, 28, 13),
+          doneAt: null,
+          createdAt: DateTime.utc(2026, 5, 27, 9),
+          updatedAt: DateTime.utc(2026, 5, 27, 9),
+          calendarEventId: 'evt-9',
+          calendarId: 'work-cal',
+          calendarOrigin: 'gcal',
+        );
+        final restored = api.todoFromRow(api.rowForTest(original, 'user-1'));
+        expect(restored, original);
+      },
+    );
+
+    test('todoFromRow 역호환 — calendar_id/calendar_origin 키 자체가 없는 원격 row → '
+        'calendarId null, calendarOrigin app (예외 없음)', () {
+      // 다른 기기가 아직 구버전 빌드라 이 두 컬럼을 아예 보내지 않는 케이스.
+      // 예외 없이 안전하게 복원돼야 동기화 전체가 멈추지 않는다.
+      final legacyRow = <String, dynamic>{
+        'id': 'legacy',
+        'title': '옛 todo',
+        'category': 'work',
+        'due_at': null,
+        'done_at': null,
+        'created_at': '2026-05-01T09:00:00.000Z',
+        'updated_at': '2026-05-01T09:00:00.000Z',
+        'calendar_event_id': null,
+        // calendar_id / calendar_origin 자체가 row 에 없는 케이스.
+      };
+      final restored = api.todoFromRow(legacyRow);
+      expect(restored.calendarId, isNull);
+      expect(restored.calendarOrigin, 'app');
+    });
+  });
 }
 
 /// SupabaseTodosApi 의 _toRow 동작을 client 없이 검증하기 위한 helper.
@@ -327,6 +421,8 @@ Map<String, dynamic> _toRowForCheck(Todo t, String userId) => {
   'created_at': t.createdAt.toUtc().toIso8601String(),
   'updated_at': t.updatedAt.toUtc().toIso8601String(),
   'calendar_event_id': t.calendarEventId,
+  'calendar_id': t.calendarId,
+  'calendar_origin': t.calendarOrigin,
   'parent_id': t.parentId,
   'type': t.type.name,
   'sort_order': t.sortOrder,
@@ -346,6 +442,10 @@ Todo _fromRowForCheck(Map<String, dynamic> row) => Todo(
   createdAt: _parseTime(row['created_at'])!,
   updatedAt: _parseTime(row['updated_at'])!,
   calendarEventId: row['calendar_event_id'] as String?,
+  calendarId: row['calendar_id'] as String?,
+  calendarOrigin: row['calendar_origin'] is String
+      ? row['calendar_origin'] as String
+      : 'app',
   parentId: row['parent_id'] as String?,
   type: _parseTypeForCheck(row['type']),
   sortOrder: row['sort_order'] is int

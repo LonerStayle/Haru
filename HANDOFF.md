@@ -186,6 +186,8 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | **Supabase 진행중 3-상태 마이그레이션 (todos.started_at)** | ⚠️ **대표님 액션 필요 (2026-07-18)** — `make sql` → schema.sql 재실행(§21 started_at + notify pgrst). idempotent. 미실행 시 진행중 상태가 기기 간 동기화 안 됨. |
 | **Google Cloud Console — Android OAuth client + calendar scope** | ✅ **완료 (2026-08-09)** — `SoloTodo - 안드로이드` 클라이언트의 SHA-1 을 현 keystore 지문(`76:EC:F3:...`)으로 교체 저장. calendar/calendar.events 범위 등록 확인. 게시 상태 프로덕션(외부)이라 테스트 사용자 불필요 — 동의 시 "확인되지 않은 앱" 경고는 고급→이동으로 통과. SHA-1 반영까지 최대 몇 시간 걸릴 수 있음. |
 | `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ✅ 채워짐 (`431288523948-6u98...`). serverClientId(`-n9pn...` 웹) 도 있음. |
+| **Supabase 캘린더 양방향 마이그레이션 (todos.calendar_id / calendar_origin)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — schema.sql 재실행. 위 fast-tasks·started_at 미실행분도 **같이 적용**되니 한 번만 돌리면 된다. 미실행 시 PGRST204 로 todos 동기화 전체 정지. |
+| **Google 재동의 (scope 확대: `calendar.calendarlist.readonly` 추가)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — 새 빌드 첫 실행 시 동의 화면 1회. 캘린더 **목록 조회**에 필요한 권한이라 없으면 설정 화면에서 캘린더를 고를 수 없다. macOS 는 저장 토큰의 scope 가 부족하면 앱이 자동으로 재동의를 띄운다(토큰 파일에 scope 를 함께 저장하도록 변경됨). |
 | 갤럭시 S24 (SM S921N) release APK 설치 | ✅ (단 fast-tasks 변경분은 재빌드·재설치 필요) |
 | 로컬 DB 백업 | `~/solo_todo_db_backup/solo_todo_*.sqlite` (1회성, 이제 클라우드 동기화되므로 불필요시 삭제 가능) |
 
@@ -201,6 +203,51 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 2. ~~**Google Cloud Console (Android 캘린더 권한, Task 3)**~~ — ✅ **완료 (2026-08-09, Claude 브라우저 자동화로 처리)**. 원인은 콘솔 SHA-1 이 keystore 재생성 전 옛 지문이었던 것. 현 지문으로 교체 저장 완료. 범위·client id 는 이미 정상이었음. §2 표 참조.
 3. **갤S24 재빌드·재설치** — fast-tasks 변경분 반영. `make build-apk` 후 `flutter install` (또는 `make run-android`).
    - 첫 캘린더 등록 시 **계정 동의 팝업이 떠야 정상**. "확인되지 않은 앱" 경고가 뜨면 고급 → 이동(안전하지 않음) 으로 진행 (개인용 미인증 앱의 정상 동작). SHA-1 변경 반영까지 최대 몇 시간 걸릴 수 있음.
+
+### Google Calendar 양방향 동기화 (2026-08-15 완료)
+
+문서: `docs/features/2026-08-15-google-calendar-sync/` (요구사항 / 기술설계 / 구현계획)
+
+**무엇이 바뀌었나** — 이전에는 "할 일 등록 시 1회 이벤트 생성" 만 동작했고,
+수정·삭제 코드는 작성돼 있었지만 **호출자가 없는 dead code** 였다. 편집 시트의
+"Google Calendar 에 등록" 토글도 편집 모드에서는 아무 효과가 없었다. 이제 양방향이다.
+
+**구조 (수정 시 알아야 할 것)**
+
+- `CalendarAwareTodoRepository` — 저장소 데코레이터. **모든** 할 일 저장이 여기를 지나며
+  캘린더에 영향 있는 변경만 큐에 넣는다. 편집 진입점이 7곳이라 호출부마다 붙이면 반드시
+  누락된다(그게 기존 결함이었다). 연동이 꺼져 있으면 조립 단계에서 아예 안 끼운다.
+- `decideCalendarOp` — 감시 필드 10종(제목·날짜 4종·완료·타입·카테고리id·반복 2종)만
+  이벤트를 건드린다. `sortOrder`/`parentId`/`description` 은 무시 — 정렬 한 번에 API 가
+  형제 수만큼 호출되는 것을 막는 핵심이다.
+- `calendar_ops` (Drift v10) — 캘린더 전용 큐. 기존 Supabase outbox 와 분리했다. 항목이
+  서로 독립이라 하나 실패해도 다음을 진행하고, rate limit 대응 지수 백오프가 있다.
+- `CalendarGateway` — API 호출 이음매. `FakeCalendarGateway` 로 모든 동기화 로직을
+  실제 인증 없이 테스트한다.
+- **echo 차단** — push 시 이벤트에 `haruRev`(그 시점 `updatedAt`)를 심고, 수신 때 서명이
+  같고 **내용도 같으면** 무시한다. 서명만 비교하면 사람이 캘린더에서 고친 게 영영 반영되지
+  않고, 시각만 비교하면 무한 루프가 된다. `calendar_roundtrip_test.dart` 가 이걸 지킨다.
+
+**⚠️ 함정 (건드릴 때 주의)**
+
+1. **동기화 서비스에 주입하는 저장소는 데코레이터를 벗긴 것이어야 한다**
+   (`calendarSyncRepositoryProvider`). 씌우면 수신 결과가 다시 큐에 쌓여 되쏜다 —
+   기존 `SupabaseRealtimeSync` 가 outbox 를 우회하는 것과 같은 이유다.
+2. **링크 필드만 바뀐 저장은 `none` 이어야 한다.** 큐가 생성 성공 후 `calendarEventId` 를
+   저장하는데, 여기서 update 가 나오면 큐가 영원히 비지 않는다.
+3. **메모 전환 시 `calendarEventId` 를 미리 지우면 안 된다.** 지우면 삭제 작업을 만들 수
+   없어 고아 이벤트가 남는다. 링크 해제는 이벤트를 실제로 지운 뒤 동기화 서비스가 한다.
+4. **반복 인스턴스에 링크를 남기면 안 된다** — 회차마다 이벤트가 생긴다. 마스터가 RRULE
+   이벤트 1개를 소유한다.
+5. 이벤트 생성 후 링크를 저장할 때 **`updatedAt` 을 갱신하지 않는다** — 서명과 어긋나
+   echo 판정이 깨진다.
+
+**동작 요약** — 자동 동기화는 앱 시작·포그라운드 복귀·5분 주기(설정에서 끌 수 있음).
+캘린더에서 지운 일정은 **출처에 따라** 갈린다: 앱에서 만든 할 일이면 일정 연결만 해제하고
+할 일은 남기고, 캘린더에서 유입된 할 일이면 함께 지운다. 완료는 이벤트 색(회색)으로만
+표시하고 제목은 건드리지 않는다. 초대받은 일정은 기본적으로 안 들어온다(설정에서 켤 수 있음).
+
+**설정 위치** — 설정 시트 → Google Calendar (OAuth 키가 없는 빌드면 항목 자체가 숨겨짐).
 
 ### 미해결 / v1.3 후보 (대표님 결정 필요)
 
