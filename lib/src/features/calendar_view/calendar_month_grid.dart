@@ -32,7 +32,10 @@ class CalendarMonthGrid extends StatelessWidget {
 
   final void Function(DateTime date)? onSelectDay;
   final void Function(DateTime date)? onLongPressDay;
-  final Widget Function(DateTime date, Widget cell)? dayCellBuilder;
+
+  /// 셀을 드롭 타깃으로 감싸기 위한 훅 — [CalendarWeekRow.dayCellBuilder] 참조.
+  final Widget Function(DateTime date, CalendarDayCellBuilder build)?
+  dayCellBuilder;
 
   @override
   Widget build(BuildContext context) {

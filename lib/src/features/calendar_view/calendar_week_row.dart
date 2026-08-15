@@ -50,8 +50,12 @@ class CalendarWeekRow extends StatelessWidget {
   final void Function(DateTime date)? onSelectDay;
   final void Function(DateTime date)? onLongPressDay;
 
-  /// 셀을 감싸 드롭 타깃 등으로 확장하기 위한 훅 (T13 에서 사용).
-  final Widget Function(DateTime date, Widget cell)? dayCellBuilder;
+  /// 셀을 드롭 타깃으로 감싸기 위한 훅.
+  ///
+  /// 완성된 위젯이 아니라 **빌더**를 넘기는 이유: 드롭 하이라이트는 셀 자신의
+  /// 장식이라 `DragTarget` 이 후보 여부를 알게 된 뒤에야 셀을 만들 수 있다.
+  final Widget Function(DateTime date, CalendarDayCellBuilder build)?
+  dayCellBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -122,7 +126,7 @@ class CalendarWeekRow extends StatelessWidget {
     Map<DateTime, int> hiddenByDate,
   ) {
     final entries = buckets[date] ?? const <CalendarEntry>[];
-    final cell = CalendarDayCell(
+    Widget build({bool isDropTarget = false}) => CalendarDayCell(
       // key 는 셀 위젯 자체에 둔다 — 테스트가 find.byKey 로 찾은 것을 그대로
       // CalendarDayCell 로 읽을 수 있어야 상태(isToday/isSelected)를 검증할 수 있다.
       key: ValueKey('calendar-cell-${calendarDateKey(date)}'),
@@ -136,12 +140,16 @@ class CalendarWeekRow extends StatelessWidget {
       isSelected: date == selectedDay,
       isOutsideMonth:
           date.month != focusedMonth.month || date.year != focusedMonth.year,
+      isDropTarget: isDropTarget,
       onTap: onSelectDay == null ? null : () => onSelectDay!(date),
       onLongPress: onLongPressDay == null ? null : () => onLongPressDay!(date),
     );
-    return dayCellBuilder?.call(date, cell) ?? cell;
+    return dayCellBuilder?.call(date, build) ?? build();
   }
 }
+
+/// [CalendarWeekRow.dayCellBuilder] 가 받는 셀 빌더.
+typedef CalendarDayCellBuilder = Widget Function({bool isDropTarget});
 
 /// 막대 한 레인 — 7열을 flex 로 나눠 세그먼트를 배치한다.
 class _LaneRow extends StatelessWidget {

@@ -65,6 +65,29 @@ DateTime _shiftDate(DateTime source, int year, int month, int day) => DateTime(
   source.microsecond,
 );
 
+/// 캘린더 드래그의 페이로드.
+///
+/// 끌 수 있는 것이 두 종류다 — 이미 날짜가 있는 캘린더 엔트리(다른 날로 옮기기)와
+/// "날짜 없음" 서랍의 [Todo](날짜 부여하기). 서랍 항목은 `dueAt == null` 이라
+/// [CalendarEntry] 가 될 수 없어서 한 타입으로 합치지 못한다.
+sealed class CalendarDragData {
+  const CalendarDragData();
+}
+
+/// 달력·선택일 패널에서 끌어온 엔트리.
+class EntryDragData extends CalendarDragData {
+  const EntryDragData(this.entry);
+
+  final CalendarEntry entry;
+}
+
+/// "날짜 없음" 서랍에서 끌어온 할 일.
+class UndatedDragData extends CalendarDragData {
+  const UndatedDragData(this.todo);
+
+  final Todo todo;
+}
+
 /// 이 엔트리를 [targetDate] 로 옮기는 게 실제 변화인가.
 ///
 /// 드롭 대상 칸을 하이라이트할지 판단하는 데 쓴다 — 원래 자리에 다시 놓는 동작에

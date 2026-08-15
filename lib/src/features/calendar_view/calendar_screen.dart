@@ -8,12 +8,15 @@ import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../home/today_providers.dart';
 import '../timeline/timeline_screen.dart';
+import '../todo_actions/todo_actions_controller.dart';
 import 'calendar_actions.dart';
 import 'calendar_day_panel.dart';
+import 'calendar_drag.dart';
 import 'calendar_entry.dart';
 import 'calendar_month_grid.dart';
 import 'calendar_providers.dart';
 import 'calendar_undated_drawer.dart';
+import 'calendar_week_row.dart';
 
 /// 캘린더 화면의 두 보기 방식.
 enum CalendarSegment {
@@ -114,6 +117,71 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     _goToMonth(today);
   }
 
+  /// 달력 칸에 항목을 떨어뜨렸을 때 — 날짜만 바꾸고 순서는 보존한다.
+  ///
+  /// 고스트(미래 반복 예정)는 옮길 row 자체가 없으므로 먼저 그 회차를 실체화한다.
+  Future<void> _handleDrop(CalendarDragData data, DateTime date) async {
+    final todo = switch (data) {
+      UndatedDragData(:final todo) => todo,
+      EntryDragData(:final entry) => await resolveEntryTodo(ref, entry),
+    };
+    if (todo == null) return;
+
+    final moved = applyDateDrop(todo, date);
+    // 같은 날에 떨어뜨렸으면 applyDateDrop 이 원본을 그대로 돌려준다 → 저장 생략.
+    if (!identical(moved, todo)) {
+      await ref.read(todoActionsProvider).setDueAt(moved);
+    }
+    if (!mounted) return;
+    // 옮긴 결과를 바로 보여준다 — 어디로 갔는지 눈으로 확인시키는 게 핵심.
+    setState(() => _selectedDay = dateOnly(date));
+  }
+
+  /// 드래그 소스 래퍼.
+  ///
+  /// 데스크탑은 즉시 드래그([Draggable]), 모바일은 롱프레스([LongPressDraggable]).
+  /// 모바일에서 즉시 드래그를 쓰면 목록의 세로 스크롤과 제스처가 겹쳐 목록을
+  /// 못 굴린다. 데스크탑은 휠로 스크롤하므로 즉시 드래그가 더 빠르다.
+  /// (사이드바 카테고리 이동이 이미 쓰는 분기 규약과 동일.)
+  Widget _dragSource({
+    required CalendarDragData data,
+    required String title,
+    required Color color,
+    required Widget child,
+  }) {
+    final feedback = _DragFeedback(title: title, color: color);
+    final placeholder = Opacity(opacity: 0.35, child: child);
+    if (AppPlatform.isDesktop) {
+      return Draggable<CalendarDragData>(
+        data: data,
+        feedback: feedback,
+        childWhenDragging: placeholder,
+        child: child,
+      );
+    }
+    return LongPressDraggable<CalendarDragData>(
+      data: data,
+      feedback: feedback,
+      childWhenDragging: placeholder,
+      child: child,
+    );
+  }
+
+  Widget _dropTarget(DateTime date, CalendarDayCellBuilder build) {
+    return DragTarget<CalendarDragData>(
+      onWillAcceptWithDetails: (details) => switch (details.data) {
+        UndatedDragData() => true,
+        // 구글 이벤트는 읽기 전용이라 애초에 드래그되지 않지만, 방어적으로 한 번 더.
+        // 원래 자리에 다시 놓는 건 변화가 아니라 하이라이트도 하지 않는다.
+        EntryDragData(:final entry) =>
+          entry.isDraggable && isMeaningfulDrop(entry, date),
+      },
+      onAcceptWithDetails: (details) => _handleDrop(details.data, date),
+      builder: (context, candidate, _) =>
+          build(isDropTarget: candidate.isNotEmpty),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 과거~오늘 반복 회차의 실체화 보장 — '오늘' 화면을 거치지 않고 캘린더로
@@ -171,7 +239,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               // 서랍은 달력 보기에서만. 목록(타임라인)에는 날짜 지정 항목만 나오므로
               // 무날짜 서랍이 붙을 자리가 아니다.
               if (_segment == CalendarSegment.grid)
-                const CalendarUndatedDrawer(),
+                CalendarUndatedDrawer(
+                  itemWrapper: (todo, tile) => _dragSource(
+                    data: UndatedDragData(todo),
+                    title: todo.title,
+                    color: todo.category.color,
+                    child: tile,
+                  ),
+                ),
             ],
           ),
         ),
@@ -221,6 +296,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               _selectDay(date);
               openAddTodoOnDate(context, ref, date);
             },
+            dayCellBuilder: _dropTarget,
           ),
         );
       },
@@ -232,7 +308,79 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final buckets = ref.watch(calendarBucketsProvider(range));
     final entries =
         buckets.asData?.value[_selectedDay] ?? const <CalendarEntry>[];
-    return CalendarDayPanel(date: _selectedDay, entries: entries);
+    return CalendarDayPanel(
+      date: _selectedDay,
+      entries: entries,
+      entryWrapper: (entry, tile) => entry.isDraggable
+          ? _dragSource(
+              data: EntryDragData(entry),
+              title: entry.title,
+              color: entry.color,
+              child: tile,
+            )
+          : tile,
+    );
+  }
+}
+
+/// 드래그 중 손끝을 따라다니는 미리보기.
+///
+/// 사이드바 카테고리 이동의 피드백과 같은 시각 언어 — 색 바 + 제목의 작은 카드.
+class _DragFeedback extends StatelessWidget {
+  const _DragFeedback({required this.title, required this.color});
+
+  final String title;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 220),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.space8,
+          vertical: AppTokens.space4,
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(AppTokens.radiusM),
+          border: Border.all(color: color, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 4,
+              height: 18,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+              ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Flexible(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -247,6 +395,7 @@ class _MonthPage extends ConsumerWidget {
     required this.selectedDay,
     required this.onSelectDay,
     required this.onLongPressDay,
+    required this.dayCellBuilder,
   });
 
   final DateTime month;
@@ -254,6 +403,7 @@ class _MonthPage extends ConsumerWidget {
   final DateTime selectedDay;
   final void Function(DateTime) onSelectDay;
   final void Function(DateTime) onLongPressDay;
+  final Widget Function(DateTime, CalendarDayCellBuilder) dayCellBuilder;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -266,6 +416,7 @@ class _MonthPage extends ConsumerWidget {
       selectedDay: selectedDay,
       onSelectDay: onSelectDay,
       onLongPressDay: onLongPressDay,
+      dayCellBuilder: dayCellBuilder,
     );
   }
 }
