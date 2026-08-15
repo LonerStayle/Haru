@@ -105,8 +105,28 @@ class TodoTile extends StatelessWidget {
   /// 보여주고, note 의 기본 본문 프리뷰는 대신 생략한다 (같은 자리에 두 번 쓰지 않게).
   final String? snippet;
 
+  /// 이 폭 아래로는 데스크탑에서도 압축 레이아웃을 쓴다.
+  ///
+  /// 폰 폭(≈390~430)을 기준으로 잡았다 — 그보다 좁으면 폰과 같은 처지라
+  /// 폰과 같은 배치가 맞다.
+  static const double _compactWidth = 420;
+
   @override
   Widget build(BuildContext context) {
+    // 압축 여부는 플랫폼이 아니라 **실제로 주어진 폭**으로 정한다.
+    //
+    // 예전엔 `AppPlatform.isMobile` 만 봤는데, 데스크탑에서 창을 좁히면 trailing
+    // 버튼들이 자리를 다 먹고 제목이 글자당 한 줄로 접히면서 타일이 가로로 넘쳤다
+    // (오늘 화면에서 실제로 발생). 폭이 좁으면 기기가 무엇이든 압축이 맞다.
+    return LayoutBuilder(
+      builder: (context, constraints) => _buildTile(
+        context,
+        compact: AppPlatform.isMobile || constraints.maxWidth < _compactWidth,
+      ),
+    );
+  }
+
+  Widget _buildTile(BuildContext context, {required bool compact}) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDone = todo.isDone;
@@ -117,10 +137,6 @@ class TodoTile extends StatelessWidget {
     final isNoteHeading = isNote && childCount > 0;
     // fast-tasks — 모드별 날짜 라벨. isAllDay 면 시간 미출력 (00:00 금지).
     final dateLabel = isNote ? null : TodoDateLabel.format(todo);
-    // 모바일 압축 레이아웃 — 폰 폭에서만 적용. 데스크탑은 폭이 넉넉하므로 현행 유지.
-    // (제목 2줄 clamp / trailing 36dp / 메타 칩 한 줄 Wrap)
-    final compact = AppPlatform.isMobile;
-
     // 제목 아래 메타 조각들. 데스크탑은 지금처럼 세로로 쌓고, 모바일은 한 줄
     // Wrap 으로 묶어 타일 높이를 줄인다. 정의는 여기 한 곳에서만 한다.
     final inProgressChip = isInProgress

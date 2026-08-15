@@ -206,6 +206,7 @@ void main() {
       WidgetTester tester,
       Todo todo, {
       int? drillChildCount,
+      double width = 360,
     }) => tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.mobileLight(),
@@ -213,7 +214,7 @@ void main() {
           body: Align(
             alignment: Alignment.topLeft,
             child: SizedBox(
-              width: 360,
+              width: width,
               child: TodoTile(
                 todo: todo,
                 onToggle: () {},
@@ -282,9 +283,9 @@ void main() {
       );
     });
 
-    testWidgets('데스크탑은 제목 줄 제한 없이 현행 유지', (tester) async {
+    testWidgets('데스크탑도 폭이 넉넉하면 제목 줄 제한 없이 현행 유지', (tester) async {
       AppPlatform.debugFormFactorOverride = FormFactor.desktop;
-      await mountNarrow(tester, make(title: longTitle));
+      await mountNarrow(tester, make(title: longTitle), width: 600);
 
       final title = tester.widget<Text>(find.text(longTitle));
       expect(title.maxLines, isNull);
@@ -293,6 +294,29 @@ void main() {
         tester.getSize(find.byKey(const ValueKey('todo-tile-check'))),
         const Size(48, 48),
       );
+    });
+
+    testWidgets('데스크탑이라도 폭이 좁으면 압축된다', (tester) async {
+      // 실사용 신고: 창을 좁히면 오늘 화면 타일이 글자당 한 줄로 접히고 가로로
+      // 넘쳤다. 압축 판단은 플랫폼이 아니라 실제 폭 기준이어야 한다.
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mountNarrow(tester, make(title: longTitle), width: 360);
+
+      final title = tester.widget<Text>(find.text(longTitle));
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
+    });
+
+    testWidgets('좁은 데스크탑 폭 + 모든 버튼이 붙어도 가로로 넘치지 않는다', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mountNarrow(
+        tester,
+        make(title: longTitle, startedAt: DateTime.utc(2026, 5, 27, 10)),
+        drillChildCount: 10,
+        width: 320,
+      );
+
+      expect(tester.takeException(), isNull);
     });
   });
 }
