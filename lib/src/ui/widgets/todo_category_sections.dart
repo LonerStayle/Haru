@@ -8,13 +8,18 @@ import 'dismissible_todo_tile.dart';
 
 /// 오늘 화면 전용 — root todo 들을 **카테고리별 섹션**으로 묶어 그리는 sliver 목록.
 ///
-/// 각 섹션은 [_CategorySectionHeader] (카테고리 아이콘 + 라벨 + 소속 그룹 라벨 +
-/// 완료 진척) 와, 그 카테고리에 속한 항목들의 독립 [SliverReorderableList] 로 구성된다.
-/// 섹션별 독립 재정렬이므로 [onReorderSiblings] 에는 그 카테고리 항목 리스트만 넘어가고,
-/// `reorderSiblings` 가 부분집합 min 기준으로 sortOrder 를 재부여한다(타 카테고리 불변).
+/// 헤더와 항목이 **하나의 [SliverReorderableList]** 안에 섞여 있다. 섹션마다 독립
+/// 리스트로 두면 섹션 경계를 넘는 드래그를 받아 줄 곳이 없어, 다른 카테고리로 끌어다
+/// 놓아도 항목이 제자리로 되돌아간다 (실사용에서 "위아래 드래그가 사라졌다" 로 보였다).
+/// 한 리스트로 합치면 드롭 지점이 어느 섹션인지 계산할 수 있고, 그래서:
 ///
-/// 자식 유무·드릴다운·＋하위추가·스와이프 삭제·체크 토글은 [TodoDrillListSliver] 와 동일
-/// 규칙을 그대로 유지한다 — 단지 평면 리스트를 카테고리 섹션으로 묶었을 뿐이다.
+///  - 같은 섹션 안에 놓으면 → [onReorderSiblings] (순서만 변경)
+///  - 다른 섹션에 놓으면 → [onMoveToCategory] (그 카테고리로 이동 + 그 자리에 삽입)
+///
+/// 헤더는 드래그 리스너를 달지 않아 끌 수 없다 — 순서 계산에만 참여한다.
+///
+/// 자식 유무·드릴다운·＋하위추가·스와이프 삭제·체크 토글은 [DismissibleTodoTile] 의
+/// 규칙을 그대로 유지한다.
 ///
 /// 반환값은 `CustomScrollView.slivers` 에 `...spread` 로 펼쳐 넣는다.
 List<Widget> todayCategorySectionSlivers({
@@ -32,6 +37,16 @@ List<Widget> todayCategorySectionSlivers({
   required void Function(Todo) onDelete,
   required void Function(List<Todo> siblings, int oldIndex, int newIndex)
   onReorderSiblings,
+
+  /// 섹션 간 드래그 — [item] 을 [target] 카테고리의 [targetItems] 중
+  /// [insertIndex] 자리(제거 후 기준)로 옮긴다.
+  required void Function(
+    Todo item,
+    Category target,
+    List<Todo> targetItems,
+    int insertIndex,
+  )
+  onMoveToCategory,
   Map<String, int> hiddenCountBySeries = const {},
   void Function(Todo)? onStopRecurrence,
 }) {
@@ -56,6 +71,7 @@ List<Widget> todayCategorySectionSlivers({
     byCat[cid]!.add(t);
     catOf[cid] = t.category;
   }
+  if (orderedCatIds.isEmpty) return const [];
 
   // 섹션 정렬: (그룹 sortOrder, 카테고리 sortOrder). 미분류(groupId==null)는 맨 위.
   final groupSort = {for (final g in groups) g.id: g.sortOrder};
@@ -71,85 +87,136 @@ List<Widget> todayCategorySectionSlivers({
     return ca.label.compareTo(cb.label);
   });
 
-  final slivers = <Widget>[];
-  for (var s = 0; s < orderedCatIds.length; s++) {
-    final cid = orderedCatIds[s];
-    final cat = catOf[cid]!;
-    final items = byCat[cid]!;
-    final tasks = items.where((t) => t.type == TodoType.task);
-    final total = tasks.length;
-    final done = tasks.where((t) => t.isDone).length;
-    final gLabel = (showGroupLabel && cat.groupId != null)
-        ? groupLabel[cat.groupId]
-        : null;
-
-    slivers.add(
-      SliverPadding(
-        padding: EdgeInsets.fromLTRB(
-          AppTokens.space24,
-          s == 0 ? AppTokens.space8 : AppTokens.space24,
-          AppTokens.space24,
-          AppTokens.space12,
-        ),
-        sliver: SliverToBoxAdapter(
-          child: _CategorySectionHeader(
-            category: cat,
-            groupLabel: gLabel,
-            done: done,
-            total: total,
-          ),
-        ),
-      ),
-    );
-
-    slivers.add(
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: AppTokens.space24),
-        sliver: SliverReorderableList(
-          itemCount: items.length,
-          onReorder: (oldIndex, newIndex) =>
-              onReorderSiblings(items, oldIndex, newIndex),
-          itemBuilder: (context, i) {
-            final todo = items[i];
-            final childCount = childCounts[todo.id] ?? 0;
-            final hasChildren = childCount > 0;
-            return Padding(
-              key: ValueKey('drill-node-${todo.id}'),
-              padding: const EdgeInsets.only(bottom: AppTokens.space8),
-              child: ReorderableDelayedDragStartListener(
-                index: i,
-                child: DismissibleTodoTile(
-                  todo: todo,
-                  onToggle: () => onToggle(todo),
-                  onToggleInProgress: onToggleInProgress == null
-                      ? null
-                      : () => onToggleInProgress(todo),
-                  onDelete: () => onDelete(todo),
-                  onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
-                  // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.
-                  onAddChild: () => onAddChild(todo),
-                  // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
-                  onMove: () => onMove(todo),
-                  onCopy: () => onCopy(todo),
-                  onEditItem: () => onEdit(todo),
-                  drillChildCount: hasChildren ? childCount : null,
-                  childCount: childCount,
-                  hiddenSeriesCount: todo.seriesId == null
-                      ? 0
-                      : (hiddenCountBySeries[todo.seriesId] ?? 0),
-                  onStopRecurrence: onStopRecurrence == null
-                      ? null
-                      : () => onStopRecurrence(todo),
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
+  // 헤더 + 항목을 한 줄기로 편다. 드롭 지점이 어느 섹션인지 이 순서에서 역산한다.
+  final entries = <_SectionEntry>[];
+  for (final cid in orderedCatIds) {
+    entries.add(_SectionEntry.header(cid));
+    for (final t in byCat[cid]!) {
+      entries.add(_SectionEntry.item(cid, t));
+    }
   }
 
-  return slivers;
+  void handleReorder(int oldIndex, int newIndex) {
+    final dragged = entries[oldIndex].todo;
+    if (dragged == null) return; // 헤더는 끌 수 없다 (리스너 미부착).
+
+    // ReorderableList 규약 — newIndex 는 **제거 전** 기준. 제거 후 좌표로 바꾼다.
+    final rest = [...entries]..removeAt(oldIndex);
+    var pos = newIndex > oldIndex ? newIndex - 1 : newIndex;
+    if (pos < 0) pos = 0;
+    if (pos > rest.length) pos = rest.length;
+
+    // 삽입 지점을 지배하는 헤더 = 그 앞의 마지막 헤더. 그 뒤로 센 항목 수가
+    // 섹션 안에서의 자리다. 첫 헤더보다 위에 놓으면 첫 섹션의 맨 위로 본다.
+    var destCid = orderedCatIds.first;
+    var indexInDest = 0;
+    for (var i = 0; i < pos; i++) {
+      final e = rest[i];
+      if (e.todo == null) {
+        destCid = e.categoryId;
+        indexInDest = 0;
+      } else {
+        indexInDest++;
+      }
+    }
+
+    final destItems = byCat[destCid]!;
+    if (destCid == dragged.category.id) {
+      final oldInDest = destItems.indexWhere((t) => t.id == dragged.id);
+      if (oldInDest < 0) return;
+      // onReorderSiblings 도 "제거 전" 인덱스 규약 → 뒤로 가는 이동은 +1 보정.
+      final newInDest = indexInDest >= oldInDest
+          ? indexInDest + 1
+          : indexInDest;
+      onReorderSiblings(destItems, oldInDest, newInDest);
+    } else {
+      onMoveToCategory(dragged, catOf[destCid]!, destItems, indexInDest);
+    }
+  }
+
+  return [
+    SliverReorderableList(
+      itemCount: entries.length,
+      onReorder: handleReorder,
+      itemBuilder: (context, i) {
+        final entry = entries[i];
+        final cat = catOf[entry.categoryId]!;
+        final todo = entry.todo;
+
+        if (todo == null) {
+          final items = byCat[entry.categoryId]!;
+          final tasks = items.where((t) => t.type == TodoType.task);
+          final total = tasks.length;
+          final done = tasks.where((t) => t.isDone).length;
+          final gLabel = (showGroupLabel && cat.groupId != null)
+              ? groupLabel[cat.groupId]
+              : null;
+          return Padding(
+            key: ValueKey('today-section-${entry.categoryId}'),
+            padding: EdgeInsets.fromLTRB(
+              AppTokens.space24,
+              i == 0 ? AppTokens.space8 : AppTokens.space24,
+              AppTokens.space24,
+              AppTokens.space12,
+            ),
+            child: _CategorySectionHeader(
+              category: cat,
+              groupLabel: gLabel,
+              done: done,
+              total: total,
+            ),
+          );
+        }
+
+        final childCount = childCounts[todo.id] ?? 0;
+        final hasChildren = childCount > 0;
+        return Padding(
+          key: ValueKey('drill-node-${todo.id}'),
+          padding: const EdgeInsets.fromLTRB(
+            AppTokens.space24,
+            0,
+            AppTokens.space24,
+            AppTokens.space8,
+          ),
+          child: ReorderableDelayedDragStartListener(
+            index: i,
+            child: DismissibleTodoTile(
+              todo: todo,
+              onToggle: () => onToggle(todo),
+              onToggleInProgress: onToggleInProgress == null
+                  ? null
+                  : () => onToggleInProgress(todo),
+              onDelete: () => onDelete(todo),
+              onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
+              // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.
+              onAddChild: () => onAddChild(todo),
+              // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
+              onMove: () => onMove(todo),
+              onCopy: () => onCopy(todo),
+              onEditItem: () => onEdit(todo),
+              drillChildCount: hasChildren ? childCount : null,
+              childCount: childCount,
+              hiddenSeriesCount: todo.seriesId == null
+                  ? 0
+                  : (hiddenCountBySeries[todo.seriesId] ?? 0),
+              onStopRecurrence: onStopRecurrence == null
+                  ? null
+                  : () => onStopRecurrence(todo),
+            ),
+          ),
+        );
+      },
+    ),
+  ];
+}
+
+/// 평탄화된 한 줄 — 카테고리 헤더([todo] 가 null) 또는 그 카테고리의 항목.
+class _SectionEntry {
+  const _SectionEntry.header(this.categoryId) : todo = null;
+  const _SectionEntry.item(this.categoryId, this.todo);
+
+  final String categoryId;
+  final Todo? todo;
 }
 
 /// 카테고리 섹션 헤더 — 아이콘 배지 + 카테고리 라벨 + (선택) 그룹 라벨 + 진척.

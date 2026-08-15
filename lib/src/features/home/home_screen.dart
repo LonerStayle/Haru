@@ -146,6 +146,16 @@ class HomeScreen extends ConsumerWidget {
           onReorderSiblings: (siblings, oldIndex, newIndex) => ref
               .read(todoActionsProvider)
               .reorderSiblings(siblings, oldIndex, newIndex),
+          // 섹션 간 드래그 — 다른 카테고리 섹션에 놓으면 그 카테고리로 이동까지.
+          onMoveToCategory: (item, target, targetItems, insertIndex) => ref
+              .read(todoActionsProvider)
+              .moveToCategoryAt(
+                item,
+                target: target,
+                targetSiblings: targetItems,
+                insertIndex: insertIndex,
+                all: allTodos,
+              ),
           // date-repeat — ⋮ '반복 중지' → 시리즈 마스터 삭제(비파괴적).
           onStopRecurrence: (t) => confirmStopRecurrence(context, ref, t),
         );
@@ -176,6 +186,7 @@ class _Loaded extends StatefulWidget {
     required this.onMove,
     required this.onCopy,
     required this.onReorderSiblings,
+    required this.onMoveToCategory,
     required this.onStopRecurrence,
   });
 
@@ -212,6 +223,15 @@ class _Loaded extends StatefulWidget {
   final void Function(Todo) onCopy;
   final void Function(List<Todo> siblings, int oldIndex, int newIndex)
   onReorderSiblings;
+
+  /// 섹션 간 드래그 — 다른 카테고리 섹션에 놓았을 때 (그 카테고리로 이동 + 자리 삽입).
+  final void Function(
+    Todo item,
+    Category target,
+    List<Todo> targetItems,
+    int insertIndex,
+  )
+  onMoveToCategory;
 
   /// date-repeat (FR-6) — ⋮ '반복 중지' 콜백.
   final void Function(Todo) onStopRecurrence;
@@ -301,6 +321,7 @@ class _LoadedState extends State<_Loaded> {
             onMove: widget.onMove,
             onCopy: widget.onCopy,
             onReorderSiblings: widget.onReorderSiblings,
+            onMoveToCategory: widget.onMoveToCategory,
             hiddenCountBySeries: widget.hiddenCountBySeries,
             onStopRecurrence: widget.onStopRecurrence,
           ),

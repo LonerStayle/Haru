@@ -145,7 +145,11 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
   }
 
   /// 목록·트리 정렬 — TodosDao 의 정렬 키와 같은 순서 (화면에서 보던 순서 유지).
+  ///
+  /// 단 **완료는 형제 안에서 맨 뒤**로 민다. 이동 목적지를 고르는 화면에서 끝난 일이
+  /// 앞을 막고 있으면 살아 있는 대상을 찾기 어렵다 (다른 목록의 "완료 접기" 와 같은 취지).
   static int _compare(Todo a, Todo b) {
+    if (a.isDone != b.isDone) return a.isDone ? 1 : -1;
     final s = a.sortOrder.compareTo(b.sortOrder);
     if (s != 0) return s;
     final u = b.updatedAt.compareTo(a.updatedAt);
@@ -259,10 +263,14 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
   }
 
   void _selectCategory(Category c) {
+    final live = _live();
     setState(() {
       _category = c;
-      // 다른 트리로 넘어가면 이전 선택은 의미가 없다 → 그 카테고리 최상위로 리셋.
-      _parentId = null;
+      // 원래 카테고리로 되돌아오면 **원위치**를 다시 고른 것으로 본다. 무조건 최상위로
+      // 리셋하면, 다른 카테고리를 눌러 본 뒤 되돌아왔을 때 원래 자리로 복귀할 방법이
+      // 없다 (그대로 확정하면 부모에서 떨어져 나간다).
+      // 다른 트리로 넘어갈 때만 이전 선택이 의미를 잃으므로 최상위로 리셋.
+      _parentId = c.id == live.category.id ? live.parentId : null;
     });
   }
 
@@ -279,6 +287,11 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
     final rows = searching ? _searchRows(all) : _treeRows(all);
     final live = _live(all);
     final canConfirm = _canConfirmWith(all, live);
+    // 이 항목이 속한 카테고리는 목록에 없어도(보관됨 등) 칩으로 항상 노출한다 —
+    // 없으면 다른 카테고리를 눌러 본 순간 원래 자리로 돌아올 길이 사라진다.
+    final chipCategories = categories.any((c) => c.id == live.category.id)
+        ? categories
+        : <Category>[live.category, ...categories];
 
     return Padding(
       padding: EdgeInsets.only(
@@ -364,7 +377,7 @@ class _MoveTodoSheetState extends ConsumerState<MoveTodoSheet> {
                           if (!searching) ...[
                             const SizedBox(height: AppTokens.space12),
                             _CategoryChipRow(
-                              categories: categories,
+                              categories: chipCategories,
                               selected: _category,
                               onSelect: _selectCategory,
                             ),

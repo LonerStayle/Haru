@@ -287,4 +287,80 @@ void main() {
       );
     }
   });
+
+  group('moveToCategoryAt — 오늘 화면 섹션 간 드래그', () {
+    test('다른 카테고리 섹션의 지정 자리로 들어간다', () async {
+      await repo.upsert(node('a', sortOrder: 0));
+      await repo.upsert(node('x', category: Category.daily, sortOrder: 0));
+      await repo.upsert(node('y', category: Category.daily, sortOrder: 1));
+
+      final target = [(await repo.getById('x'))!, (await repo.getById('y'))!];
+      final ok = await controller.moveToCategoryAt(
+        (await repo.getById('a'))!,
+        target: Category.daily,
+        targetSiblings: target,
+        insertIndex: 1,
+        all: [
+          for (final id in ['a', 'x', 'y']) (await repo.getById(id))!,
+        ],
+      );
+
+      expect(ok, isTrue);
+      final moved = (await repo.getById('a'))!;
+      expect(moved.category.id, 'daily');
+      final daily = [
+        for (final id in ['x', 'a', 'y']) (await repo.getById(id))!,
+      ];
+      expect(
+        daily.map((t) => t.sortOrder),
+        [0, 1, 2],
+        reason: 'x, a, y 순서로 연속 sortOrder 가 재부여돼야 한다',
+      );
+    });
+
+    test('카테고리가 바뀌면 부모에서 분리된다', () async {
+      await seedTree();
+      final all = [
+        for (final id in ['a', 'b', 'c', 'd']) (await repo.getById(id))!,
+      ];
+
+      await controller.moveToCategoryAt(
+        all.firstWhere((t) => t.id == 'b'),
+        target: Category.daily,
+        targetSiblings: const [],
+        insertIndex: 0,
+        all: all,
+      );
+
+      final moved = (await repo.getById('b'))!;
+      expect(moved.parentId, isNull, reason: '옛 카테고리 부모 밑에 남으면 안 된다');
+      expect(moved.category.id, 'daily');
+      expect(
+        (await repo.getById('c'))!.category.id,
+        'daily',
+        reason: '자손도 함께 옮겨가야 한다',
+      );
+      expect(
+        (await repo.getById('c'))!.parentId,
+        'b',
+        reason: '서브트리 구조 자체는 유지',
+      );
+    });
+
+    test('같은 카테고리면 아무것도 하지 않는다 (재정렬 몫)', () async {
+      await repo.upsert(node('a', sortOrder: 3));
+      final before = (await repo.getById('a'))!;
+
+      final ok = await controller.moveToCategoryAt(
+        before,
+        target: Category.work,
+        targetSiblings: [before],
+        insertIndex: 0,
+        all: [before],
+      );
+
+      expect(ok, isFalse);
+      expect((await repo.getById('a'))!.sortOrder, 3, reason: '자리가 튀면 안 된다');
+    });
+  });
 }

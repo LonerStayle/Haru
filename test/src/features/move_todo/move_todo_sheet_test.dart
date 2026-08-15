@@ -186,6 +186,75 @@ void main() {
     expect(confirm.onPressed, isNull, reason: '최신 기준 이미 회사 최상위 → 제자리');
   });
 
+  testWidgets('다른 카테고리를 눌러 봐도 원래 카테고리로 되돌아올 수 있다', (tester) async {
+    // 캔버스는 넥서스의 하위. 일상 칩을 눌렀다가 회사로 돌아오면 "원위치"(넥서스
+    // 하위)가 다시 선택돼야 한다 — 무조건 최상위로 리셋되면 그대로 확정했을 때
+    // 부모에서 떨어져 나가고, 되돌릴 방법도 없다.
+    await open(tester, canvas);
+
+    await tester.tap(find.byKey(const ValueKey('move-category-daily')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-category-work')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('넥서스'), findsOneWidget, reason: '회사 트리로 돌아왔다');
+    final confirm = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('move-confirm')),
+    );
+    expect(confirm.onPressed, isNull, reason: '원위치로 돌아왔으니 이동할 것이 없다');
+  });
+
+  testWidgets('목록에 없는 카테고리(보관 등)라도 칩으로 노출된다', (tester) async {
+    // 활성 목록에 회사가 없으면, 일상을 눌러 본 순간 회사로 돌아올 길이 사라진다.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          allTodosProvider.overrideWith((_) => Stream.value(all)),
+          activeCategoriesProvider.overrideWithValue(
+            const AsyncValue.data([Category.daily]),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.mobileLight(),
+          home: Scaffold(body: MoveTodoSheet(item: canvas)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('move-category-work')), findsOneWidget);
+  });
+
+  testWidgets('완료된 대상은 형제 안에서 맨 뒤로 밀린다', (tester) async {
+    final doneRoot = Todo(
+      id: 'done',
+      title: '끝난일',
+      category: Category.work,
+      dueAt: null,
+      doneAt: now,
+      createdAt: now,
+      updatedAt: now,
+      calendarEventId: null,
+      sortOrder: -5, // 정렬만 보면 맨 위여야 하는 값.
+    );
+    // 옮기는 항목 자신은 비활성 행이라 판정에서 제외하려고 별도로 둔다.
+    final mover = make(id: 'mover', title: '옮길것', sortOrder: 9);
+    await open(
+      tester,
+      mover,
+      todos: [doneRoot, nexus, refactor, mover, grocery],
+    );
+
+    final doneY = tester.getTopLeft(find.text('끝난일')).dy;
+    for (final title in ['넥서스', '리팩터링']) {
+      expect(
+        tester.getTopLeft(find.text(title)).dy,
+        lessThan(doneY),
+        reason: '완료는 미완료보다 아래에 있어야 한다',
+      );
+    }
+  });
+
   testWidgets('검색은 카테고리를 넘어 찾고 경로를 함께 보여 준다', (tester) async {
     final result = await open(tester, refactor);
 

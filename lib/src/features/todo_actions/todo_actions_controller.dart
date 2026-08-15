@@ -183,6 +183,57 @@ class TodoActionsController {
     }
   }
 
+  /// 오늘 화면의 **섹션 간 드래그** — [item] 을 [target] 카테고리의
+  /// [targetSiblings] 중 [insertIndex] 자리로 옮긴다.
+  ///
+  /// [reorderSiblings] 와 [moveTo] 의 중간 경로다. 순서만 바꾸는 것도 아니고
+  /// 부모를 고르는 것도 아니라, "다른 카테고리의 이 자리" 를 한 번에 처리한다:
+  ///
+  ///  - **부모에서 분리** — 카테고리가 바뀌면 부모에서 떼어 root 로 올린다. 이 앱은
+  ///    자식이 부모 카테고리를 상속하는 구조라, 안 떼면 다른 카테고리 부모 밑에
+  ///    남아 화면상 그 자리에 그대로 보인다 (편집 시트의 카테고리 변경과 같은 규칙).
+  ///  - **자손 동기화** — 서브트리 category 를 함께 맞춘다. 안 맞추면 자손이 옛
+  ///    카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다.
+  ///  - **자리 배치** — 대상 형제들에 삽입한 뒤 연속 sortOrder 를 재부여한다.
+  ///
+  /// 같은 카테고리로의 호출은 아무것도 하지 않는다(그건 [reorderSiblings] 몫).
+  Future<bool> moveToCategoryAt(
+    Todo item, {
+    required Category target,
+    required List<Todo> targetSiblings,
+    required int insertIndex,
+    List<Todo>? all,
+  }) async {
+    if (item.category.id == target.id) return false;
+
+    final moved = item.copyWith(parentId: null, category: target);
+    final placed = [...targetSiblings.where((t) => t.id != item.id)];
+    var at = insertIndex;
+    if (at < 0) at = 0;
+    if (at > placed.length) at = placed.length;
+    placed.insert(at, moved);
+
+    // 기준 min — 대상 집합의 최소 sortOrder (섹션의 맨 위 위치 유지).
+    var base = 0;
+    if (targetSiblings.isNotEmpty) {
+      base = targetSiblings.first.sortOrder;
+      for (final s in targetSiblings) {
+        if (s.sortOrder < base) base = s.sortOrder;
+      }
+    }
+
+    final now = _now();
+    for (var i = 0; i < placed.length; i++) {
+      final t = placed[i];
+      final desired = base + i;
+      // 옮겨온 항목은 category/parentId 도 바뀌므로 sortOrder 동률이어도 저장한다.
+      if (t.id != moved.id && t.sortOrder == desired) continue;
+      await _repo.upsert(t.copyWith(sortOrder: desired, updatedAt: now));
+    }
+    await _syncSubtreeCategory(moved.copyWith(category: target), now, all: all);
+    return true;
+  }
+
   /// Task B — 같은 부모의 형제들 사이 순서 재정렬 (within-sibling).
   ///
   /// [siblings] 는 현재 화면 표시 순서(작은 sortOrder = 위). [oldIndex] 의 항목을
