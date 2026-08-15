@@ -138,36 +138,6 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     setState(() => _selectedDay = dateOnly(date));
   }
 
-  /// 드래그 소스 래퍼.
-  ///
-  /// 데스크탑은 즉시 드래그([Draggable]), 모바일은 롱프레스([LongPressDraggable]).
-  /// 모바일에서 즉시 드래그를 쓰면 목록의 세로 스크롤과 제스처가 겹쳐 목록을
-  /// 못 굴린다. 데스크탑은 휠로 스크롤하므로 즉시 드래그가 더 빠르다.
-  /// (사이드바 카테고리 이동이 이미 쓰는 분기 규약과 동일.)
-  Widget _dragSource({
-    required CalendarDragData data,
-    required String title,
-    required Color color,
-    required Widget child,
-  }) {
-    final feedback = _DragFeedback(title: title, color: color);
-    final placeholder = Opacity(opacity: 0.35, child: child);
-    if (AppPlatform.isDesktop) {
-      return Draggable<CalendarDragData>(
-        data: data,
-        feedback: feedback,
-        childWhenDragging: placeholder,
-        child: child,
-      );
-    }
-    return LongPressDraggable<CalendarDragData>(
-      data: data,
-      feedback: feedback,
-      childWhenDragging: placeholder,
-      child: child,
-    );
-  }
-
   Widget _dropTarget(DateTime date, CalendarDayCellBuilder build) {
     return DragTarget<CalendarDragData>(
       onWillAcceptWithDetails: (details) => switch (details.data) {
@@ -288,29 +258,81 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
           padding: EdgeInsets.all(
             AppPlatform.isMobile ? AppTokens.space4 : AppTokens.space12,
           ),
-          child: _MonthPage(
-            month: month,
-            today: today,
-            selectedDay: _selectedDay,
-            onSelectDay: _selectDay,
-            onLongPressDay: (date) {
-              _selectDay(date);
-              openAddTodoOnDate(context, ref, date);
-            },
-            dayCellBuilder: _dropTarget,
+          // 옆 달 페이지가 이 달의 리페인트에 딸려오지 않게 격리한다 —
+          // 스와이프 중 프레임 비용을 눈에 띄게 줄인다.
+          child: RepaintBoundary(
+            child: _MonthPage(
+              month: month,
+              today: today,
+              selectedDay: _selectedDay,
+              onSelectDay: _selectDay,
+              onLongPressDay: (date) {
+                _selectDay(date);
+                openAddTodoOnDate(context, ref, date);
+              },
+              dayCellBuilder: _dropTarget,
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _buildPanel() {
-    final range = CalendarRange.forMonth(_selectedDay);
+  Widget _buildPanel() => _DayPanelSection(selectedDay: _selectedDay);
+}
+
+/// 드래그 소스 래퍼.
+///
+/// 데스크탑은 즉시 드래그([Draggable]), 모바일은 롱프레스([LongPressDraggable]).
+/// 모바일에서 즉시 드래그를 쓰면 목록의 세로 스크롤과 제스처가 겹쳐 목록을
+/// 못 굴린다. 데스크탑은 휠로 스크롤하므로 즉시 드래그가 더 빠르다.
+/// (사이드바 카테고리 이동이 이미 쓰는 분기 규약과 동일.)
+///
+/// State 메서드가 아니라 top-level 인 이유: 화면 State 와 아래 [_DayPanelSection]
+/// 이 함께 쓰는데, State 에 두면 패널을 분리할 수 없다.
+Widget _dragSource({
+  required CalendarDragData data,
+  required String title,
+  required Color color,
+  required Widget child,
+}) {
+  final feedback = _DragFeedback(title: title, color: color);
+  final placeholder = Opacity(opacity: 0.35, child: child);
+  if (AppPlatform.isDesktop) {
+    return Draggable<CalendarDragData>(
+      data: data,
+      feedback: feedback,
+      childWhenDragging: placeholder,
+      child: child,
+    );
+  }
+  return LongPressDraggable<CalendarDragData>(
+    data: data,
+    feedback: feedback,
+    childWhenDragging: placeholder,
+    child: child,
+  );
+}
+
+/// 선택일 목록 패널.
+///
+/// **별도 위젯으로 떼어낸 이유(성능)**: 예전엔 화면 State 의 build 안에서 직접
+/// `calendarBucketsProvider` 를 watch 했다. 그래서 할 일 stream 이 한 번 튀거나
+/// 구글 이벤트가 도착할 때마다 화면 전체 — PageView 의 달 3개 × 42칸 × DragTarget —
+/// 가 통째로 재빌드돼 눈에 띄게 버벅였다. 이제 버킷 변화는 이 패널만 다시 그린다.
+class _DayPanelSection extends ConsumerWidget {
+  const _DayPanelSection({required this.selectedDay});
+
+  final DateTime selectedDay;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final range = CalendarRange.forMonth(selectedDay);
     final buckets = ref.watch(calendarBucketsProvider(range));
     final entries =
-        buckets.asData?.value[_selectedDay] ?? const <CalendarEntry>[];
+        buckets.asData?.value[selectedDay] ?? const <CalendarEntry>[];
     return CalendarDayPanel(
-      date: _selectedDay,
+      date: selectedDay,
       entries: entries,
       entryWrapper: (entry, tile) => entry.isDraggable
           ? _dragSource(

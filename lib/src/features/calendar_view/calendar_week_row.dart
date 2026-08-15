@@ -5,12 +5,18 @@ import 'calendar_day_cell.dart';
 import 'calendar_entry.dart';
 import 'calendar_layout.dart';
 
-/// 기간 막대 한 줄의 높이.
-const double _barHeight = 12;
-const double _barGap = 2;
+/// 기간 막대 한 줄의 높이와 줄 사이 간격.
+///
+/// 12/2 였을 때 막대들이 서로 달라붙어 보인다는 지적이 있었다 — 9pt 글자가 12px 안에
+/// 꽉 차 위아래 여백이 없었던 탓이다. 높이와 간격을 함께 키워 줄을 눈으로 분리한다.
+const double _barHeight = 14;
+const double _barGap = 3;
 
-/// 셀 안 날짜 숫자 줄의 높이 — 막대 오버레이를 그 아래에 얹기 위한 오프셋.
-double get _dayNumberHeight => AppPlatform.isMobile ? 20 : 22;
+/// 날짜 숫자와 첫 막대 사이 여백.
+double get _barsTopInset => AppPlatform.isMobile ? 3 : 5;
+
+/// 마지막 막대와 그 아래 칩 사이 여백.
+const double _barsBottomInset = 4;
 
 /// 막대 레인 상한. 넘치는 막대는 셀의 "외 N건" 으로 합산한다.
 ///
@@ -81,9 +87,12 @@ class CalendarWeekRow extends StatelessWidget {
       }
     }
 
+    // 칩이 시작할 y = 셀padding + 날짜숫자 + reservedTop. 막대는 그 사이(오버레이)에
+    // 그려지므로, **막대가 실제로 쓰는 높이 + 위아래 여백**을 전부 여기 반영해야 한다.
+    // 예전엔 여백(위 5 / 아래 4)을 빼먹어 마지막 막대가 첫 칩 위에 4px 겹쳤다.
     final reservedTop = laneCount == 0
         ? 0.0
-        : laneCount * (_barHeight + _barGap);
+        : _barsTopInset + laneCount * (_barHeight + _barGap) + _barsBottomInset;
 
     return Stack(
       children: [
@@ -97,7 +106,8 @@ class CalendarWeekRow extends StatelessWidget {
           Positioned(
             left: 0,
             right: 0,
-            top: _dayNumberHeight + (AppPlatform.isMobile ? 4 : 8),
+            // 셀 안 Column 의 좌표계와 맞춘다 — 셀 padding + 날짜 숫자 아래부터.
+            top: calendarCellPadding + calendarDayNumberHeight + _barsTopInset,
             child: IgnorePointer(
               child: Padding(
                 // 셀의 좌우 padding + 테두리만큼 안쪽으로 들여 막대가 칸 경계에
@@ -220,9 +230,10 @@ class _Bar extends StatelessWidget {
         borderRadius: radius,
       ),
       child: Text(
-        // 이어져 온 막대는 제목을 다시 쓰지 않는다 — 같은 일이 매 주 반복해서
-        // 이름표를 다는 것보다, 첫 주에 한 번 쓰고 이후는 색으로 잇는 게 읽기 쉽다.
-        segment.continuesLeft ? '' : e.title,
+        // 이어져 온 막대에도 제목을 다시 쓴다. 예전엔 "첫 주에 한 번 쓰고 이후는 색으로
+        // 잇는다" 였는데, 실사용에서 둘째 주부터는 이름 없는 색 막대만 남아 무슨 일인지
+        // 알 수 없었다. 이어짐 표시는 잘린 쪽 모서리를 각지게 그리는 것으로 충분하다.
+        e.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelSmall?.copyWith(
