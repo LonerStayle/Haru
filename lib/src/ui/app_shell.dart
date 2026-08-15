@@ -23,6 +23,7 @@ import '../features/home/home_screen.dart';
 import '../features/home/today_providers.dart';
 import '../features/manage/manage_drawer.dart';
 import '../features/outline/outline_screen.dart';
+import '../features/search/search_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
 import '../features/timeline/timeline_screen.dart';
@@ -451,6 +452,12 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   /// FAB / Cmd+N 진입점 — 바로 새 할일을 띄우지 않고 **추가 선택 시트**를 먼저 연다.
   /// 새 할일 / 카테고리 / 그룹 중 하나를 고르는 단일 추가 동선 (대표님 요청).
+  /// 전역 검색 화면 열기 — 사이드바/앱바 버튼과 Cmd+F 가 공유하는 단일 진입점.
+  void _openSearch() {
+    if (!mounted) return;
+    SearchScreen.show(context);
+  }
+
   Future<void> _openAddMenu() async {
     final choice = await showModalBottomSheet<_AddAction>(
       context: context,
@@ -688,6 +695,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     return _ShortcutsHost(
       destinations: _destinations,
       onSelect: _selectByDigit,
+      onOpenSearch: _openSearch,
       // 모바일 시스템 뒤로가기 계단식 처리 — Drawer 닫기 / 그룹 나가기 / 오늘 복귀.
       // canPop=false 로 두면 predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅된다.
       child: PopScope(
@@ -717,6 +725,12 @@ class _AppShellState extends ConsumerState<AppShell> {
                     ),
                   ),
                   actions: [
+                    IconButton(
+                      key: const ValueKey('search-button'),
+                      icon: const Icon(Icons.search),
+                      tooltip: '검색',
+                      onPressed: _openSearch,
+                    ),
                     IconButton(
                       key: const ValueKey('settings-button'),
                       icon: const Icon(Icons.settings_outlined),
@@ -754,15 +768,24 @@ class _SelectDestinationIntent extends Intent {
   final int digit;
 }
 
+class _OpenSearchIntent extends Intent {
+  const _OpenSearchIntent();
+}
+
 class _ShortcutsHost extends StatelessWidget {
   const _ShortcutsHost({
     required this.destinations,
     required this.onSelect,
+    required this.onOpenSearch,
     required this.child,
   });
 
   final List<AppDestination> destinations;
   final void Function(int digit) onSelect;
+
+  /// Cmd+F — 전역 검색 열기. 숫자 단축키와 달리 modifier 조합이라 TextField 입력
+  /// 중에도 그대로 동작한다 (숫자처럼 오타로 눌릴 일이 없다).
+  final VoidCallback onOpenSearch;
   final Widget child;
 
   /// 단축키 digit (0~9) ↔ LogicalKeyboardKey 매핑. destinations 의 shortcutDigit
@@ -790,6 +813,9 @@ class _ShortcutsHost extends StatelessWidget {
       if (key == null) continue;
       shortcuts[SingleActivator(key)] = _SelectDestinationIntent(digit);
     }
+    // macOS 관례대로 Cmd+F = 찾기. Cmd+N (추가) 과 같은 계열의 앱 단축키다.
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyF, meta: true)] =
+        const _OpenSearchIntent();
 
     return Shortcuts(
       shortcuts: shortcuts,
@@ -797,6 +823,12 @@ class _ShortcutsHost extends StatelessWidget {
         actions: <Type, Action<Intent>>{
           _SelectDestinationIntent: _SelectDestinationAction(
             onSelect: onSelect,
+          ),
+          _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
+            onInvoke: (_) {
+              onOpenSearch();
+              return null;
+            },
           ),
         },
         child: Focus(autofocus: true, child: child),
@@ -1200,6 +1232,13 @@ class _SidebarState extends State<_Sidebar> {
                   fontWeight: FontWeight.w700,
                 ),
               ),
+            ),
+            IconButton(
+              key: const ValueKey('search-button'),
+              icon: const Icon(Icons.search, size: 20),
+              tooltip: '검색 (Cmd+F)',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => SearchScreen.show(context),
             ),
             IconButton(
               key: const ValueKey('settings-button'),

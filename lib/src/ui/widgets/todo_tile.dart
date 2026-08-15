@@ -45,6 +45,7 @@ class TodoTile extends StatelessWidget {
     this.hiddenSeriesCount = 0,
     this.onStopRecurrence,
     this.breadcrumb,
+    this.snippet,
   });
 
   final Todo todo;
@@ -99,6 +100,10 @@ class TodoTile extends StatelessWidget {
   /// 상태별 보기 — 계층이 평탄해진 목록에서 "이 항목이 어디 소속인지" 알려주는
   /// 부모 경로 (`상위 › 그 하위`). null 이면 미표시(기본 트리 뷰).
   final String? breadcrumb;
+
+  /// 검색 결과에서 메모 본문의 매칭된 부분 발췌. non-null 이면 제목 아래 한 줄로
+  /// 보여주고, note 의 기본 본문 프리뷰는 대신 생략한다 (같은 자리에 두 번 쓰지 않게).
+  final String? snippet;
 
   @override
   Widget build(BuildContext context) {
@@ -346,7 +351,9 @@ class TodoTile extends StatelessWidget {
                       ),
                     // §13 — note 본문(description) 2줄 프리뷰. "정보=메모" 를 즉시 전달.
                     // task 는 미노출(위 힌트 아이콘 유지), 빈 description note 는 생략.
-                    if (isNote && (todo.description ?? '').trim().isNotEmpty)
+                    if (snippet == null &&
+                        isNote &&
+                        (todo.description ?? '').trim().isNotEmpty)
                       Padding(
                         padding: const EdgeInsets.only(top: AppTokens.space4),
                         child: Text(
@@ -355,6 +362,21 @@ class TodoTile extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    // 검색 결과 — 메모 본문에서 걸린 부분 발췌. 왜 이 항목이 나왔는지
+                    // 바로 보이게 한다 (제목만 매칭이면 null 이라 렌더 안 됨).
+                    if (snippet != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppTokens.space4),
+                        child: Text(
+                          snippet!,
+                          key: const ValueKey('todo-tile-search-snippet'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurface.withValues(alpha: 0.75),
+                          ),
                         ),
                       ),
                     if (!compact && dateText != null)
