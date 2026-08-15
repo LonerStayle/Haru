@@ -15,6 +15,7 @@ import '../features/add_todo/add_todo_sheet.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/category/add_category_dialog.dart';
 import '../features/category/add_group_dialog.dart';
+import '../features/calendar/calendar_providers.dart';
 import '../features/category/categories_controller.dart';
 import '../features/category/groups_controller.dart';
 import '../features/category/category_view.dart';
@@ -611,6 +612,10 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     // user 가 다른 계정으로 바뀌면 옛 todos/outbox 자동 정리 (side-effect listener).
     ref.watch(userChangeCleanupProvider);
+
+    // Google Calendar 자동 동기화 — 앱 시작·포그라운드 복귀·5분 주기.
+    // 연동이 꺼져 있거나 OAuth 키가 없으면 scheduler 자체가 null 이라 아무 일도 없다.
+    ref.watch(calendarSyncSchedulerProvider)?.start();
 
     // v1.2 — 활성 카테고리 stream 에 따라 destinations 동적 build (보관 카테고리 제외).
     // loading / error 시 fallback 으로 builtin 5종 기준의 default 사용.

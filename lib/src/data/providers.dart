@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/auth_providers.dart';
+import '../features/calendar/calendar_settings.dart';
+import 'calendar_aware_todo_repository.dart';
 import 'categories_repository.dart';
 import 'groups_repository.dart';
 import 'local/app_database.dart';
@@ -31,15 +33,31 @@ final todoRepositoryProvider = Provider<TodoRepository>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final api = ref.watch(supabaseTodosApiProvider);
 
-  if (api == null) {
-    return LocalTodoRepository(db.todosDao);
-  }
-  return SyncingTodoRepository(
-    local: db.todosDao,
-    outbox: db.outboxDao,
-    api: api,
-    // userIdGetter 가 호출 시점마다 ref.read 로 현재 user 반환 — sign-in/out 동적 추적.
-    userIdGetter: () => ref.read(currentUserProvider)?.id,
+  final base = api == null
+      ? LocalTodoRepository(db.todosDao)
+      : SyncingTodoRepository(
+          local: db.todosDao,
+          outbox: db.outboxDao,
+          api: api,
+          // userIdGetter 가 호출 시점마다 ref.read 로 현재 user 반환 — sign-in/out 동적 추적.
+          userIdGetter: () => ref.read(currentUserProvider)?.id,
+        );
+
+  // Google Calendar 연동이 켜져 있을 때만 캘린더 데코레이터를 한 겹 씌운다.
+  // **꺼져 있으면 아예 끼우지 않는다** — 연동 없이도 앱이 이전과 완전히 동일하게
+  // 동작한다는 것을 조립 단계에서 보장한다 (판정 함수에 의존하지 않는다).
+  //
+  // 주의: 동기화 서비스 자신은 이 provider 를 쓰면 안 된다. 수신 결과를 여기에
+  // 쓰면 다시 캘린더 큐에 쌓여 되쏘게 된다 — `calendarSyncRepositoryProvider` 참고.
+  final calendarConnected = ref.watch(
+    calendarSettingsProvider.select((s) => s.connected),
+  );
+  if (!calendarConnected) return base;
+
+  return CalendarAwareTodoRepository(
+    inner: base,
+    ops: db.calendarOpsDao,
+    settings: () => ref.read(calendarSettingsProvider),
   );
 });
 
