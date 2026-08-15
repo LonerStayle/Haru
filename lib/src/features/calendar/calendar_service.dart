@@ -14,9 +14,16 @@ class CalendarService {
 
   final CalendarAuth _auth;
 
+  /// 기본 대상 캘린더. 사용자가 설정에서 고르기 전(또는 레거시 항목)의 값이다.
+  static const defaultCalendarId = 'primary';
+
   /// Todo 의 dueAt 기반 이벤트 생성. dueAt 이 null 이면 null 반환.
   /// 사용자가 OAuth 인증을 거부/실패하면 null (호출자가 graceful 처리).
-  Future<String?> createEventForTodo(Todo todo, {bool isAllDay = false}) async {
+  Future<String?> createEventForTodo(
+    Todo todo, {
+    bool isAllDay = false,
+    String calendarId = defaultCalendarId,
+  }) async {
     if (todo.dueAt == null) return null;
     final client = await _auth.authedClient();
     if (client == null) return null;
@@ -24,7 +31,7 @@ class CalendarService {
       final api = gcal.CalendarApi(client);
       final created = await api.events.insert(
         _toEvent(todo, isAllDay: isAllDay),
-        'primary',
+        calendarId,
       );
       return created.id;
     } finally {
@@ -33,28 +40,35 @@ class CalendarService {
   }
 
   /// 기존 캘린더 이벤트를 todo 의 최신 상태로 갱신. dueAt 이 null 이 되면 이벤트 삭제.
-  Future<void> updateEventForTodo(Todo todo, String eventId) async {
+  Future<void> updateEventForTodo(
+    Todo todo,
+    String eventId, {
+    String calendarId = defaultCalendarId,
+  }) async {
     if (todo.dueAt == null) {
-      await deleteEvent(eventId);
+      await deleteEvent(eventId, calendarId: calendarId);
       return;
     }
     final client = await _auth.authedClient();
     if (client == null) return;
     try {
       final api = gcal.CalendarApi(client);
-      await api.events.update(_toEvent(todo), 'primary', eventId);
+      await api.events.update(_toEvent(todo), calendarId, eventId);
     } finally {
       client.close();
     }
   }
 
   /// 캘린더 이벤트 삭제. 이미 삭제된 (404/410) 경우 silent — 멱등.
-  Future<void> deleteEvent(String eventId) async {
+  Future<void> deleteEvent(
+    String eventId, {
+    String calendarId = defaultCalendarId,
+  }) async {
     final client = await _auth.authedClient();
     if (client == null) return;
     try {
       final api = gcal.CalendarApi(client);
-      await api.events.delete('primary', eventId);
+      await api.events.delete(calendarId, eventId);
     } on gcal.DetailedApiRequestError catch (e) {
       if (e.status == 404 || e.status == 410) return; // 이미 없음 — 멱등
       rethrow;
@@ -125,6 +139,28 @@ class CalendarService {
     if (todo.isRecurringMaster && rule != null) {
       event.recurrence = [rule.toRRule(todo.recurrenceEndAt)];
     }
+
+    // google-calendar-sync: 완료 표시는 **색으로만** 한다 (8 = Graphite 회색).
+    // 제목에 "✓" 를 붙이는 방식은 되가져올 때 제목을 파싱해 떼어내야 해서
+    // 사용자가 직접 "✓" 로 시작하는 제목을 쓰면 깨진다. 미완료면 null 로 되돌려
+    // 캘린더 기본색을 복구한다.
+    event.colorId = todo.isDone ? '8' : null;
+
+    // google-calendar-sync: 앱 서명. 되가져오기(pull) 가 이 값들을 읽는다.
+    //  - haruRev   — echo 차단. 수신한 이벤트의 rev 가 로컬 updatedAt 과 같으면
+    //                "우리가 쓴 것" 이므로 무시한다. 이 비교가 어긋나면 push↔pull
+    //                무한 루프가 돈다 → UTC ISO8601 로 고정.
+    //  - haruDateMode / haruAnchor — 왕복 안정성. startTime 모드는 "시각+1시간"
+    //                블록으로 나가므로, 형태만 보고 되읽으면 range 로 변질된다.
+    //  - haruTodoId — 링크 복구·중복 이벤트 정리용 역추적 키.
+    event.extendedProperties = gcal.EventExtendedProperties(
+      private: {
+        'haruTodoId': todo.id,
+        'haruRev': todo.updatedAt.toUtc().toIso8601String(),
+        'haruDateMode': todo.dateMode.name,
+        'haruAnchor': todo.timeAnchor,
+      },
+    );
     return event;
   }
 }
