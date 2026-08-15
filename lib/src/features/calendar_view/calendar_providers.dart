@@ -4,6 +4,8 @@ import '../../data/day_boundary_provider.dart';
 import '../../data/providers.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
+import '../calendar/google_auth_service.dart';
+import '../calendar/google_events_service.dart';
 import '../category/categories_controller.dart';
 import '../outline/tree_providers.dart';
 import 'calendar_entry.dart';
@@ -182,14 +184,59 @@ final calendarEntriesProvider = Provider.family
       );
     });
 
+/// 구글 이벤트를 함께 그릴지 (세션 내 토글).
+///
+/// 기본값은 연동이 구성돼 있으면 on. 영속 저장은 하지 않는다 — 표시 여부는
+/// "지금 뭘 보고 싶은가" 라서 기기 설정으로 굳힐 성질이 아니다.
+class ShowGoogleEventsNotifier extends Notifier<bool> {
+  @override
+  bool build() => ref.watch(googleCalendarAvailableProvider);
+
+  void toggle() => state = !state;
+}
+
+final showGoogleEventsProvider =
+    NotifierProvider<ShowGoogleEventsNotifier, bool>(
+      ShowGoogleEventsNotifier.new,
+    );
+
+/// 보이는 달 범위의 구글 이벤트 (읽기 전용).
+///
+/// `autoDispose` 를 쓰지 않는 이유: 달을 오갈 때마다 재조회하면 네트워크 왕복만큼
+/// 이벤트가 깜빡인다. 한 세션에서 방문한 달 수만큼만 캐시가 쌓이므로 부담도 없다.
+///
+/// 조회 실패는 서비스가 빈 리스트로 삼키므로 여기서도 화면을 막지 않는다.
+final googleEventsProvider =
+    FutureProvider.family<List<GoogleEventEntry>, CalendarRange>((
+      ref,
+      range,
+    ) async {
+      if (!ref.watch(showGoogleEventsProvider)) return const [];
+      final service = ref.watch(googleEventsServiceProvider);
+      if (service == null) return const [];
+      // timeMax 는 exclusive — 마지막 날이 잘리지 않게 하루 더 준다.
+      final until = DateTime(
+        range.end.year,
+        range.end.month,
+        range.end.day + 1,
+      );
+      return service.listRange(range.start, until);
+    });
+
 /// 보이는 달의 날짜별 버킷. 각 리스트는 `compareEntries` 순서로 정렬돼 있다.
+///
+/// 구글 이벤트는 비동기라 **로딩을 기다리지 않는다** — 로컬 항목이 먼저 그려지고
+/// 이벤트가 도착하면 그때 합쳐진다. 구글이 느리다고 내 할 일이 안 보이면 안 된다.
 final calendarBucketsProvider = Provider.family
     .autoDispose<AsyncValue<Map<DateTime, List<CalendarEntry>>>, CalendarRange>(
       (ref, range) {
         final entries = ref.watch(calendarEntriesProvider(range));
+        final google =
+            ref.watch(googleEventsProvider(range)).asData?.value ??
+            const <GoogleEventEntry>[];
         return entries.whenData(
           (list) => bucketByDate(
-            entries: list,
+            entries: [...list, ...google],
             rangeStart: range.start,
             rangeEnd: range.end,
           ),
