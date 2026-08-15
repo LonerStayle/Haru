@@ -238,6 +238,24 @@ void main() {
       expect(after, greaterThan(before));
     });
 
+    testWidgets('좁은 데스크탑 창에서도 헤더가 가로로 넘치지 않는다', (tester) async {
+      // 실사용 신고: 사이드바를 뺀 폭이 330 남짓일 때 제목을 0 으로 줄여도
+      // 버튼들만으로 5.5px 넘쳤다. 폭에 따라 ‹ › / 구글 토글을 접어야 한다.
+      await mount(tester, size: const Size(330, 700));
+      expect(tester.takeException(), isNull);
+      // 패널 토글은 절대 접지 않는다 — 접힌 상태에서 사라지면 되돌릴 수 없다.
+      expect(
+        find.byKey(const ValueKey('calendar-panel-toggle')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('calendar-prev-month')), findsNothing);
+    });
+
+    testWidgets('넓은 창에서는 ‹ › 가 다시 나온다', (tester) async {
+      await mount(tester, size: const Size(1200, 900));
+      expect(find.byKey(const ValueKey('calendar-prev-month')), findsOneWidget);
+    });
+
     testWidgets('모바일에는 패널 토글이 없다', (tester) async {
       await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
       expect(find.byKey(const ValueKey('calendar-panel-toggle')), findsNothing);

@@ -22,6 +22,12 @@ import 'calendar_week_row.dart';
 /// 데스크탑 우측 선택일 패널의 폭.
 const double _panelWidth = 340;
 
+/// 패널을 띄우고도 격자에 남겨야 하는 최소 폭.
+///
+/// 이보다 좁아지면 패널을 자동으로 접는다 — 안 그러면 340 짜리 패널이 창보다 넓어
+/// 가로 오버플로가 난다 (사이드바까지 낀 좁은 창에서 실제로 났다).
+const double _minGridWidth = 280;
+
 /// 캘린더 화면의 두 보기 방식.
 enum CalendarSegment {
   /// 월 달력 격자 + 선택일 목록.
@@ -240,18 +246,27 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   }
 
   Widget _buildDesktopBody(DateTime today) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(child: _buildPager(today)),
-        // 접으면 격자가 패널 폭만큼 넓어진다. 애니메이션 없이 즉시 전환하는 건
-        // 모바일의 달력 접기와 같은 규약 — 폭이 크게 바뀌는 전환은 중간 프레임이
-        // 오히려 어수선하다.
-        if (!_panelCollapsed) ...[
-          const VerticalDivider(width: 1, thickness: AppTokens.hairline),
-          SizedBox(width: _panelWidth, child: _buildPanel()),
-        ],
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 창이 좁으면 패널(340)이 통째로 안 들어가 가로로 넘친다. 격자가 최소한
+        // [_minGridWidth] 는 남아야 달력 구실을 하므로, 자리가 없으면 패널을 접는다.
+        final fits = constraints.maxWidth >= _panelWidth + _minGridWidth;
+        final showPanel = !_panelCollapsed && fits;
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: _buildPager(today)),
+            // 접으면 격자가 패널 폭만큼 넓어진다. 애니메이션 없이 즉시 전환하는 건
+            // 모바일의 달력 접기와 같은 규약 — 폭이 크게 바뀌는 전환은 중간
+            // 프레임이 오히려 어수선하다.
+            if (showPanel) ...[
+              const VerticalDivider(width: 1, thickness: AppTokens.hairline),
+              SizedBox(width: _panelWidth, child: _buildPanel()),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -492,113 +507,138 @@ class _CalendarHeader extends StatelessWidget {
   /// 우측 패널 접기/펼치기. null 이면 버튼 미표시 (모바일).
   final VoidCallback? onTogglePanel;
 
+  /// 이 폭 아래로는 ‹ › 를 접는다. 달 이동은 ←/→ 키와 좌우 스와이프로도 되므로
+  /// 잃는 기능이 없다. (모바일에서 같은 이유로 이미 ‹ › 를 빼고 있다.)
+  static const double _arrowsMinWidth = 460;
+
+  /// 이 폭 아래로는 구글 일정 토글을 접는다 — 부가 표시라 가장 먼저 양보한다.
+  static const double _googleToggleMinWidth = 380;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final compact = AppPlatform.isMobile;
     final showMonthNav = segment == CalendarSegment.grid;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        compact ? AppTokens.space8 : AppTokens.space24,
-        compact ? AppTokens.space8 : AppTokens.space20,
-        compact ? AppTokens.space8 : AppTokens.space24,
-        AppTokens.space8,
-      ),
-      child: Row(
-        children: [
-          if (showMonthNav) ...[
-            Flexible(
-              child: Text(
-                KoDate.monthTitle(focusedMonth),
-                key: const ValueKey('calendar-month-title'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    (compact
-                            ? theme.textTheme.titleLarge
-                            : theme.textTheme.headlineSmall)
-                        ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-            ),
-            // 모바일에는 ‹ › 를 두지 않는다. 폭이 40px 모자라 헤더가 넘치고,
-            // 확정 요구상 모바일의 달 이동 수단은 좌우 스와이프다 (데스크탑은 키/버튼).
-            if (!compact) ...[
-              const SizedBox(width: AppTokens.space4),
-              IconButton(
-                key: const ValueKey('calendar-prev-month'),
-                onPressed: onPrev,
-                icon: const Icon(Icons.chevron_left),
-                tooltip: '이전 달 (←)',
-                visualDensity: VisualDensity.compact,
-                style: IconButton.styleFrom(
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    // 헤더는 폭이 줄면 가로로 넘친다 — 제목을 0 으로 줄여도 버튼들만으로 넘치는
+    // 구간이 실제로 있었다(사이드바까지 낀 좁은 창). 그래서 실측 폭을 보고 덜
+    // 중요한 것부터 접는다. **패널 토글은 절대 접지 않는다** — 패널을 접어 둔
+    // 상태에서 그 버튼까지 사라지면 되돌릴 방법이 없다.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final showArrows = !compact && width >= _arrowsMinWidth;
+        final showGoogle = width >= _googleToggleMinWidth;
+
+        // 좌우 여백도 좁은 창에서는 양보한다 — 버튼을 더 접는 것보다 여백을 줄이는
+        // 쪽이 기능을 안 잃는다 (24+24 → 8+8 로 32px 확보).
+        final tight = compact || width < _arrowsMinWidth;
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            tight ? AppTokens.space8 : AppTokens.space24,
+            compact ? AppTokens.space8 : AppTokens.space20,
+            tight ? AppTokens.space8 : AppTokens.space24,
+            AppTokens.space8,
+          ),
+          child: Row(
+            children: [
+              if (showMonthNav) ...[
+                Flexible(
+                  child: Text(
+                    KoDate.monthTitle(focusedMonth),
+                    key: const ValueKey('calendar-month-title'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        (compact
+                                ? theme.textTheme.titleLarge
+                                : theme.textTheme.headlineSmall)
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
                 ),
-              ),
-              IconButton(
-                key: const ValueKey('calendar-next-month'),
-                onPressed: onNext,
-                icon: const Icon(Icons.chevron_right),
-                tooltip: '다음 달 (→)',
-                visualDensity: VisualDensity.compact,
-                style: IconButton.styleFrom(
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                // 모바일에는 ‹ › 를 두지 않는다. 폭이 40px 모자라 헤더가 넘치고,
+                // 확정 요구상 모바일의 달 이동 수단은 좌우 스와이프다 (데스크탑은 키/버튼).
+                // 데스크탑도 창이 좁으면 같은 이유로 접는다 ([_arrowsMinWidth]).
+                if (showArrows) ...[
+                  const SizedBox(width: AppTokens.space4),
+                  IconButton(
+                    key: const ValueKey('calendar-prev-month'),
+                    onPressed: onPrev,
+                    icon: const Icon(Icons.chevron_left),
+                    tooltip: '이전 달 (←)',
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('calendar-next-month'),
+                    onPressed: onNext,
+                    icon: const Icon(Icons.chevron_right),
+                    tooltip: '다음 달 (→)',
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
+                const SizedBox(width: AppTokens.space4),
+                TextButton(
+                  key: const ValueKey('calendar-today-button'),
+                  onPressed: onToday,
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space8,
+                    ),
+                  ),
+                  child: const Text('오늘'),
                 ),
-              ),
+              ] else
+                Text(
+                  '타임라인',
+                  style:
+                      (compact
+                              ? theme.textTheme.titleLarge
+                              : theme.textTheme.headlineSmall)
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+              const Spacer(),
+              if (showMonthNav && showGoogle) const _GoogleEventsToggle(),
+              if (onTogglePanel != null && showMonthNav)
+                IconButton(
+                  key: const ValueKey('calendar-panel-toggle'),
+                  onPressed: onTogglePanel,
+                  icon: Icon(
+                    panelCollapsed
+                        ? Icons.view_sidebar_outlined
+                        : Icons.view_sidebar,
+                  ),
+                  tooltip: panelCollapsed ? '목록 패널 펼치기' : '목록 패널 접기',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              if (onToggleCollapse != null && showMonthNav)
+                IconButton(
+                  key: const ValueKey('calendar-collapse-toggle'),
+                  onPressed: onToggleCollapse,
+                  icon: Icon(
+                    gridCollapsed ? Icons.expand_more : Icons.expand_less,
+                  ),
+                  tooltip: gridCollapsed ? '달력 펼치기' : '달력 접기',
+                  visualDensity: VisualDensity.compact,
+                  style: IconButton.styleFrom(
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              _SegmentToggle(segment: segment, onSegment: onSegment),
             ],
-            const SizedBox(width: AppTokens.space4),
-            TextButton(
-              key: const ValueKey('calendar-today-button'),
-              onPressed: onToday,
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppTokens.space8,
-                ),
-              ),
-              child: const Text('오늘'),
-            ),
-          ] else
-            Text(
-              '타임라인',
-              style:
-                  (compact
-                          ? theme.textTheme.titleLarge
-                          : theme.textTheme.headlineSmall)
-                      ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          const Spacer(),
-          if (showMonthNav) const _GoogleEventsToggle(),
-          if (onTogglePanel != null && showMonthNav)
-            IconButton(
-              key: const ValueKey('calendar-panel-toggle'),
-              onPressed: onTogglePanel,
-              icon: Icon(
-                panelCollapsed
-                    ? Icons.view_sidebar_outlined
-                    : Icons.view_sidebar,
-              ),
-              tooltip: panelCollapsed ? '목록 패널 펼치기' : '목록 패널 접기',
-              visualDensity: VisualDensity.compact,
-              style: IconButton.styleFrom(
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          if (onToggleCollapse != null && showMonthNav)
-            IconButton(
-              key: const ValueKey('calendar-collapse-toggle'),
-              onPressed: onToggleCollapse,
-              icon: Icon(gridCollapsed ? Icons.expand_more : Icons.expand_less),
-              tooltip: gridCollapsed ? '달력 펼치기' : '달력 접기',
-              visualDensity: VisualDensity.compact,
-              style: IconButton.styleFrom(
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          _SegmentToggle(segment: segment, onSegment: onSegment),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 }
