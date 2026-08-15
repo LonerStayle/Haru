@@ -161,4 +161,46 @@ void main() {
       reason: '루트(오늘)에서는 가로챌 게 없어 앱 종료(SystemNavigator.pop) 로 이어져야 함',
     );
   });
+
+  group('캘린더 화면은 앱바를 쓰지 않는다', () {
+    // 달력은 세로 높이가 곧 정보량이라 "캘린더" 제목 한 줄에 56dp 를 내주지 않는다.
+    // 다른 화면의 앱바는 그대로 — 이 화면만의 규칙이다.
+    testWidgets('오늘 화면에는 앱바가 있고, 캘린더로 가면 사라진다', (tester) async {
+      await pump(tester);
+      expect(find.byType(AppBar), findsOneWidget, reason: '오늘 화면은 앱바 유지');
+
+      await tester.tap(find.text('캘린더'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CalendarScreen), findsOneWidget);
+      expect(find.byType(AppBar), findsNothing);
+    });
+
+    testWidgets('앱바가 없어도 검색·설정 통로는 남는다 (헤더 ⋮)', (tester) async {
+      await pump(tester);
+      await tester.tap(find.text('캘린더'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('calendar-overflow-menu')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('캘린더에서 나오면 앱바가 돌아온다', (tester) async {
+      await pump(tester);
+      await tester.tap(find.text('캘린더'));
+      await tester.pumpAndSettle();
+      // 캘린더 헤더에도 '오늘' 버튼이 있어 하단 네비의 것으로 좁힌다.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('오늘'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppBar), findsOneWidget);
+    });
+  });
 }

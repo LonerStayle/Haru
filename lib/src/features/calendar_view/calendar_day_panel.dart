@@ -21,6 +21,7 @@ class CalendarDayPanel extends ConsumerWidget {
     required this.date,
     required this.entries,
     this.entryWrapper,
+    this.onToggleCollapse,
   });
 
   final DateTime date;
@@ -30,6 +31,10 @@ class CalendarDayPanel extends ConsumerWidget {
 
   /// 타일을 감싸 드래그 소스로 만들기 위한 훅 (T13 에서 사용).
   final Widget Function(CalendarEntry entry, Widget tile)? entryWrapper;
+
+  /// 이 패널을 접는다. null 이면 접기 affordance 미표시 (데스크탑은 헤더의 패널
+  /// 토글이 같은 일을 하므로 넘기지 않는다).
+  final VoidCallback? onToggleCollapse;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,14 +53,43 @@ class CalendarDayPanel extends ConsumerWidget {
           ),
           child: Row(
             children: [
+              // 날짜 영역 자체가 접기 버튼 — 모바일에서 달력을 크게 보려면 이 패널을
+              // 내려야 하는데, 헤더에 토글을 하나 더 두면 '달력 접기' 와 헷갈린다.
               Expanded(
-                child: Text(
-                  KoDate.dayWithWeekday(date),
-                  key: const ValueKey('calendar-panel-header'),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+                child: onToggleCollapse == null
+                    ? Text(
+                        KoDate.dayWithWeekday(date),
+                        key: const ValueKey('calendar-panel-header'),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      )
+                    : InkWell(
+                        key: const ValueKey('calendar-panel-collapse'),
+                        onTap: onToggleCollapse,
+                        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: AppTokens.space4,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  KoDate.dayWithWeekday(date),
+                                  key: const ValueKey('calendar-panel-header'),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              const Icon(Icons.expand_more, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
               ),
               if (entries.isNotEmpty)
                 Padding(

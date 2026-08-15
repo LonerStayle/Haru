@@ -301,5 +301,101 @@ void main() {
       await mount(tester, form: FormFactor.mobile, size: const Size(360, 800));
       expect(tester.takeException(), isNull);
     });
+
+    testWidgets('앱바를 대신할 ⋮ 메뉴(검색·설정)가 헤더에 있다', (tester) async {
+      // 캘린더 화면은 세로 높이를 위해 앱바를 쓰지 않는다 — 앱바가 들고 있던
+      // 검색·설정 통로가 사라지지 않았는지 확인.
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(
+        find.byKey(const ValueKey('calendar-overflow-menu')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('데스크탑 헤더에는 ⋮ 메뉴가 없다', (tester) async {
+      await mount(tester);
+      expect(
+        find.byKey(const ValueKey('calendar-overflow-menu')),
+        findsNothing,
+      );
+    });
+  });
+
+  group('모바일 — 목록 패널 접기', () {
+    testWidgets('패널 헤더를 누르면 접히고 하단 막대만 남는다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(
+        find.byKey(const ValueKey('calendar-panel-collapse')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
+      await tester.pumpAndSettle();
+
+      // 목록 본문은 사라지고(‘이 날짜로 추가’ 가 그 증거) 펼치기 막대만 남는다.
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('calendar-panel-expand')),
+        findsOneWidget,
+      );
+      // 달력은 그대로 — 접기의 목적이 달력을 크게 보는 것이다.
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+    });
+
+    testWidgets('하단 막대를 누르면 다시 펼쳐진다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-expand')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-panel-expand')), findsNothing);
+    });
+
+    testWidgets('접힌 막대에 선택일과 건수가 나온다', (tester) async {
+      await mount(
+        tester,
+        form: FormFactor.mobile,
+        size: const Size(420, 900),
+        todos: [
+          Todo(
+            id: 'x',
+            title: '회의',
+            category: Category.work,
+            dueAt: DateTime(2026, 8, 15, 10),
+            doneAt: null,
+            createdAt: now,
+            updatedAt: now,
+            calendarEventId: null,
+          ),
+        ],
+      );
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+      expect(find.text('1건'), findsOneWidget);
+    });
+
+    testWidgets('달력을 접은 상태에서는 목록 접기를 막는다 (둘 다 접히면 빈 화면)', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await tester.tap(find.byKey(const ValueKey('calendar-collapse-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('calendar-panel-collapse')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('데스크탑 패널에는 접기 affordance 가 없다 (헤더 토글이 담당)', (tester) async {
+      await mount(tester);
+      expect(
+        find.byKey(const ValueKey('calendar-panel-collapse')),
+        findsNothing,
+      );
+    });
   });
 }

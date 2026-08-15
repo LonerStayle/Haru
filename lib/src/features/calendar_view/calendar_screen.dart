@@ -8,6 +8,8 @@ import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../calendar/google_auth_service.dart';
 import '../home/today_providers.dart';
+import '../search/search_screen.dart';
+import '../settings/settings_sheet.dart';
 import '../timeline/timeline_screen.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import 'calendar_actions.dart';
@@ -270,12 +272,37 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     );
   }
 
+  /// 모바일은 위아래 분할 — 위 달력 / 아래 선택일 목록.
+  ///
+  /// 양쪽 다 접을 수 있다(단, 동시에는 아니다):
+  ///  - 달력 접기([_gridCollapsed]) → 목록이 화면 전체. 그날 할 일을 길게 볼 때.
+  ///  - 목록 접기([_panelCollapsed]) → 달력이 화면 전체. 달을 크게 볼 때.
+  ///
+  /// 목록을 접으면 하단에 얇은 막대만 남긴다 — 완전히 없애면 다시 펼 방법이 없다.
   Widget _buildMobileBody(DateTime today) {
+    if (_panelCollapsed && !_gridCollapsed) {
+      return Column(
+        children: [
+          Expanded(child: _buildPager(today)),
+          _CollapsedDayBar(
+            selectedDay: _selectedDay,
+            onExpand: () => setState(() => _panelCollapsed = false),
+          ),
+        ],
+      );
+    }
     return Column(
       children: [
-        // 접으면 목록이 화면 전체를 쓴다 — 좁은 폰에서 그날 할 일을 길게 볼 때.
         if (!_gridCollapsed) Expanded(flex: 6, child: _buildPager(today)),
-        Expanded(flex: 5, child: _buildPanel()),
+        Expanded(
+          flex: 5,
+          child: _buildPanel(
+            // 달력이 접힌 상태에서 목록까지 접으면 아무것도 안 남는다 → 그때는 미제공.
+            onToggleCollapse: _gridCollapsed
+                ? null
+                : () => setState(() => _panelCollapsed = true),
+          ),
+        ),
       ],
     );
   }
@@ -312,7 +339,69 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     );
   }
 
-  Widget _buildPanel() => _DayPanelSection(selectedDay: _selectedDay);
+  Widget _buildPanel({VoidCallback? onToggleCollapse}) => _DayPanelSection(
+    selectedDay: _selectedDay,
+    onToggleCollapse: onToggleCollapse,
+  );
+}
+
+/// 목록을 접었을 때 하단에 남는 얇은 막대 — 날짜 + 건수 + 펼치기.
+///
+/// 접기를 되돌릴 유일한 통로라 반드시 보이게 남긴다. 건수는 패널과 같은 버킷을
+/// 보므로 여기서만 다시 watch 한다 (화면 전체 재빌드를 유발하지 않도록 분리).
+class _CollapsedDayBar extends ConsumerWidget {
+  const _CollapsedDayBar({required this.selectedDay, required this.onExpand});
+
+  final DateTime selectedDay;
+  final VoidCallback onExpand;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final range = CalendarRange.forMonth(selectedDay);
+    final buckets = ref.watch(calendarBucketsProvider(range));
+    final count = buckets.asData?.value[selectedDay]?.length ?? 0;
+
+    return Material(
+      color: scheme.surfaceContainerHighest,
+      child: InkWell(
+        key: const ValueKey('calendar-panel-expand'),
+        onTap: onExpand,
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTokens.space16,
+              vertical: AppTokens.space8,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    KoDate.dayWithWeekday(selectedDay),
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  count == 0 ? '없음' : '$count건',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.onSurface.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space4),
+                const Icon(Icons.expand_less, size: 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 드래그 소스 래퍼.
@@ -355,9 +444,12 @@ Widget _dragSource({
 /// 구글 이벤트가 도착할 때마다 화면 전체 — PageView 의 달 3개 × 42칸 × DragTarget —
 /// 가 통째로 재빌드돼 눈에 띄게 버벅였다. 이제 버킷 변화는 이 패널만 다시 그린다.
 class _DayPanelSection extends ConsumerWidget {
-  const _DayPanelSection({required this.selectedDay});
+  const _DayPanelSection({required this.selectedDay, this.onToggleCollapse});
 
   final DateTime selectedDay;
+
+  /// 모바일에서 이 패널을 접는 콜백 (데스크탑은 헤더의 패널 토글이 담당 → null).
+  final VoidCallback? onToggleCollapse;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -368,6 +460,7 @@ class _DayPanelSection extends ConsumerWidget {
     return CalendarDayPanel(
       date: selectedDay,
       entries: entries,
+      onToggleCollapse: onToggleCollapse,
       entryWrapper: (entry, tile) => entry.isDraggable
           ? _dragSource(
               data: EntryDragData(entry),
@@ -635,6 +728,10 @@ class _CalendarHeader extends StatelessWidget {
                   ),
                 ),
               _SegmentToggle(segment: segment, onSegment: onSegment),
+              // 모바일은 이 화면에 앱바가 없다 (달력 높이를 위해 뺐다) — 앱바가
+              // 들고 있던 검색·설정을 여기서 이어받는다. ☰ 는 하단 네비의
+              // '카테고리' 슬롯이 이미 Drawer 를 열므로 옮길 필요가 없다.
+              if (compact) const _MobileOverflowMenu(),
             ],
           ),
         );
@@ -642,6 +739,54 @@ class _CalendarHeader extends StatelessWidget {
     );
   }
 }
+
+/// 모바일 캘린더 헤더의 ⋮ — 앱바를 없애며 잃은 검색·설정 통로.
+class _MobileOverflowMenu extends StatelessWidget {
+  const _MobileOverflowMenu();
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_HeaderMenuAction>(
+      key: const ValueKey('calendar-overflow-menu'),
+      icon: const Icon(Icons.more_vert, size: 20),
+      tooltip: '더보기',
+      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onSelected: (action) {
+        switch (action) {
+          case _HeaderMenuAction.search:
+            SearchScreen.show(context);
+          case _HeaderMenuAction.settings:
+            SettingsSheet.show(context);
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: _HeaderMenuAction.search,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.search, size: 18),
+            title: Text('검색'),
+          ),
+        ),
+        PopupMenuItem(
+          value: _HeaderMenuAction.settings,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.settings_outlined, size: 18),
+            title: Text('설정'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+enum _HeaderMenuAction { search, settings }
 
 /// 구글 캘린더 이벤트 표시 on/off.
 ///

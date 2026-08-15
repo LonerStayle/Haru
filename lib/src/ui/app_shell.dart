@@ -717,7 +717,12 @@ class _AppShellState extends ConsumerState<AppShell> {
           },
           // 모바일만 상단 앱바 — ☰ 로 그룹/카테고리 관리 Drawer 를 연다 (Task A).
           // 데스크탑은 좌측 _Sidebar 가 모든 관리/네비를 담당하므로 앱바 없음.
-          appBar: AppPlatform.isDesktop
+          //
+          // 캘린더 화면도 앱바를 안 쓴다 — 달력은 세로 높이가 곧 정보량이라
+          // "캘린더" 제목 한 줄에 56dp 를 내주면 주 행이 눈에 띄게 눌린다.
+          // 잃는 통로는 없다: ☰ 는 하단 네비의 '카테고리' 슬롯이, 검색·설정은
+          // 캘린더 헤더의 ⋮ 메뉴가 그대로 맡는다.
+          appBar: AppPlatform.isDesktop || destination.isCalendar
               ? null
               : AppBar(
                   title: Text(selectedGroup?.label ?? destination.label),
