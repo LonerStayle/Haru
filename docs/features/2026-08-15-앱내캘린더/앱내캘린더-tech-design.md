@@ -77,11 +77,11 @@ class RecurringGhostEntry extends CalendarEntry { final Todo master; final DateT
 class GoogleEventEntry extends CalendarEntry { final String id, summary; final DateTime s, e; final bool allDay; }
 ```
 
-**정렬 규칙** (칸 안, 상한 계산 전):
+**정렬 규칙** (칸 안, 상한 계산 전) — `compareEntries`:
 1. 기간 항목(막대) 먼저
-2. 종일 → 시각 있는 항목 (시각 오름차순)
-3. 미완료 → 완료
-4. 같으면 `sortOrder asc → createdAt desc → id asc` (전 앱 규칙)
+2. **미완료 → 완료** — 칸에 상한(칩 3 / 점 4)이 있어서, 완료가 자리를 먹고 미완료가 `외 N건` 뒤로 밀리면 달력을 보는 이유가 사라진다. 그래서 시각보다 우선한다
+3. 종일 → 시각 있는 항목 (시각 오름차순)
+4. 같으면 `sortOrder asc → createdAt desc → entryKey asc` (전 앱 규칙, `updatedAt` 배제)
 
 ---
 
