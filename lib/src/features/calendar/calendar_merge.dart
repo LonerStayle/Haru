@@ -44,21 +44,33 @@ MergeResult mergeEventIntoTodo({
   required gcal.Event event,
   required Todo local,
 }) {
+  final patch = eventToTodoPatch(event);
+  if (patch == null) return const MergeResult(MergeKind.unmappable);
+
   final signature = readHaruSignature(event);
   final localRev = local.updatedAt.toUtc().toIso8601String();
-  if (signature.rev != null && signature.rev == localRev) {
+  final sameRev = signature.rev != null && signature.rev == localRev;
+
+  // 서명이 우리 것과 같아도 **내용까지 같아야** echo 다.
+  //
+  // 사람이 구글 캘린더에서 제목이나 시간을 고쳐도 우리가 심어둔 서명은 그대로
+  // 남는다. 서명만 보고 걸러내면 그 수정이 영영 앱에 반영되지 않는다 (왕복
+  // 통합 테스트가 잡아낸 실제 결함). 반대로 내용까지 같으면 우리가 방금 올린
+  // 그대로이므로 무시해야 루프가 끊긴다.
+  if (sameRev && _sameContent(patch, local)) {
     return const MergeResult(MergeKind.echo);
   }
 
   final serverUpdated = event.updated;
-  // 서버 시각이 없으면 어느 쪽이 최신인지 판단할 근거가 없다 — 앱을 신뢰한다.
-  if (serverUpdated == null) return const MergeResult(MergeKind.localWins);
-  if (!serverUpdated.toUtc().isAfter(local.updatedAt.toUtc())) {
-    return const MergeResult(MergeKind.localWins);
+  // 서명이 우리 것과 같은데 내용이 다르다 = 우리가 올린 뒤로 앱은 손대지 않았고
+  // 캘린더에서만 바뀌었다는 뜻이다. 이때는 시각 비교 없이 캘린더를 따른다.
+  if (!sameRev) {
+    // 서버 시각이 없으면 어느 쪽이 최신인지 판단할 근거가 없다 — 앱을 신뢰한다.
+    if (serverUpdated == null) return const MergeResult(MergeKind.localWins);
+    if (!serverUpdated.toUtc().isAfter(local.updatedAt.toUtc())) {
+      return const MergeResult(MergeKind.localWins);
+    }
   }
-
-  final patch = eventToTodoPatch(event);
-  if (patch == null) return const MergeResult(MergeKind.unmappable);
 
   return MergeResult(
     MergeKind.updated,
@@ -72,7 +84,18 @@ MergeResult mergeEventIntoTodo({
       recurrenceEndAt: patch.recurrenceEndAt ?? local.recurrenceEndAt,
       // 서버 시각을 그대로 쓴다. 지금 시각으로 찍으면 로컬이 더 최신이 되어
       // 곧바로 캘린더로 되쏘게 되고, 그게 또 돌아와 루프가 된다.
-      updatedAt: serverUpdated,
+      updatedAt: serverUpdated ?? local.updatedAt,
     ),
   );
 }
+
+/// 이벤트에서 뽑은 값이 로컬 할 일과 **내용상** 같은가.
+///
+/// 캘린더가 건드릴 수 있는 필드만 본다 — 카테고리·부모·정렬·완료는 앱에만 있는
+/// 개념이라 비교 대상이 아니다.
+bool _sameContent(EventDatePatch patch, Todo local) =>
+    patch.title == local.title &&
+    patch.dueAt == local.dueAt &&
+    patch.endAt == local.endAt &&
+    patch.isAllDay == local.isAllDay &&
+    patch.timeAnchor == local.timeAnchor;
