@@ -13,6 +13,7 @@ import 'calendar_day_panel.dart';
 import 'calendar_entry.dart';
 import 'calendar_month_grid.dart';
 import 'calendar_providers.dart';
+import 'calendar_undated_drawer.dart';
 
 /// 캘린더 화면의 두 보기 방식.
 enum CalendarSegment {
@@ -167,6 +168,10 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                     ? _buildMobileBody(today)
                     : _buildDesktopBody(today),
               ),
+              // 서랍은 달력 보기에서만. 목록(타임라인)에는 날짜 지정 항목만 나오므로
+              // 무날짜 서랍이 붙을 자리가 아니다.
+              if (_segment == CalendarSegment.grid)
+                const CalendarUndatedDrawer(),
             ],
           ),
         ),
