@@ -45,12 +45,14 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   /// 테스트 결정성을 위해 주입 가능. 기본 [DateTime.now].
   final DateTime Function()? now;
 
-  /// 초기 dueAt 값. 위젯 테스트에서 picker dialog 우회용. null 이면 일정 없음.
-  @visibleForTesting
+  /// 초기 dueAt 값. null 이면 일정 없음.
+  ///
+  /// v1.6 — 캘린더에서 "이 날짜로 추가" 를 하려면 날짜가 미리 채워진 채로 시트가
+  /// 열려야 한다. 그래서 [show] 도 이 값을 받아 전달한다 (그 전에는 위젯 테스트가
+  /// picker dialog 를 우회하는 용도로만 쓰였다).
   final DateTime? initialDueAt;
 
   /// [initialDueAt] 가 종일 의미인지. 기본 true.
-  @visibleForTesting
   final bool initialAllDay;
 
   /// 신규 추가 모드 — submission 콜백. edit 모드 (initialTodo != null) 면 호출 안 됨.
@@ -85,6 +87,10 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   ///
   /// add 모드: [initialTodo] null + [onSubmit] 만. edit 모드: [initialTodo] non-null
   /// + [onUpdate] 콜백 — 호출자가 todoActionsProvider.update 호출.
+  ///
+  /// v1.6 — [initialDueAt] / [initialAllDay] 를 받는다. 캘린더에서 날짜 칸을 길게
+  /// 눌러 "이 날짜로 추가" 할 때 날짜 입력 단계를 통째로 생략하기 위한 것.
+  /// 기본값은 종전 위젯 기본값과 같아 기존 호출처의 동작은 변하지 않는다.
   static Future<void> show(
     BuildContext context, {
     Category initialCategory = Category.daily,
@@ -94,6 +100,8 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     Todo? prefillFrom,
     String? parentId,
     void Function(Todo item)? onRequestMove,
+    DateTime? initialDueAt,
+    bool initialAllDay = true,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -111,6 +119,8 @@ class AddTodoSheet extends ConsumerStatefulWidget {
           prefillFrom: prefillFrom,
           parentId: parentId,
           onRequestMove: onRequestMove,
+          initialDueAt: initialDueAt,
+          initialAllDay: initialAllDay,
         ),
       ),
     );
