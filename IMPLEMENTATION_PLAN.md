@@ -273,32 +273,32 @@ v1.0 의 "5종 고정" 폐기 — 카테고리를 DB row 로 저장해 사용자
 > 기준선: `main @ 4ec4ac7`, 715 tests PASS
 
 **15-A. 기반 정지작업 (순수 함수 · 단일 파일 수정)**
-- [ ] T1 destination 교체 — `DestinationKind.timeline` → `calendar`, 라벨 '캘린더', `isTimeline`→`isCalendar`. `app_shell.dart` 3지점(`_MainArea`/`_Sidebar` index/모바일 nav 라벨) 치환. **슬롯 수·단축키 digit 불변.** 임시로 `TimelineScreen` 을 그대로 렌더. 기존 테스트 갱신
-- [ ] T2 `KoDate.monthTitle`(`"2026년 8월"`) / `KoDate.dayWithWeekday`(`"8월 15일 (토)"`) 추가 + 단위 테스트
-- [ ] T3 `CalendarEntry` sealed 계층 + `calendar_layout.dart` 순수 함수 (`monthGridDays` 42칸·일요일 시작, `bucketByDate`, `layoutWeekBars` 레인 배치) + 단위 테스트 (TDD)
-- [ ] T4 `calendar_drag.dart` — `applyDateDrop` (시각·`isAllDay` 보존, 기간 평행이동) 순수 함수 + 단위 테스트
-- [ ] T5 `TodoActionsController.setDueAt` 신설 — **sortOrder 보존** (`update()` 의 min-1 bump 부작용 차단) + 테스트
-- [ ] T6 `RecurrenceMaterializer.materializeOne` 신설 — 미래 1회차만 실체화, `instanceId` 결정성 유지 + 테스트
-- [ ] T7 `AddTodoSheet.show()` 에 `initialDueAt` / `initialAllDay` 전달 파라미터 추가 (기존 기본값 유지 → 무회귀) + 테스트
+- [x] T1 destination 교체 — `DestinationKind.timeline` → `calendar`, 라벨 '캘린더', `isTimeline`→`isCalendar`. `app_shell.dart` 3지점(`_MainArea`/`_Sidebar` index/모바일 nav 라벨) 치환. **슬롯 수·단축키 digit 불변.** 임시로 `TimelineScreen` 을 그대로 렌더. 기존 테스트 갱신
+- [x] T2 `KoDate.monthTitle`(`"2026년 8월"`) / `KoDate.dayWithWeekday`(`"8월 15일 (토)"`) 추가 + 단위 테스트
+- [x] T3 `CalendarEntry` sealed 계층 + `calendar_layout.dart` 순수 함수 (`monthGridDays` 42칸·일요일 시작, `bucketByDate`, `layoutWeekBars` 레인 배치) + 단위 테스트 (TDD)
+- [x] T4 `calendar_drag.dart` — `applyDateDrop` (시각·`isAllDay` 보존, 기간 평행이동) 순수 함수 + 단위 테스트
+- [x] T5 `TodoActionsController.setDueAt` 신설 — **sortOrder 보존** (`update()` 의 min-1 bump 부작용 차단) + 테스트
+- [x] T6 `RecurrenceMaterializer.materializeOne` 신설 — 미래 1회차만 실체화, `instanceId` 결정성 유지 + 테스트
+- [x] T7 `AddTodoSheet.show()` 에 `initialDueAt` / `initialAllDay` 전달 파라미터 추가 (기존 기본값 유지 → 무회귀) + 테스트
 
 **15-B. 데이터 조립**
-- [ ] T8 `calendar_providers.dart` — 로컬 엔트리(`!isSeriesMaster && dueAt != null && !archived`), 미래 반복 고스트 합성, 무날짜 목록. 전부 `Provider<AsyncValue<T>>` + `.whenData()` 관용구 + 테스트
+- [x] T8 `calendar_providers.dart` — 로컬 엔트리(`!isSeriesMaster && dueAt != null && !archived`), 미래 반복 고스트 합성, 무날짜 목록. 전부 `Provider<AsyncValue<T>>` + `.whenData()` 관용구 + 테스트
 
 **15-C. 화면**
-- [ ] T9 월 그리드 — `calendar_day_cell` / `calendar_week_row` / `calendar_month_grid`. 오늘·선택 강조, 데스크탑 칩 3개+`외 N건` / 모바일 점 4개, 기간 막대 레인 + 위젯 테스트
-- [ ] T10 선택일 패널 — 목록·체크·편집 시트·`＋ 이 날짜로 추가` + 위젯 테스트
-- [ ] T11 화면 셸 `calendar_screen` — 세그먼트 `[달력]/[목록]`, 데스크탑 좌우 / 모바일 상하, 월 이동(스와이프·`←`/`→`·`‹ ›`·`T`). `_MainArea` 실제 연결 + 위젯 테스트
-- [ ] T12 "날짜 없음" 서랍 — 접기(기본 접힘, 세션 비영속) + 위젯 테스트
+- [x] T9 월 그리드 — `calendar_day_cell` / `calendar_week_row` / `calendar_month_grid`. 오늘·선택 강조, 데스크탑 칩 3개+`외 N건` / 모바일 점 4개, 기간 막대 레인 + 위젯 테스트
+- [x] T10 선택일 패널 — 목록·체크·편집 시트·`＋ 이 날짜로 추가` + 위젯 테스트
+- [x] T11 화면 셸 `calendar_screen` — 세그먼트 `[달력]/[목록]`, 데스크탑 좌우 / 모바일 상하, 월 이동(스와이프·`←`/`→`·`‹ ›`·`T`). `_MainArea` 실제 연결 + 위젯 테스트
+- [x] T12 "날짜 없음" 서랍 — 접기(기본 접힘, 세션 비영속) + 위젯 테스트
 
 **15-D. 인터랙션**
-- [ ] T13 드래그 앤 드롭 — 데스크탑 `Draggable<Todo>` / 모바일 `LongPressDraggable<Todo>` → 셀 `DragTarget<Todo>`. 고스트는 드롭 시 `materializeOne` 선행 + 위젯 테스트
+- [x] T13 드래그 앤 드롭 — 데스크탑 `Draggable<Todo>` / 모바일 `LongPressDraggable<Todo>` → 셀 `DragTarget<Todo>`. 고스트는 드롭 시 `materializeOne` 선행 + 위젯 테스트
 
 **15-E. 구글 이벤트 (읽기 전용)**
-- [ ] T14 `google_events_service.dart` **신규 파일만** — `events.list(singleEvents: true)`, client `close()` 보장, 실패 시 빈 리스트. `googleEventsProvider` family(현재 달 ±1) + 테스트. **기존 `calendar_service.dart` / `google_auth_service.dart` 수정 금지**
-- [ ] T15 구글 이벤트 렌더링 + 표시 on/off 토글 (편집 불가, 아웃라인 스타일로 로컬과 구분) + 위젯 테스트
+- [x] T14 `google_events_service.dart` **신규 파일만** — `events.list(singleEvents: true)`, client `close()` 보장, 실패 시 빈 리스트. `googleEventsProvider` family(현재 달 ±1) + 테스트. **기존 `calendar_service.dart` / `google_auth_service.dart` 수정 금지**
+- [x] T15 구글 이벤트 렌더링 + 표시 on/off 토글 (편집 불가, 아웃라인 스타일로 로컬과 구분) + 위젯 테스트
 
 **15-F. 마감**
-- [ ] T16 모바일 압축(셀 최소 높이 48dp, 달력 접기) · 성능 점검 · §15 종료 자가평가(디자인·편의성 각 10점 만점)
+- [x] T16 모바일 압축(셀 최소 높이 48dp, 달력 접기) · 성능 점검 · §15 종료 자가평가(디자인·편의성 각 10점 만점)
 
 ---
 
@@ -473,3 +473,40 @@ v1.5 머지 코드 위에서 **메모를 "섹션 헤딩"으로 승격** — v1.1
 5. 카테고리 전환 비용 (1.7/2) — 변경 없음.
 
 두 점수 모두 9 이상 — §14 비전 충족. **§13(시각) + §14(구조) 로 메모↔체크리스트 구분 완성.**
+
+---
+
+## 자가평가 — §15 (앱 내 캘린더 화면) 종료 시점 (2026-08-15)
+
+**§15 완료 기능**
+- **캘린더 destination** — v1.5 '타임라인' 을 흡수. 모바일 nav 4슬롯·단축키 digit 2 그대로. 기존 버킷 목록은 `[목록]` 세그먼트로 보존 (기능 손실 0).
+- **월 그리드** — 6행 42칸 고정(달 넘김 시 높이 불변), 오늘=숫자 원 / 선택=셀 테두리로 표현을 분리해 동시 표시. 데스크탑 제목 칩 3개+"외 N건" / 모바일 점 4개.
+- **기간 막대** — 주 단위 greedy 레인 배치, 주 경계에서 잘리고 다음 주에 이어짐(모서리 각짐 + 제목 미반복). 레인 상한으로 행 높이 고정.
+- **선택일 패널** — 한 타일이 실제 Todo / 미래 반복 고스트 / 구글 이벤트 셋을 그린다. 편집은 기존 시트(닫으면 저장) 재사용.
+- **인터랙션 4종** — 날짜 탭 / 길게 눌러 그 날짜로 추가 / 드래그로 날짜 변경 / 월 이동(모바일 스와이프·데스크탑 ←→·T).
+- **미래 반복 = 고스트** — 건드리는 순간 그 회차만 실체화(`materializeOne`). id 결정적이라 정규 실체화와 중복 없음.
+- **"날짜 없음" 서랍** — 기본 접힘, 달력 칸으로 끌어다 놓으면 종일로 날짜 부여.
+- **구글 이벤트 읽기 전용 표시** — 신규 파일(`google_events_service.dart`)만 추가해 형제 워크트리와 충돌 표면 0. 실패는 전부 삼켜 로컬만으로 정상 동작.
+
+**비전 정렬 확인** — CLAUDE.md 비전 §3 "Google Calendar 연동 / 날짜 UX" 및 v1.5 타임라인의 후속. 범위 밖(iOS/웹/협업/광고) 침범 없음. Drift `schemaVersion` 9 유지 — 스키마 변경 없음.
+
+**디자인 점수 — 9.4 / 10**
+1. 가독성 (2/2) — 데스크탑은 제목 칩으로 무엇인지 바로 읽히고, 모바일은 점으로 "있다/없다"만 명확히. 완료는 취소선+흐림으로 즉시 구분.
+2. 대비 (1.8/2) — 오늘(accent 채운 원)·선택(accent 테두리)·주말(적/청) 세 신호가 서로 안 섞인다. 고스트/구글은 채우지 않고 테두리만 — 확정 여부가 형태로 갈린다.
+3. 여백 (1.8/2) — 셀 padding·막대 gap 을 AppTokens 기준으로 통일. 6행 고정으로 달마다 높이가 안 튄다.
+4. 정렬 (2/2) — 막대 레인이 flex 7분할이라 칸 경계와 정확히 맞고, 주 경계 이어짐이 모서리로 표현된다.
+5. 일관성 (1.8/2) — 색 바 + 제목의 시각 언어를 셀 칩 / 패널 타일 / 서랍 / 드래그 피드백이 공유.
+
+**편의성 점수 — 9.5 / 10**
+1. 단축 동작 (2/2) — 날짜 길게 눌러 그 날짜로 추가(날짜 입력 단계 생략), 드래그로 날짜 변경, ←/→/T 단축키.
+2. 반응성 (2/2) — 구글 조회를 기다리지 않고 로컬을 먼저 그린다. 페이지별 provider 구독으로 스와이프 중 이웃 달 재계산 차단. 2000건 버킷팅+막대 배치 200ms 상한 테스트로 고정.
+3. 학습성 (1.9/2) — 서랍에 "펼쳐서 달력으로 끌어놓기" 힌트, 드래그 손잡이(⠿), 드롭 후 그 날짜 자동 선택으로 결과를 눈으로 확인.
+4. 오류 회복 (2/2) — 같은 날 드롭은 저장 자체를 안 해 updatedAt 도 안 튐. 구글 실패는 화면을 막지 않음. 드래그가 sortOrder 를 건드리지 않아 목록 순서가 안 무너짐.
+5. 카테고리 전환 비용 (1.6/2) — 캘린더에 카테고리 필터가 없다 (색으로만 구분). 카테고리가 많아지면 필터 칩이 필요할 수 있음 — 후속 후보.
+
+두 점수 모두 9 이상 — §15 비전 충족. 테스트 715 → **896**.
+
+**후속 후보 (이번 범위 밖)**
+- 캘린더 내 카테고리 필터 칩 (편의성 5번 항목)
+- 주 뷰 / 일 뷰 (요구사항에서 명시적으로 제외)
+- 구글 이벤트 양방향 동기화 — 형제 워크트리 `구글캘린더동기화` 담당

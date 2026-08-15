@@ -282,3 +282,8 @@ enum DestinationKind { today, category, outline, calendar }   // timeline → ca
 | CH-id | 일시 | 종류 | 내용 |
 |---|---|---|---|
 | CH-001 | 2026-08-15 | 신규 | 조사 3건(구글연동/UI/데이터) 기반 최초 작성. F-1~F-8 전제 확정 |
+| CH-002 | 2026-08-15 | 수정 | §2 정렬 규칙에서 **미완료/완료를 종일·시각보다 앞**으로 올림 — 칸 상한(칩 3/점 4)을 완료가 먹으면 달력을 보는 이유가 사라진다 |
+| CH-003 | 2026-08-15 | 수정 | §6 모바일에서 `‹ ›` 버튼 제거 — 헤더가 40px 넘쳤고, 확정 요구상 모바일의 달 이동 수단은 좌우 스와이프. 데스크탑은 그대로 유지 |
+| CH-004 | 2026-08-15 | 수정 | §8 구글 이벤트 표시 on/off 게이트를 `googleEventsProvider` 가 아니라 `calendarBucketsProvider` 에 둠 — provider 안에 두면 껐다 켤 때마다 재조회가 나서 깜빡인다 |
+| CH-005 | 2026-08-15 | 추가 | 셀 훅을 위젯이 아니라 **빌더**(`CalendarDayCellBuilder`)로 — 드롭 하이라이트는 셀 자신의 장식이라 `DragTarget` 이 후보 여부를 안 뒤에야 셀을 만들 수 있다 |
+| CH-006 | 2026-08-15 | 완료 | T1~T16 전부 구현·검증 완료. 테스트 715 → 896. Drift schemaVersion 9 유지(스키마 변경 없음), `calendar_service.dart` / `google_auth_service.dart` 무수정 확인 |

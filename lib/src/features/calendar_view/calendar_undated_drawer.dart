@@ -97,8 +97,12 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
           if (_expanded)
             // 높이를 제한하지 않으면 무날짜 항목이 수백 건일 때 서랍이 화면을
             // 통째로 밀어낸다. 안에서만 스크롤되게 상한을 둔다.
+            //
+            // 모바일 상한이 더 낮은 이유: 서랍을 펼친 상태에서도 달력 한 칸이
+            // 터치 타겟(48dp)을 지켜야 하는데, 폰 높이에서 서랍이 160 을 먹으면
+            // 6주 행이 그 아래로 내려간다.
             ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: compact ? 160 : 200),
+              constraints: BoxConstraints(maxHeight: compact ? 120 : 200),
               child: ListView.separated(
                 padding: EdgeInsets.fromLTRB(
                   compact ? AppTokens.space12 : AppTokens.space24,

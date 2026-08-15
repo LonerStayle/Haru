@@ -34,6 +34,7 @@
 | **브랜딩 — 앱 이름 '하루' + 볼드 체크 아이콘 + macOS 로그인 자동실행 토글** | ✅ 종료 | 561/561 PASS. **스키마 변경 없음**. 아래 "브랜딩 내역" 참조. 대표님 직접 요청(아이콘·이름·자동실행) |
 | **진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 (2026-07-18)** | ✅ 종료 | 602/602 PASS. **DB 스키마 변경됨 (drift v8→9 `todos.started_at`) → Supabase schema.sql 재실행 필요.** 아래 "진행중 3-상태 내역" 참조. 대표님 직접 요청 |
 | **상태별 보기 — 카테고리·상세 5칩 필터 (2026-08-09)** | ✅ 종료 (워크트리 `상태별보기`, 미커밋) | 625/625 PASS. **스키마 변경 없음**. 아래 "상태별 보기 내역" 참조. 대표님 직접 요청 |
+| **§15 앱 내 캘린더 화면 (2026-08-15)** | ✅ 종료 (워크트리 `앱내캘린더`, 미머지) | 896/896 PASS. **스키마 변경 없음 (drift v9 유지)**. 아래 "앱 내 캘린더 내역" 참조. 대표님 직접 요청 |
 
 ### 현 상태 (2026-06-06)
 
@@ -131,6 +132,39 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 - **Outline view**: 단축키 6. 5 카테고리 root + 자식 트리 펼침/접힘 + [N/M] progress bar
 - **Bulk paste**: AddTodoSheet 의 multi-line paste → N개 todos 일괄 추가 (confirm dialog)
 - **Today breadcrumb**: today list 의 각 todo 옆에 "JS슈퍼 / 울트라 모드" 식 path
+
+---
+
+### 앱 내 캘린더 내역 — 2026-08-15 (워크트리 `앱내캘린더`)
+
+요구사항 / 기술설계: `docs/features/2026-08-15-앱내캘린더/`
+
+**무엇이 생겼나**
+- `DestinationKind.timeline` → `calendar` **교체**. 모바일 nav 4슬롯·단축키 digit 2 그대로.
+  기존 타임라인 버킷 목록은 캘린더 화면의 `[목록]` 세그먼트로 살아 있다 (기능 손실 0).
+- 신규 디렉터리 `lib/src/features/calendar_view/` — 앱 내 캘린더 화면 전부.
+  (기존 `lib/src/features/calendar/` 는 **구글 연동 전용**이라 이름을 분리했다.)
+- 월 6행 42칸 그리드 / 선택일 패널 / "날짜 없음" 서랍 / 기간 막대 / 드래그로 날짜 변경.
+- 구글 이벤트 **읽기 전용** 표시 — 신규 파일 `features/calendar/google_events_service.dart` 만 추가.
+
+**외부 작업 없음** — Drift `schemaVersion` 9 유지, Supabase `schema.sql` 재실행 불필요,
+구글 스코프 변경 없음 (`calendar.events` 가 읽기까지 포함).
+
+**형제 워크트리와의 경계 (중요)**
+- `구글캘린더동기화` 워크트리가 `calendar_service.dart` / `google_auth_service.dart` 를 담당한다.
+  이 작업은 그 두 파일을 **한 줄도 수정하지 않았다**. 인증(`calendarAuthProvider`)만 재사용.
+- 머지 시 충돌 표면은 `calendar_view/` 신규 파일들 + `app_shell.dart` 3지점 + `destination.dart`.
+
+**알아둘 함정**
+- **반복은 하이브리드다.** `RecurrenceMaterializer` 가 오늘까지만 인스턴스를 만들어
+  미래 회차는 DB 에 없다. 캘린더는 그걸 런타임 고스트로 그리고, 사용자가 건드리면
+  `materializeOne` 으로 그 회차만 실체화한다. 고스트를 실체 row 로 착각하고
+  체크·드래그 경로를 붙이면 조용히 아무 일도 안 일어난다.
+- **드래그 저장은 `setDueAt` 이지 `update` 가 아니다.** `update()` 는 sortOrder 를
+  형제 min-1 로 bump 하므로, 날짜만 옮겼는데 목록 맨 위로 튄다.
+- `allTodosProvider` 는 `isSeriesMaster` 를 걸러주지 않는다 (타임라인·전체보기도 안 거른다).
+  캘린더는 직접 거른다 — 안 그러면 anchor 날짜에 유령 항목이 하나 더 뜬다.
+- 달력 격자는 **항상 6행**. 5/6행이 오가면 스와이프 때 높이가 튄다.
 
 ---
 

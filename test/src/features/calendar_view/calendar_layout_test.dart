@@ -442,6 +442,14 @@ void main() {
       expect(layoutWeekBars([bar('a', 24, 28)], weekStart), isEmpty);
     });
 
+    test('한 주에 막대가 많아도 레인 배치가 폭주하지 않는다', () {
+      // 겹치는 막대 30개 → 레인 30개. 위젯 쪽 상한이 자르더라도 계산은 끝나야 한다.
+      final many = [for (var i = 0; i < 30; i++) bar('b$i', 17, 20)];
+      final segs = layoutWeekBars(many, weekStart);
+      expect(segs, hasLength(30));
+      expect(segs.map((s) => s.lane).toSet(), hasLength(30));
+    });
+
     test('같은 입력이면 항상 같은 배치 (레이아웃이 프레임마다 튀지 않도록)', () {
       final entries = [bar('c', 18, 21), bar('a', 17, 19), bar('b', 17, 22)];
       final first = layoutWeekBars(entries, weekStart);
@@ -456,6 +464,46 @@ void main() {
                 ..sort())
               .join(',');
       expect(sig(second), sig(first));
+    });
+  });
+
+  group('성능 sanity — 한 달 그리기가 프레임을 넘기지 않는다', () {
+    // 이 앱은 1인 사용자 데이터(수백 건)를 전부 in-memory 로 다룬다. 그래서
+    // "달을 넘길 때마다 전체를 다시 버킷팅" 이 성립하는지 상한으로 못 박아둔다.
+    test('2000건을 42칸으로 버킷팅 + 주별 막대 배치', () {
+      final entries = [
+        for (var i = 0; i < 2000; i++)
+          TodoEntry(
+            make(
+              id: 'e$i',
+              dueAt: DateTime(2026, 8, 1 + (i % 31), 9 + (i % 12)),
+              // 5건 중 1건은 기간 항목 (막대 배치까지 태운다).
+              endAt: i % 5 == 0 ? DateTime(2026, 8, 3 + (i % 28)) : null,
+            ),
+          ),
+      ];
+
+      final sw = Stopwatch()..start();
+      final buckets = bucketByDate(
+        entries: entries,
+        rangeStart: DateTime(2026, 7, 26),
+        rangeEnd: DateTime(2026, 9, 5),
+      );
+      for (final week in chunkIntoWeeks(monthGridDays(DateTime(2026, 8)))) {
+        layoutWeekBars(
+          week.expand((d) => buckets[d] ?? const <CalendarEntry>[]).toSet(),
+          week.first,
+        );
+      }
+      sw.stop();
+
+      expect(buckets, isNotEmpty);
+      // 60fps 프레임 예산(16.7ms)의 여러 배를 잡아 느슨하게 — 회귀 감지용 상한.
+      expect(
+        sw.elapsedMilliseconds,
+        lessThan(200),
+        reason: '한 달 렌더 준비가 200ms 를 넘으면 달 넘김이 눈에 띄게 끊긴다',
+      );
     });
   });
 }
