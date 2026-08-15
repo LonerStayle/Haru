@@ -23,6 +23,9 @@ mixin _$Todo {
 // 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
 // origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
 // 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
+// ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
+// 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
+// todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
  String get calendarOrigin; String? get parentId; TodoType get type; int get sortOrder;// v1.2 — 상세 메모 (long text). nullable + 누락 시 null 로 안전 fallback.
  String? get description;// ── 날짜·기간 모델 (fast-tasks 4/5/1) — dueAt 은 앵커로 그대로 유지 ──────────
 // [endAt] — 기간 모드의 종료 시각. 단일 모드면 null.
@@ -280,6 +283,9 @@ class _Todo extends Todo {
 // 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
 // origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
 // 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
+// ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
+// 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
+// todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
 @override@JsonKey() final  String calendarOrigin;
 @override final  String? parentId;
 @override@JsonKey() final  TodoType type;
