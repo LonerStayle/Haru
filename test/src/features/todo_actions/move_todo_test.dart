@@ -131,6 +131,37 @@ void main() {
     );
   });
 
+  test('하위 → 같은 카테고리 최상위 (카테고리는 그대로, 부모만 떨어진다)', () async {
+    // 카테고리를 바꾸지 않는 "그 자리 최상위로" — 실제로 가장 흔한 경로인데
+    // 위 케이스(다른 카테고리로)만 있어 회귀 구멍이었다.
+    final all = await seedTree();
+    final c = all.firstWhere((t) => t.id == 'c');
+
+    final ok = await controller.moveTo(
+      c,
+      newParent: null,
+      targetCategory: Category.work,
+      all: all,
+    );
+
+    expect(ok, isTrue);
+    final moved = await repo.getById('c');
+    expect(moved!.parentId, isNull);
+    expect(moved.category.id, 'work');
+    expect(
+      (await db.todosDao.watchRootsOfCategory(Category.work).first).map(
+        (t) => t.id,
+      ),
+      ['c', 'a', 'd'],
+      reason: '새 root 는 형제 맨 위 (min sortOrder - 1)',
+    );
+    expect(
+      (await db.todosDao.watchChildrenOf('b').first),
+      isEmpty,
+      reason: '옛 부모 b 밑은 비어야',
+    );
+  });
+
   test('다른 카테고리 항목 밑으로 옮기면 서브트리 전체가 그 카테고리로 동기화', () async {
     final all = await seedTree();
     // 개인개발 카테고리의 root 하나 추가.
