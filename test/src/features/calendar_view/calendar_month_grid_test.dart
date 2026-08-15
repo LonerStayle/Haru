@@ -323,8 +323,9 @@ void main() {
         find.byKey(const ValueKey('calendar-bar-todo:long')),
         findsNWidgets(3),
       );
-      // 이어진 조각은 제목을 반복하지 않는다.
-      expect(find.text('장기'), findsOneWidget);
+      // 이어진 조각에도 제목을 붙인다 — 둘째 주부터 이름 없는 색 막대만 남으면
+      // 무슨 일인지 알 수 없다는 실사용 지적 반영. 이어짐은 모서리 모양으로 표시.
+      expect(find.text('장기'), findsNWidgets(3));
     });
 
     testWidgets('막대가 있으면 그 주의 칩 영역이 아래로 밀린다', (tester) async {
@@ -353,6 +354,98 @@ void main() {
 
       expect(without, 0.0);
       expect(with_, greaterThan(0));
+    });
+
+    testWidgets('막대가 꽉 찬 칸에 단일 항목이 많아도 세로 오버플로가 나지 않는다', (tester) async {
+      // 실사용 신고: 기간 막대가 여러 줄 깔린 칸에서 칩이 3개 그대로 세워져
+      // "BOTTOM OVERFLOWED BY N PIXELS" 빗금이 떴다. 칩 수는 남은 높이에 맞춰
+      // 줄어들어야 한다.
+      await mount(
+        tester,
+        entries: [
+          for (var i = 0; i < 4; i++)
+            TodoEntry(
+              make(
+                id: 'bar$i',
+                title: '기간 $i',
+                dueAt: DateTime(2026, 8, 17),
+                endAt: DateTime(2026, 8, 20),
+                isAllDay: true,
+              ),
+            ),
+          for (var i = 0; i < 5; i++)
+            TodoEntry(
+              make(
+                id: 'one$i',
+                title: '단일 $i',
+                dueAt: DateTime(2026, 8, 18, 9),
+              ),
+            ),
+        ],
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('기본 창 크기(좁고 낮은 격자)에서도 오버플로가 나지 않는다', (tester) async {
+      // 실사용 신고: 기본 창(≈844×636)에서 사이드바·패널을 빼면 격자는 300×480 남짓인데,
+      // 막대 레인 상한이 3으로 고정돼 있어 칸을 통째로 먹고 빗금만 남았다.
+      // 레인 수는 행 높이에서 역산돼야 한다.
+      await mount(
+        tester,
+        size: const Size(300, 480),
+        entries: [
+          for (var i = 0; i < 5; i++)
+            TodoEntry(
+              make(
+                id: 'bar$i',
+                title: '[리서치] 기간 항목 $i',
+                dueAt: DateTime(2026, 8, 9),
+                endAt: DateTime(2026, 8, 14),
+                isAllDay: true,
+              ),
+            ),
+          for (var i = 0; i < 6; i++)
+            TodoEntry(
+              make(
+                id: 'one$i',
+                title: '단일 $i',
+                dueAt: DateTime(2026, 8, 10, 9),
+              ),
+            ),
+        ],
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('좁은 화면에서도 오버플로가 나지 않는다', (tester) async {
+      await mount(
+        tester,
+        size: const Size(900, 560),
+        entries: [
+          for (var i = 0; i < 3; i++)
+            TodoEntry(
+              make(
+                id: 'bar$i',
+                title: '기간 $i',
+                dueAt: DateTime(2026, 8, 17),
+                endAt: DateTime(2026, 8, 20),
+                isAllDay: true,
+              ),
+            ),
+          for (var i = 0; i < 4; i++)
+            TodoEntry(
+              make(
+                id: 'one$i',
+                title: '단일 $i',
+                dueAt: DateTime(2026, 8, 18, 9),
+              ),
+            ),
+        ],
+      );
+
+      expect(tester.takeException(), isNull);
     });
   });
 

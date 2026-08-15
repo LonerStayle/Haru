@@ -16,7 +16,40 @@ String calendarDateKey(DateTime date) {
 ///
 /// 데스크탑은 칸이 넓어 제목을 읽을 수 있으니 칩 3개, 모바일은 좁아서 점 4개로
 /// 압축한다 — "기능은 양쪽 parity, 폭·줄 수·터치 타겟만 모바일 압축" 규칙.
+///
+/// 데스크탑에서 이 값은 **상한일 뿐 실제 표시 수가 아니다**. 기간 막대가 몇 레인
+/// 깔렸느냐([CalendarDayCell.reservedTop])에 따라 칩이 쓸 수 있는 높이가 매 칸
+/// 달라지므로, 실제 개수는 [_chipCapacityFor] 가 남은 높이에서 계산한다.
 int get calendarCellItemCap => AppPlatform.isMobile ? 4 : 3;
+
+/// 셀 안쪽 padding.
+///
+/// 기간 막대 오버레이(주 행)가 셀 바깥에서 그려지므로, 막대의 세로 위치를 맞추려면
+/// 그쪽에서도 이 값을 알아야 한다 — 그래서 상수를 여기 한 곳에 두고 공유한다.
+double get calendarCellPadding => AppPlatform.isMobile ? 2 : AppTokens.space4;
+
+/// 날짜 숫자 줄의 높이.
+double get calendarDayNumberHeight => AppPlatform.isMobile ? 20 : 22;
+
+/// 칩 한 줄이 차지하는 높이 (칩 16 + 아래 간격 2).
+const double _chipRowHeight = 18;
+
+/// "외 N건" 한 줄의 높이.
+const double _moreRowHeight = 14;
+
+/// 남은 높이 [available] 에 실제로 세울 수 있는 칩 수.
+///
+/// 예전에는 칩 수를 3으로 고정했는데, 기간 막대가 깔린 칸은 그만큼 높이가 줄어드는데도
+/// 칩은 그대로 3개를 세워서 세로 오버플로가 났다(노란 빗금). 그래서 상한은 유지하되
+/// **남은 높이에서 들어갈 만큼만** 세우고 나머지는 "외 N건" 으로 접는다.
+///
+/// [needsMoreRow] 가 true 면 마지막 한 줄을 "외 N건" 에 내준다.
+int _chipCapacityFor(double available, {required bool needsMoreRow}) {
+  final usable = needsMoreRow ? available - _moreRowHeight : available;
+  if (usable < _chipRowHeight) return 0;
+  final fit = usable ~/ _chipRowHeight;
+  return fit > calendarCellItemCap ? calendarCellItemCap : fit;
+}
 
 /// 월 그리드의 날짜 한 칸.
 ///
@@ -66,10 +99,6 @@ class CalendarDayCell extends StatelessWidget {
     final scheme = theme.colorScheme;
     final compact = AppPlatform.isMobile;
 
-    final cap = calendarCellItemCap;
-    final shown = singleDayEntries.take(cap).toList();
-    final overflow = (singleDayEntries.length - shown.length) + hiddenBarCount;
-
     return Semantics(
       selected: isSelected,
       button: true,
@@ -93,27 +122,82 @@ class CalendarDayCell extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppTokens.radiusS),
           ),
           child: Padding(
-            padding: EdgeInsets.all(compact ? 2 : AppTokens.space4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _DayNumber(
-                  date: date,
-                  isToday: isToday,
-                  isOutsideMonth: isOutsideMonth,
-                  compact: compact,
-                ),
-                SizedBox(height: reservedTop),
-                Expanded(
-                  child: compact
-                      ? _DotRow(entries: shown, overflow: overflow)
-                      : _ChipColumn(
-                          date: date,
-                          entries: shown,
-                          overflow: overflow,
+            padding: EdgeInsets.all(calendarCellPadding),
+            child: LayoutBuilder(
+              builder: (context, cell) {
+                // 창이 낮으면 막대 레인이 꽉 찬 칸에서 예약 높이가 칸 자체를 넘길 수
+                // 있다(막대 3줄 + 낮은 주 행). 그때는 예약을 칸 안으로 눌러 넣는다 —
+                // 넘기면 칸 전체가 빗금이 되어 날짜조차 안 보인다.
+                final room = cell.maxHeight - calendarDayNumberHeight;
+                final reserved = room <= 0
+                    ? 0.0
+                    : (reservedTop > room ? room : reservedTop);
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _DayNumber(
+                      date: date,
+                      isToday: isToday,
+                      isOutsideMonth: isOutsideMonth,
+                      compact: compact,
+                    ),
+                    SizedBox(height: reserved),
+                    // 남은 높이는 기간 막대 레인 수에 따라 칸마다 다르다. 그래서 몇
+                    // 개를 세울지는 여기서(실측 높이) 정한다. ClipRect 는 1px 반올림
+                    // 오차로 빗금이 뜨지 않게 하는 안전망.
+                    Expanded(
+                      child: ClipRect(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            final total =
+                                singleDayEntries.length + hiddenBarCount;
+                            final available = constraints.maxHeight;
+
+                            // 모바일은 점이라 한 줄이면 충분 — 상한만 쓴다.
+                            if (compact) {
+                              final shown = singleDayEntries
+                                  .take(calendarCellItemCap)
+                                  .toList();
+                              return _DotRow(
+                                entries: shown,
+                                overflow: total - shown.length,
+                              );
+                            }
+
+                            // 전부 들어가는지 먼저 보고, 안 되면 "외 N건" 줄을 빼고
+                            // 다시 센다.
+                            var capacity = _chipCapacityFor(
+                              available,
+                              needsMoreRow: false,
+                            );
+                            if (hiddenBarCount > 0 ||
+                                singleDayEntries.length > capacity) {
+                              capacity = _chipCapacityFor(
+                                available,
+                                needsMoreRow: true,
+                              );
+                            }
+
+                            final shown = singleDayEntries
+                                .take(capacity)
+                                .toList();
+                            // 칩 한 줄도 못 들어가는 칸에서는 "외 N건" 조차 넘친다
+                            // (막대가 칸을 거의 다 먹은 경우). 이때는 아무것도 그리지
+                            // 않는다 — 어차피 칸을 눌러 보면 그날 목록이 다 나온다.
+                            final canShowMore = available >= _moreRowHeight;
+                            return _ChipColumn(
+                              date: date,
+                              entries: shown,
+                              overflow: canShowMore ? total - shown.length : 0,
+                            );
+                          },
                         ),
-                ),
-              ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -197,6 +281,8 @@ class _ChipColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Column(
+      // 남은 높이를 다 채우려 들지 않게 — 높이 계산은 호출측이 이미 끝냈다.
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final e in entries) ...[
@@ -204,14 +290,22 @@ class _ChipColumn extends StatelessWidget {
           const SizedBox(height: 2),
         ],
         if (overflow > 0)
-          Padding(
-            key: ValueKey('calendar-more-${calendarDateKey(date)}'),
-            padding: const EdgeInsets.only(left: 2),
-            child: Text(
-              '외 $overflow건',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                fontWeight: FontWeight.w600,
+          SizedBox(
+            // 높이를 고정해야 호출측의 용량 계산(_moreRowHeight)과 어긋나지 않는다.
+            height: _moreRowHeight,
+            child: Padding(
+              key: ValueKey('calendar-more-${calendarDateKey(date)}'),
+              padding: const EdgeInsets.only(left: 2),
+              child: Text(
+                '외 $overflow건',
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontSize: 10,
+                  height: 1.2,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),

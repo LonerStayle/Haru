@@ -5,18 +5,42 @@ import 'calendar_day_cell.dart';
 import 'calendar_entry.dart';
 import 'calendar_layout.dart';
 
-/// 기간 막대 한 줄의 높이.
-const double _barHeight = 12;
-const double _barGap = 2;
+/// 기간 막대 한 줄의 높이와 줄 사이 간격.
+///
+/// 12/2 였을 때 막대들이 서로 달라붙어 보인다는 지적이 있었다 — 9pt 글자가 12px 안에
+/// 꽉 차 위아래 여백이 없었던 탓이다. 높이와 간격을 함께 키워 줄을 눈으로 분리한다.
+const double _barHeight = 14;
+const double _barGap = 3;
 
-/// 셀 안 날짜 숫자 줄의 높이 — 막대 오버레이를 그 아래에 얹기 위한 오프셋.
-double get _dayNumberHeight => AppPlatform.isMobile ? 20 : 22;
+/// 날짜 숫자와 첫 막대 사이 여백.
+double get _barsTopInset => AppPlatform.isMobile ? 3 : 5;
 
-/// 막대 레인 상한. 넘치는 막대는 셀의 "외 N건" 으로 합산한다.
+/// 마지막 막대와 그 아래 칩 사이 여백.
+const double _barsBottomInset = 4;
+
+/// 막대 레인 수의 절대 상한. 넘치는 막대는 셀의 "외 N건" 으로 합산한다.
 ///
 /// 상한이 없으면 기간 항목이 겹칠 때 주 행 높이가 무한정 늘어나 달력이 스크롤된다.
 /// 달력의 값은 "한 화면에서 한 달을 본다" 이므로 높이를 고정하는 쪽을 택했다.
-int get _maxLanes => AppPlatform.isMobile ? 2 : 3;
+int get _laneHardCap => AppPlatform.isMobile ? 2 : 3;
+
+/// 막대에 자리를 내주고도 남겨야 하는 최소 칩 공간 (칩 한 줄).
+///
+/// 이게 없으면 좁은 창에서 막대 3줄이 칸을 통째로 먹어, 그날의 단일 항목이 하나도
+/// 안 보이고 빗금만 뜬다 (기본 창 크기에서 실제로 그랬다).
+const double _minChipRoom = 18;
+
+/// 주 행 높이 [rowHeight] 에서 실제로 쓸 수 있는 막대 레인 수.
+///
+/// 상한을 3으로 고정하지 않고 높이에서 역산하는 이유: 창 크기에 따라 한 행이
+/// 75px 도 되고 160px 도 된다. 고정 상한은 좁은 창에서 반드시 넘친다.
+int _laneCapacityFor(double rowHeight) {
+  final content = rowHeight - calendarCellPadding * 2 - calendarDayNumberHeight;
+  final forBars = content - _barsTopInset - _barsBottomInset - _minChipRoom;
+  if (forBars < _barHeight) return 0;
+  final fit = forBars ~/ (_barHeight + _barGap);
+  return fit > _laneHardCap ? _laneHardCap : fit;
+}
 
 /// 월 그리드의 한 주(7일) 행.
 ///
@@ -68,55 +92,73 @@ class CalendarWeekRow extends StatelessWidget {
       }
     }
     final segments = layoutWeekBars(weekEntries.values, days.first);
-    final visible = segments.where((s) => s.lane < _maxLanes).toList();
-    final laneCount = visible.isEmpty
-        ? 0
-        : visible.map((s) => s.lane).reduce((a, b) => a > b ? a : b) + 1;
 
-    // 상한을 넘겨 안 그려진 막대는 걸친 날짜마다 "외 N건" 으로 합산한다.
-    final hiddenByDate = <DateTime, int>{};
-    for (final s in segments.where((s) => s.lane >= _maxLanes)) {
-      for (var c = s.startCol; c <= s.endCol; c++) {
-        hiddenByDate.update(days[c], (v) => v + 1, ifAbsent: () => 1);
-      }
-    }
+    // 몇 레인까지 그릴지는 이 행이 실제로 몇 픽셀인지 알아야 정할 수 있다.
+    return LayoutBuilder(
+      builder: (context, rowConstraints) {
+        final maxLanes = _laneCapacityFor(rowConstraints.maxHeight);
+        final visible = segments.where((s) => s.lane < maxLanes).toList();
+        final laneCount = visible.isEmpty
+            ? 0
+            : visible.map((s) => s.lane).reduce((a, b) => a > b ? a : b) + 1;
 
-    final reservedTop = laneCount == 0
-        ? 0.0
-        : laneCount * (_barHeight + _barGap);
+        // 상한을 넘겨 안 그려진 막대는 걸친 날짜마다 "외 N건" 으로 합산한다.
+        final hiddenByDate = <DateTime, int>{};
+        for (final s in segments.where((s) => s.lane >= maxLanes)) {
+          for (var c = s.startCol; c <= s.endCol; c++) {
+            hiddenByDate.update(days[c], (v) => v + 1, ifAbsent: () => 1);
+          }
+        }
 
-    return Stack(
-      children: [
-        Row(
+        // 칩이 시작할 y = 셀padding + 날짜숫자 + reservedTop. 막대는 그 사이
+        // (오버레이)에 그려지므로 **막대가 쓰는 높이 + 위아래 여백**을 전부 반영한다.
+        // 예전엔 여백(위 5 / 아래 4)을 빼먹어 마지막 막대가 첫 칩 위에 4px 겹쳤다.
+        final reservedTop = laneCount == 0
+            ? 0.0
+            : _barsTopInset +
+                  laneCount * (_barHeight + _barGap) +
+                  _barsBottomInset;
+
+        return Stack(
           children: [
-            for (final d in days)
-              Expanded(child: _buildCell(d, reservedTop, hiddenByDate)),
-          ],
-        ),
-        if (laneCount > 0)
-          Positioned(
-            left: 0,
-            right: 0,
-            top: _dayNumberHeight + (AppPlatform.isMobile ? 4 : 8),
-            child: IgnorePointer(
-              child: Padding(
-                // 셀의 좌우 padding + 테두리만큼 안쪽으로 들여 막대가 칸 경계에
-                // 딱 붙지 않게 한다.
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Column(
-                  children: [
-                    for (var lane = 0; lane < laneCount; lane++) ...[
-                      _LaneRow(
-                        segments: visible.where((s) => s.lane == lane).toList(),
-                      ),
-                      const SizedBox(height: _barGap),
-                    ],
-                  ],
+            Row(
+              children: [
+                for (final d in days)
+                  Expanded(child: _buildCell(d, reservedTop, hiddenByDate)),
+              ],
+            ),
+            if (laneCount > 0)
+              Positioned(
+                left: 0,
+                right: 0,
+                // 셀 안 Column 의 좌표계와 맞춘다 — 셀 padding + 날짜 숫자 아래.
+                top:
+                    calendarCellPadding +
+                    calendarDayNumberHeight +
+                    _barsTopInset,
+                child: IgnorePointer(
+                  child: Padding(
+                    // 셀의 좌우 padding + 테두리만큼 안쪽으로 들여 막대가 칸 경계에
+                    // 딱 붙지 않게 한다.
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      children: [
+                        for (var lane = 0; lane < laneCount; lane++) ...[
+                          _LaneRow(
+                            segments: visible
+                                .where((s) => s.lane == lane)
+                                .toList(),
+                          ),
+                          const SizedBox(height: _barGap),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 
@@ -220,9 +262,10 @@ class _Bar extends StatelessWidget {
         borderRadius: radius,
       ),
       child: Text(
-        // 이어져 온 막대는 제목을 다시 쓰지 않는다 — 같은 일이 매 주 반복해서
-        // 이름표를 다는 것보다, 첫 주에 한 번 쓰고 이후는 색으로 잇는 게 읽기 쉽다.
-        segment.continuesLeft ? '' : e.title,
+        // 이어져 온 막대에도 제목을 다시 쓴다. 예전엔 "첫 주에 한 번 쓰고 이후는 색으로
+        // 잇는다" 였는데, 실사용에서 둘째 주부터는 이름 없는 색 막대만 남아 무슨 일인지
+        // 알 수 없었다. 이어짐 표시는 잘린 쪽 모서리를 각지게 그리는 것으로 충분하다.
+        e.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelSmall?.copyWith(
