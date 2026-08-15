@@ -540,20 +540,20 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Drawer 에서 고르므로 일관적이다. 슬롯 라벨/아이콘도 그룹명/폴더로 바꿔 표시.
     final groupActive = selectedGroup != null;
     final onCategory = current.kind == DestinationKind.category;
-    // 슬롯: 0=오늘 1=전체보기 2=타임라인 3=카테고리(관리 Drawer 진입점).
+    // 슬롯: 0=오늘 1=전체보기 2=캘린더 3=카테고리(관리 Drawer 진입점).
     final navSelected = groupActive
         ? 3
         : current.isToday
         ? 0
         : current.isOutline
         ? 1
-        : current.isTimeline
+        : current.isCalendar
         ? 2
         : 3;
 
     final todayDest = _destinations.firstWhere((d) => d.isToday);
     final outlineDest = _destinations.firstWhere((d) => d.isOutline);
-    final timelineDest = _destinations.firstWhere((d) => d.isTimeline);
+    final calendarDest = _destinations.firstWhere((d) => d.isCalendar);
 
     final categoryIcon = groupActive
         ? Icons.folder_outlined
@@ -577,7 +577,7 @@ class _AppShellState extends ConsumerState<AppShell> {
             _selectByDestination(outlineDest);
             break;
           case 2:
-            _selectByDestination(timelineDest);
+            _selectByDestination(calendarDest);
             break;
           case 3:
             _scaffoldKey.currentState?.openDrawer();
@@ -587,7 +587,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       destinations: [
         NavigationDestination(icon: Icon(todayDest.icon), label: '오늘'),
         NavigationDestination(icon: Icon(outlineDest.icon), label: '전체보기'),
-        NavigationDestination(icon: Icon(timelineDest.icon), label: '타임라인'),
+        NavigationDestination(icon: Icon(calendarDest.icon), label: '캘린더'),
         NavigationDestination(icon: Icon(categoryIcon), label: categoryLabel),
       ],
     );
@@ -1191,7 +1191,7 @@ class _SidebarState extends State<_Sidebar> {
     final byGroup = <String, List<int>>{};
     int? outlineIndex;
     int? todayIndex;
-    int? timelineIndex;
+    int? calendarIndex;
     for (var i = 0; i < widget.destinations.length; i++) {
       final d = widget.destinations[i];
       switch (d.kind) {
@@ -1201,8 +1201,8 @@ class _SidebarState extends State<_Sidebar> {
         case DestinationKind.outline:
           outlineIndex = i;
           break;
-        case DestinationKind.timeline:
-          timelineIndex = i;
+        case DestinationKind.calendar:
+          calendarIndex = i;
           break;
         case DestinationKind.category:
           final gid = d.category?.groupId;
@@ -1253,8 +1253,8 @@ class _SidebarState extends State<_Sidebar> {
       if (todayIndex != null) _item(todayIndex),
       // v1.4 (Task G) — 전체보기를 '오늘' 바로 다음으로 (카테고리/그룹 섹션 앞).
       if (outlineIndex != null) _item(outlineIndex),
-      // v1.5 — 타임라인 (날짜 지정 항목 전역 뷰). 전체보기 다음.
-      if (timelineIndex != null) _item(timelineIndex),
+      // v1.6 — 캘린더 (월 달력 + 선택일 목록). 전체보기 다음, v1.5 타임라인 자리.
+      if (calendarIndex != null) _item(calendarIndex),
       // 미분류 섹션 — 그룹이 있으면 DragTarget(그룹 빼기)+라벨, 없으면 평면 리스트.
       if (widget.groups.isEmpty) ...[
         if (ungrouped.isNotEmpty) _categorySection(ungrouped),
@@ -1741,7 +1741,9 @@ class _MainArea extends StatelessWidget {
   Widget build(BuildContext context) {
     if (destination.isToday) return const HomeScreen();
     if (destination.isOutline) return const OutlineScreen();
-    if (destination.isTimeline) return const TimelineScreen();
+    // v1.6 — 캘린더 destination. 화면 셸(달력/목록 세그먼트)이 붙기 전까지는
+    // 흡수 대상인 타임라인 목록을 그대로 보여준다 (T11 에서 CalendarScreen 으로 교체).
+    if (destination.isCalendar) return const TimelineScreen();
     return CategoryView(category: destination.category!);
   }
 }

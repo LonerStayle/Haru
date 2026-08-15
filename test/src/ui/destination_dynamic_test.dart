@@ -9,25 +9,25 @@ import 'package:solo_todo/src/ui/destination.dart';
 /// 8번째부터 단축키 없음.
 void main() {
   group('AppDestination.buildAll', () {
-    test('빈 categories — today + outline + timeline (0/1/2)', () {
+    test('빈 categories — today + outline + calendar (0/1/2)', () {
       final dests = AppDestination.buildAll(const []);
       expect(dests.length, 3);
       expect(dests[0].isToday, isTrue);
       expect(dests[0].shortcutDigit, 0);
       expect(dests[1].isOutline, isTrue);
       expect(dests[1].shortcutDigit, 1);
-      expect(dests[2].isTimeline, isTrue);
+      expect(dests[2].isCalendar, isTrue);
       expect(dests[2].shortcutDigit, 2);
     });
 
-    test('builtin 5종 — today=0 / outline=1 / timeline=2 / 카테고리 3~7', () {
+    test('builtin 5종 — today=0 / outline=1 / calendar=2 / 카테고리 3~7', () {
       final dests = AppDestination.buildAll(Category.builtinSeeds);
       expect(dests.length, 8);
       expect(dests[0].isToday, isTrue);
       expect(dests[0].shortcutDigit, 0);
       expect(dests[1].isOutline, isTrue);
       expect(dests[1].shortcutDigit, 1);
-      expect(dests[2].isTimeline, isTrue);
+      expect(dests[2].isCalendar, isTrue);
       expect(dests[2].shortcutDigit, 2);
       for (var i = 0; i < 5; i++) {
         expect(dests[i + 3].shortcutDigit, i + 3);
@@ -116,9 +116,9 @@ void main() {
           isBuiltin: false,
         ),
       ]);
-      // today, outline, timeline, 커스텀(digit 3).
+      // today, outline, calendar, 커스텀(digit 3).
       expect(dests[1].tooltipWithShortcut, '전체보기 (1)');
-      expect(dests[2].tooltipWithShortcut, '타임라인 (2)');
+      expect(dests[2].tooltipWithShortcut, '캘린더 (2)');
       expect(dests[3].tooltipWithShortcut, '커스텀 (3)');
 
       // 8개 이상 카테고리에선 후순위 destination 의 tooltip 은 라벨만.

@@ -113,8 +113,8 @@ void main() {
     await pump(tester);
     expect(find.byType(HomeScreen), findsOneWidget, reason: '초기 진입은 오늘');
 
-    // 타임라인 탭으로 이동.
-    await tester.tap(find.text('타임라인'));
+    // 캘린더 탭으로 이동.
+    await tester.tap(find.text('캘린더'));
     await tester.pumpAndSettle();
     expect(find.byType(TimelineScreen), findsOneWidget);
     expect(find.byType(HomeScreen), findsNothing);

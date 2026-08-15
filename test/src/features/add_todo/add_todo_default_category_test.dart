@@ -23,7 +23,7 @@ void main() {
   ];
 
   final destinations = AppDestination.buildAll(categories);
-  // buildAll 순서: [오늘, 전체보기, 타임라인, work, dev, daily, idea].
+  // buildAll 순서: [오늘, 전체보기, 캘린더, work, dev, daily, idea].
   final workIndex = destinations.indexWhere((d) => d.category?.id == work.id);
   final ideaIndex = destinations.indexWhere((d) => d.category?.id == idea.id);
   final todayIndex = destinations.indexWhere((d) => d.isToday);
