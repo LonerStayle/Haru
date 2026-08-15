@@ -21,7 +21,12 @@ import '../todo_actions/todo_actions_controller.dart';
 /// 시간 흐름으로 한눈에 보는 화면이 필요해졌다. 버킷: 지남 / 오늘 / 내일 / 이번 주 / 이후.
 /// 완료 항목은 제외(미완료만, 완료보기는 추후). 메모(note)는 dueAt 가 없어 자연히 제외된다.
 class TimelineScreen extends ConsumerWidget {
-  const TimelineScreen({super.key});
+  const TimelineScreen({super.key, this.showHeader = true});
+
+  /// v1.6 — 캘린더 화면의 `[목록]` 세그먼트 안에 embed 될 때는 false.
+  /// 이미 캘린더 헤더가 화면 제목을 달고 있어 "타임라인" 제목이 두 번 나오면
+  /// 어디를 보고 있는지 오히려 헷갈린다.
+  final bool showHeader;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -62,15 +67,18 @@ class TimelineScreen extends ConsumerWidget {
 
     return CustomScrollView(
       slivers: [
-        const SliverPadding(
-          padding: EdgeInsets.fromLTRB(
-            AppTokens.space24,
-            AppTokens.space32,
-            AppTokens.space24,
-            AppTokens.space12,
-          ),
-          sliver: SliverToBoxAdapter(child: _Header()),
-        ),
+        if (showHeader)
+          const SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              AppTokens.space24,
+              AppTokens.space32,
+              AppTokens.space24,
+              AppTokens.space12,
+            ),
+            sliver: SliverToBoxAdapter(child: _Header()),
+          )
+        else
+          const SliverToBoxAdapter(child: SizedBox(height: AppTokens.space8)),
         if (dated.isEmpty)
           const SliverFillRemaining(
             hasScrollBody: false,

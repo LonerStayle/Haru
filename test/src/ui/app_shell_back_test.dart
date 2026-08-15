@@ -9,6 +9,7 @@ import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/calendar_view/calendar_screen.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/category_providers.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
@@ -16,7 +17,6 @@ import 'package:solo_todo/src/features/group/group_screen.dart';
 import 'package:solo_todo/src/features/home/home_screen.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
-import 'package:solo_todo/src/features/timeline/timeline_screen.dart';
 import 'package:solo_todo/src/ui/app_shell.dart';
 
 /// 모바일 시스템 뒤로가기(백버튼/제스처) 계단식 동작 검증.
@@ -116,7 +116,7 @@ void main() {
     // 캘린더 탭으로 이동.
     await tester.tap(find.text('캘린더'));
     await tester.pumpAndSettle();
-    expect(find.byType(TimelineScreen), findsOneWidget);
+    expect(find.byType(CalendarScreen), findsOneWidget);
     expect(find.byType(HomeScreen), findsNothing);
 
     await systemBack(tester);

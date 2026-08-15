@@ -83,10 +83,22 @@ class CalendarDayPanel extends ConsumerWidget {
         ),
         Expanded(
           child: entries.isEmpty
-              ? const EmptyState(
-                  icon: Icons.event_available_outlined,
-                  title: '이 날은 비어 있습니다',
-                  subtitle: '＋ 이 날짜로 추가 를 누르거나, 아래 서랍에서 끌어다 놓으세요',
+              // 패널이 아주 낮아질 수 있다 (모바일에서 달력을 펼친 상태 / 좁은 창).
+              // 그 높이에서도 빈 상태가 잘리지 않도록 스크롤 가능하게 감싼다 —
+              // 공간이 남을 땐 minHeight 로 여전히 가운데 정렬된다.
+              ? LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: const EmptyState(
+                        icon: Icons.event_available_outlined,
+                        title: '이 날은 비어 있습니다',
+                        subtitle: '＋ 이 날짜로 추가 를 누르거나, 아래 서랍에서 끌어다 놓으세요',
+                      ),
+                    ),
+                  ),
                 )
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(

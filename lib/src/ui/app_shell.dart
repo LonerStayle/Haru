@@ -17,6 +17,7 @@ import '../features/category/add_category_dialog.dart';
 import '../features/category/add_group_dialog.dart';
 import '../features/category/categories_controller.dart';
 import '../features/category/groups_controller.dart';
+import '../features/calendar_view/calendar_screen.dart';
 import '../features/category/category_view.dart';
 import '../features/group/group_screen.dart';
 import '../features/home/home_screen.dart';
@@ -26,7 +27,6 @@ import '../features/outline/outline_screen.dart';
 import '../features/search/search_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
-import '../features/timeline/timeline_screen.dart';
 import 'destination.dart';
 import 'widgets/undo_snackbar.dart';
 
@@ -1741,9 +1741,8 @@ class _MainArea extends StatelessWidget {
   Widget build(BuildContext context) {
     if (destination.isToday) return const HomeScreen();
     if (destination.isOutline) return const OutlineScreen();
-    // v1.6 — 캘린더 destination. 화면 셸(달력/목록 세그먼트)이 붙기 전까지는
-    // 흡수 대상인 타임라인 목록을 그대로 보여준다 (T11 에서 CalendarScreen 으로 교체).
-    if (destination.isCalendar) return const TimelineScreen();
+    // v1.6 — 캘린더. 흡수된 타임라인 목록은 이 화면의 `[목록]` 세그먼트에 있다.
+    if (destination.isCalendar) return const CalendarScreen();
     return CategoryView(category: destination.category!);
   }
 }
