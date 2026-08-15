@@ -387,6 +387,38 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('기본 창 크기(좁고 낮은 격자)에서도 오버플로가 나지 않는다', (tester) async {
+      // 실사용 신고: 기본 창(≈844×636)에서 사이드바·패널을 빼면 격자는 300×480 남짓인데,
+      // 막대 레인 상한이 3으로 고정돼 있어 칸을 통째로 먹고 빗금만 남았다.
+      // 레인 수는 행 높이에서 역산돼야 한다.
+      await mount(
+        tester,
+        size: const Size(300, 480),
+        entries: [
+          for (var i = 0; i < 5; i++)
+            TodoEntry(
+              make(
+                id: 'bar$i',
+                title: '[리서치] 기간 항목 $i',
+                dueAt: DateTime(2026, 8, 9),
+                endAt: DateTime(2026, 8, 14),
+                isAllDay: true,
+              ),
+            ),
+          for (var i = 0; i < 6; i++)
+            TodoEntry(
+              make(
+                id: 'one$i',
+                title: '단일 $i',
+                dueAt: DateTime(2026, 8, 10, 9),
+              ),
+            ),
+        ],
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('좁은 화면에서도 오버플로가 나지 않는다', (tester) async {
       await mount(
         tester,

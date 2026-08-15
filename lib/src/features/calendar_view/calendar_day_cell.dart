@@ -182,10 +182,14 @@ class CalendarDayCell extends StatelessWidget {
                             final shown = singleDayEntries
                                 .take(capacity)
                                 .toList();
+                            // 칩 한 줄도 못 들어가는 칸에서는 "외 N건" 조차 넘친다
+                            // (막대가 칸을 거의 다 먹은 경우). 이때는 아무것도 그리지
+                            // 않는다 — 어차피 칸을 눌러 보면 그날 목록이 다 나온다.
+                            final canShowMore = available >= _moreRowHeight;
                             return _ChipColumn(
                               date: date,
                               entries: shown,
-                              overflow: total - shown.length,
+                              overflow: canShowMore ? total - shown.length : 0,
                             );
                           },
                         ),
