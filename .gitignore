@@ -65,3 +65,6 @@ docs/audit/
 .claude/worktrees/
 .worktrees/
 devtools_options.yaml
+
+# js-super 실행 중 임시 manifest 버퍼 (end-of-run 에 정리됨)
+.js-super/
