@@ -84,6 +84,29 @@ class TodoActionsController {
     return synced;
   }
 
+  /// v1.6 — 캘린더 드래그 전용 저장 경로. **sortOrder 를 보존**한다.
+  ///
+  /// [update] 는 "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 형제 min-1 로
+  /// bump 하는데, 달력에서 항목을 다른 날짜 칸으로 끄는 건 *순서* 조작이 아니라
+  /// *일정* 조작이다. 그 경로에 bump 가 새면 날짜만 옮겼는데 '오늘'/'전체보기'
+  /// 목록에서 맨 위로 튀어오른다 — 사용자가 시키지 않은 변화다.
+  ///
+  /// [moved] 는 `applyDateDrop` 이 만든 값이어야 한다 (날짜 외 필드는 원본과 동일).
+  /// 저장된 값과 내용이 같으면 아무것도 쓰지 않는다 — updatedAt 도 보존된다.
+  ///
+  /// 저장된 sortOrder 를 우선 쓰는 이유: 드래그 중인 화면의 Todo 는 스트림 지연으로
+  /// 살짝 옛 값일 수 있는데, 그걸 그대로 되쓰면 다른 화면의 재정렬을 되돌릴 수 있다.
+  Future<Todo> setDueAt(Todo moved) async {
+    final current = await _repo.getById(moved.id);
+    if (current != null && _isUnchanged(current, moved)) return current;
+    final synced = moved.copyWith(
+      updatedAt: _now(),
+      sortOrder: current?.sortOrder ?? moved.sortOrder,
+    );
+    await _repo.upsert(synced);
+    return synced;
+  }
+
   /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.
   ///
   /// 순서·동기화 메타(sortOrder / updatedAt)는 비교에서 제외한다 — 판정의 목적이

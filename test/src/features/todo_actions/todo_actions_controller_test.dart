@@ -268,4 +268,106 @@ void main() {
       expect((await repo.getById('p'))!.type, TodoType.task);
     });
   });
+
+  group('setDueAt — 캘린더 드래그 전용 (v1.6)', () {
+    Todo dated({
+      String id = 'a',
+      DateTime? dueAt,
+      DateTime? endAt,
+      int sortOrder = 0,
+      bool isAllDay = false,
+    }) => Todo(
+      id: id,
+      title: '회의',
+      category: Category.work,
+      dueAt: dueAt ?? DateTime(2026, 8, 15, 14, 30),
+      endAt: endAt,
+      isAllDay: isAllDay,
+      sortOrder: sortOrder,
+      createdAt: created,
+      updatedAt: created,
+    );
+
+    test('날짜만 바꾸고 sortOrder 는 그대로 — update 처럼 맨 위로 튀지 않는다', () async {
+      final original = dated(sortOrder: 7);
+      await repo.upsert(original);
+      // 같은 형제에 더 위(작은 sortOrder)가 있어도 bump 되면 안 된다.
+      await repo.upsert(dated(id: 'top', sortOrder: 1));
+
+      final later = DateTime.utc(2026, 8, 20, 10);
+      controller = TodoActionsController(repo, () => later);
+
+      final moved = await controller.setDueAt(
+        original.copyWith(dueAt: DateTime(2026, 8, 20, 14, 30)),
+      );
+
+      expect(moved.sortOrder, 7);
+      expect(moved.dueAt, DateTime(2026, 8, 20, 14, 30));
+      expect(moved.updatedAt, later);
+      expect((await repo.getById('a'))!.sortOrder, 7);
+    });
+
+    test('같은 조건에서 update 는 여전히 맨 위로 bump 한다 (기존 동작 회귀 없음)', () async {
+      final original = dated(sortOrder: 7);
+      await repo.upsert(original);
+      await repo.upsert(dated(id: 'top', sortOrder: 1));
+
+      final bumped = await controller.update(
+        original.copyWith(dueAt: DateTime(2026, 8, 20, 14, 30)),
+      );
+
+      expect(bumped.sortOrder, 0); // min(1) - 1
+    });
+
+    test('내용이 그대로면 아무것도 쓰지 않는다 (updatedAt 보존)', () async {
+      final original = dated();
+      await repo.upsert(original);
+
+      final later = DateTime.utc(2026, 8, 20, 10);
+      controller = TodoActionsController(repo, () => later);
+
+      final same = await controller.setDueAt(original);
+      expect(same.updatedAt, created);
+      expect((await repo.getById('a'))!.updatedAt, created);
+    });
+
+    test('저장된 sortOrder 를 우선한다 — 스트림 지연으로 옛 값을 들고 와도 되돌리지 않는다', () async {
+      await repo.upsert(dated(sortOrder: 3));
+      // 화면이 들고 있던 옛 스냅샷(sortOrder 99)으로 날짜만 옮긴다.
+      final stale = dated(sortOrder: 99, dueAt: DateTime(2026, 8, 22, 14, 30));
+
+      final moved = await controller.setDueAt(stale);
+
+      expect(moved.sortOrder, 3);
+      expect((await repo.getById('a'))!.sortOrder, 3);
+    });
+
+    test('기간 항목의 endAt 도 함께 저장된다', () async {
+      final original = dated(
+        dueAt: DateTime(2026, 8, 15),
+        endAt: DateTime(2026, 8, 18),
+        isAllDay: true,
+      );
+      await repo.upsert(original);
+
+      await controller.setDueAt(
+        original.copyWith(
+          dueAt: DateTime(2026, 8, 20),
+          endAt: DateTime(2026, 8, 23),
+        ),
+      );
+
+      final fromDb = (await repo.getById('a'))!;
+      expect(fromDb.dueAt, DateTime(2026, 8, 20));
+      expect(fromDb.endAt, DateTime(2026, 8, 23));
+      expect(fromDb.dateMode, TodoDateMode.range);
+    });
+
+    test('DB 에 없던 항목(방금 실체화된 반복 회차)도 그대로 저장된다', () async {
+      final fresh = dated(id: 'series#20260820', sortOrder: 5);
+      final saved = await controller.setDueAt(fresh);
+      expect(saved.sortOrder, 5);
+      expect(await repo.getById('series#20260820'), isNotNull);
+    });
+  });
 }
