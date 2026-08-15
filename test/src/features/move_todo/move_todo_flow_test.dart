@@ -196,6 +196,63 @@ void main() {
     await disposeTree(tester);
   });
 
+  testWidgets('최상위 → 하위 — 다른 최상위 항목 밑으로 들어간다', (tester) async {
+    // "최상위에서 하위로는 못 옮긴다" 는 제보 확인용. 시트 목록에서 다른 root 를
+    // 골라 확정하는 경로가 DB 까지 닿는지 본다 (반대 방향만 검증돼 있었다).
+    await repo.upsert(node('a'));
+    await repo.upsert(node('b'));
+
+    await openFlow(tester, node('b'));
+
+    await tester.tap(find.byKey(const ValueKey('move-target-a')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-confirm')));
+    await tester.pumpAndSettle();
+
+    final moved = await repo.getById('b');
+    expect(moved!.parentId, 'a', reason: 'a 의 하위로 내려가야 한다');
+
+    await disposeTree(tester);
+  });
+
+  testWidgets('최상위 → 하위 — 자손도 서브트리째 따라 내려간다', (tester) async {
+    await repo.upsert(node('a'));
+    await repo.upsert(node('b'));
+    await repo.upsert(node('c', parentId: 'b'));
+
+    await openFlow(tester, node('b'));
+
+    await tester.tap(find.byKey(const ValueKey('move-target-a')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-confirm')));
+    await tester.pumpAndSettle();
+
+    expect((await repo.getById('b'))!.parentId, 'a');
+    expect((await repo.getById('c'))!.parentId, 'b');
+
+    await disposeTree(tester);
+  });
+
+  testWidgets('다른 카테고리 항목의 하위로 옮기면 카테고리도 따라간다', (tester) async {
+    await repo.upsert(node('a', category: Category.daily));
+    await repo.upsert(node('b'));
+
+    await openFlow(tester, node('b'));
+
+    await tester.tap(find.byKey(const ValueKey('move-category-daily')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-target-a')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-confirm')));
+    await tester.pumpAndSettle();
+
+    final moved = await repo.getById('b');
+    expect(moved!.parentId, 'a');
+    expect(moved.category.id, 'daily', reason: '자식은 부모 카테고리를 상속한다');
+
+    await disposeTree(tester);
+  });
+
   testWidgets('다른 카테고리 최상위로도 이동한다', (tester) async {
     await repo.upsert(node('a'));
     await repo.upsert(node('b', parentId: 'a'));
