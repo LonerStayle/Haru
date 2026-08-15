@@ -1,12 +1,18 @@
-import 'package:flutter/foundation.dart';
+// foundation 전체를 들이면 그쪽 `Category` 가 도메인 `Category` 와 충돌한다.
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import '../../data/local/app_database.dart';
 import '../../data/local/calendar_ops_dao.dart';
 import '../../data/todo_repository.dart';
+import '../../domain/category.dart';
 import '../../domain/todo.dart';
 import 'calendar_gateway.dart';
+import 'calendar_merge.dart';
 import 'calendar_service.dart';
+import 'calendar_settings.dart';
+import 'event_import_filter.dart';
+import 'event_to_todo.dart';
 
 /// 큐 한 번 비우기의 결과. 설정 화면이 상태를 보여주는 데 쓴다.
 class PushResult {
@@ -33,6 +39,48 @@ class PushResult {
   String toString() =>
       'PushResult(성공 $succeeded, 재시도 $retryable, 폐기 $dropped, '
       '재인증 필요 $authRequired)';
+}
+
+/// 수신 1회의 결과.
+class PullResult {
+  const PullResult({
+    this.imported = 0,
+    this.updated = 0,
+    this.deleted = 0,
+    this.unlinked = 0,
+    this.skipped = 0,
+    this.authRequired = false,
+    this.newSyncTokens = const {},
+    this.expiredCalendars = const {},
+  });
+
+  /// 캘린더에서 새로 들어온 할 일 수.
+  final int imported;
+
+  /// 캘린더 쪽 수정이 반영된 할 일 수.
+  final int updated;
+
+  /// 캘린더에서 지워져 함께 삭제된 할 일 수 (유입 항목).
+  final int deleted;
+
+  /// 캘린더에서 지워졌지만 할 일은 남기고 연결만 끊은 수 (앱이 만든 항목).
+  final int unlinked;
+
+  /// 필터에 걸려 들이지 않은 이벤트 수.
+  final int skipped;
+
+  final bool authRequired;
+
+  /// 캘린더 id → 다음 회차에 쓸 토큰. 호출자가 설정에 저장한다.
+  final Map<String, String> newSyncTokens;
+
+  /// 토큰이 만료돼 전체 재수집으로 폴백한 캘린더들.
+  final Set<String> expiredCalendars;
+
+  @override
+  String toString() =>
+      'PullResult(유입 $imported, 갱신 $updated, 삭제 $deleted, '
+      '연결해제 $unlinked, 건너뜀 $skipped)';
 }
 
 /// 앱 → 캘린더 방향의 실행부. 큐에 쌓인 작업을 구글에 반영한다.
@@ -189,4 +237,200 @@ class CalendarSyncService {
   /// echo 로 인식하지 못한다.
   Future<void> _saveLink(Todo todo, String eventId, String calendarId) => repo
       .upsert(todo.copyWith(calendarEventId: eventId, calendarId: calendarId));
+
+  // ── 캘린더 → 앱 ─────────────────────────────────────────────────────────
+
+  /// 읽기 캘린더들의 변경분을 받아 앱에 반영한다.
+  ///
+  /// [categoryFor] 는 캘린더 id 로 유입 항목의 카테고리를 정한다 — 설정의 매핑과
+  /// 활성 카테고리 목록을 아는 것은 호출자이므로 함수로 주입받는다.
+  ///
+  /// 새 토큰은 저장하지 않고 [PullResult] 로 돌려준다. 설정 저장은 호출자 몫이라
+  /// 이 서비스는 설정 저장소를 몰라도 되고, 테스트도 가벼워진다.
+  Future<PullResult> pull({
+    required CalendarSettings settings,
+    required Category Function(String calendarId) categoryFor,
+  }) async {
+    if (settings.readCalendarIds.isEmpty) return const PullResult();
+
+    // 링크 조회를 위해 한 번만 전체를 읽는다 — 이벤트마다 DB 를 뒤지지 않기 위함.
+    final all = await repo.watchAll().first;
+    final byEventId = <String, Todo>{
+      for (final t in all)
+        if (t.calendarEventId != null) t.calendarEventId!: t,
+    };
+    final knownTodoIds = all.map((t) => t.id).toSet();
+
+    var imported = 0;
+    var updated = 0;
+    var deleted = 0;
+    var unlinked = 0;
+    var skipped = 0;
+    final newTokens = <String, String>{};
+    final expired = <String>{};
+
+    for (final calendarId in settings.readCalendarIds) {
+      EventPage page;
+      try {
+        page = await _fetchChanges(calendarId, settings.syncTokens[calendarId]);
+      } on _SyncTokenExpired {
+        expired.add(calendarId);
+        try {
+          page = await _fetchChanges(calendarId, null);
+        } on CalendarGatewayException catch (e) {
+          if (e.kind == CalendarErrorKind.authRequired) {
+            return PullResult(
+              imported: imported,
+              updated: updated,
+              deleted: deleted,
+              unlinked: unlinked,
+              skipped: skipped,
+              authRequired: true,
+              newSyncTokens: newTokens,
+              expiredCalendars: expired,
+            );
+          }
+          continue; // 일시 오류 — 다음 회차에 다시.
+        }
+      } on CalendarGatewayException catch (e) {
+        if (e.kind == CalendarErrorKind.authRequired) {
+          return PullResult(
+            imported: imported,
+            updated: updated,
+            deleted: deleted,
+            unlinked: unlinked,
+            skipped: skipped,
+            authRequired: true,
+            newSyncTokens: newTokens,
+            expiredCalendars: expired,
+          );
+        }
+        continue;
+      }
+
+      for (final event in page.events) {
+        final verdict = judgeImport(
+          event,
+          importInvited: settings.importInvited,
+          knownTodoIds: knownTodoIds,
+        );
+        final linked = byEventId[event.id];
+
+        if (verdict == ImportVerdict.cancelled) {
+          if (linked == null) continue;
+          if (linked.calendarOrigin == 'gcal') {
+            // 구글이 원본이었다 — 원본이 사라졌으니 할 일도 지운다.
+            await repo.deleteById(linked.id);
+            deleted++;
+          } else {
+            // 앱이 원본이다 — 할 일은 대표님 것이므로 남기고 연결만 끊는다.
+            await repo.upsert(
+              linked.copyWith(calendarEventId: null, calendarId: null),
+            );
+            unlinked++;
+          }
+          byEventId.remove(event.id);
+          continue;
+        }
+
+        if (linked != null) {
+          final merge = mergeEventIntoTodo(event: event, local: linked);
+          if (merge.kind == MergeKind.updated) {
+            await repo.upsert(merge.merged!);
+            updated++;
+          }
+          continue;
+        }
+
+        if (!verdict.isAccepted) {
+          skipped++;
+          continue;
+        }
+
+        final created = await _importEvent(event, calendarId, categoryFor);
+        if (created == null) {
+          skipped++;
+        } else {
+          imported++;
+          byEventId[event.id!] = created;
+          knownTodoIds.add(created.id);
+        }
+      }
+
+      final token = page.nextSyncToken;
+      if (token != null) newTokens[calendarId] = token;
+    }
+
+    return PullResult(
+      imported: imported,
+      updated: updated,
+      deleted: deleted,
+      unlinked: unlinked,
+      skipped: skipped,
+      newSyncTokens: newTokens,
+      expiredCalendars: expired,
+    );
+  }
+
+  /// 만료 토큰을 [_SyncTokenExpired] 로 바꿔 호출부의 폴백 분기를 단순하게 만든다.
+  Future<EventPage> _fetchChanges(String calendarId, String? token) async {
+    try {
+      return await gateway.listChanges(
+        calendarId,
+        syncToken: token,
+        timeMin: token == null ? _fullSyncFloor() : null,
+      );
+    } on CalendarGatewayException catch (e) {
+      if (e.kind == CalendarErrorKind.syncTokenExpired) {
+        throw const _SyncTokenExpired();
+      }
+      rethrow;
+    }
+  }
+
+  /// 전체 수집의 과거 방향 하한. 지난 일정까지 통째로 가져오면 첫 동기화가 무거워진다.
+  DateTime _fullSyncFloor() =>
+      _now().toUtc().subtract(const Duration(days: 30));
+
+  Future<Todo?> _importEvent(
+    gcal.Event event,
+    String calendarId,
+    Category Function(String) categoryFor,
+  ) async {
+    final patch = eventToTodoPatch(event);
+    if (patch == null || patch.dueAt == null) return null;
+
+    final category = categoryFor(calendarId);
+    final minSibling = await repo.minSiblingSortOrder(
+      categoryId: category.id,
+      parentId: null,
+    );
+    final todo =
+        Todo.create(
+          title: patch.title,
+          category: category,
+          dueAt: patch.dueAt,
+          now: _now,
+          // 방금 들어온 것을 바로 볼 수 있게 맨 위로.
+          sortOrder: (minSibling ?? 0) - 1,
+          endAt: patch.endAt,
+          isAllDay: patch.isAllDay,
+          timeAnchor: patch.timeAnchor,
+          recurrenceRule: patch.recurrence?.encode(),
+          recurrenceEndAt: patch.recurrenceEndAt,
+        ).copyWith(
+          calendarEventId: event.id,
+          calendarId: calendarId,
+          // 출처를 기록해야 삭제 규칙이 성립한다 — 구글에서 지워졌을 때
+          // 할 일을 함께 지울지, 연결만 끊을지가 이 값으로 갈린다.
+          calendarOrigin: 'gcal',
+        );
+    await repo.upsert(todo);
+    return todo;
+  }
+}
+
+/// 만료 토큰 폴백용 내부 신호.
+class _SyncTokenExpired implements Exception {
+  const _SyncTokenExpired();
 }
