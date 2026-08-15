@@ -56,6 +56,39 @@ class RecurrenceMaterializer {
     return out;
   }
 
+  /// v1.6 — 발생일 **하나만** 실체화. 캘린더에서 미래 회차를 건드릴 때 쓴다.
+  ///
+  /// [materializeDue] 는 `until = min(오늘, recurrenceEndAt)` 이라 **미래 회차를
+  /// 절대 만들지 않는다**. 그래서 캘린더의 미래 반복은 DB 에 실체가 없는 고스트인데,
+  /// 사용자가 체크·드래그·편집으로 건드리는 순간 조작할 row 가 필요해진다.
+  /// 이 함수가 그 한 회차만 만들어준다.
+  ///
+  /// [materializeDue] 와 같은 [_instanceFor] / [instanceId] 를 재사용하므로 id 가
+  /// 결정적이다 — 나중에 정규 실체화가 그 날짜에 도달해도 같은 row 를 덮어쓸 뿐
+  /// 중복이 생기지 않는다. 새로운 저장 경로를 만들지 않는 것이 요점.
+  ///
+  /// null 반환: 반복 마스터가 아니거나 / [occLocalDate] 가 실제 발생일이 아니거나 /
+  /// anchor 이전이거나 / 종료일([Todo.recurrenceEndAt])을 넘은 경우.
+  static Todo? materializeOne(
+    Todo master,
+    DateTime occLocalDate,
+    DateTime now,
+  ) {
+    if (!master.isRecurringMaster) return null;
+    final rule = master.recurrence;
+    final anchor = master.dueAt;
+    final seriesId = master.seriesId;
+    if (rule == null || anchor == null || seriesId == null) return null;
+
+    final date = _dateOnly(occLocalDate);
+    if (date.isBefore(_dateOnly(anchor))) return null;
+    final end = master.recurrenceEndAt;
+    if (end != null && date.isAfter(_dateOnly(end))) return null;
+    if (!rule.isOccurrenceOn(date, anchor)) return null;
+
+    return _instanceFor(master, date, instanceId(seriesId, date), now);
+  }
+
   /// 결정적 인스턴스 id — `${seriesId}#yyyymmdd`(local date). 같은 (시리즈,발생일)은
   /// 항상 동일 → upsert 가 같은 row 를 덮어써 중복이 원천 차단된다.
   static String instanceId(String seriesId, DateTime occLocalDate) {

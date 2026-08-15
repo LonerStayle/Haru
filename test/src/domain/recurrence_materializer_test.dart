@@ -279,4 +279,127 @@ void main() {
       expect(RecurrenceMaterializer.activeMasters([m, plain]), [m]);
     });
   });
+
+  group('materializeOne — 미래 회차 한 건만 실체화 (v1.6 캘린더)', () {
+    final weekly = master(
+      rule: const RecurrenceRule(freq: RecurrenceFreq.weekly),
+      dueAt: dt(2026, 1, 1, 10, 30), // 목요일
+    );
+
+    test('미래 발생일을 실체화 — materializeDue 는 만들지 않는 구간', () {
+      // materializeDue 는 오늘(1/5)까지만 만든다.
+      final due = RecurrenceMaterializer.materializeDue([weekly], {}, now);
+      expect(due.every((t) => !t.dueAt!.isAfter(now)), isTrue);
+
+      final future = dt(2026, 1, 29); // anchor 로부터 4주 뒤 목요일
+      final one = RecurrenceMaterializer.materializeOne(weekly, future, now);
+      expect(one, isNotNull);
+      expect(one!.dueAt, dt(2026, 1, 29, 10, 30));
+    });
+
+    test('id 가 결정적 — 정규 실체화가 나중에 도달해도 같은 row 를 덮어쓸 뿐', () {
+      final date = dt(2026, 1, 29);
+      final one = RecurrenceMaterializer.materializeOne(weekly, date, now)!;
+      expect(one.id, RecurrenceMaterializer.instanceId('m1', date));
+
+      // 시간이 흘러 오늘이 1/29 가 되면 정규 실체화도 같은 id 를 만든다.
+      final later = dt(2026, 1, 29, 12);
+      final byDue = RecurrenceMaterializer.materializeDue([weekly], {}, later);
+      expect(byDue.map((t) => t.id), contains(one.id));
+    });
+
+    test('이미 존재하는 날짜로 인덱싱하면 정규 실체화가 건너뛴다 (중복 없음)', () {
+      final date = dt(2026, 1, 29);
+      final one = RecurrenceMaterializer.materializeOne(weekly, date, now)!;
+      final index = RecurrenceMaterializer.indexExistingInstanceDates([
+        weekly,
+        one,
+      ]);
+      final later = dt(2026, 1, 29, 12);
+      final byDue = RecurrenceMaterializer.materializeDue(
+        [weekly],
+        index,
+        later,
+      );
+      expect(byDue.map((t) => t.id), isNot(contains(one.id)));
+    });
+
+    test('인스턴스 속성은 materializeDue 와 동일 (마스터 표식 없음, 규칙 미보유)', () {
+      final one = RecurrenceMaterializer.materializeOne(
+        weekly,
+        dt(2026, 1, 29),
+        now,
+      )!;
+      expect(one.isSeriesMaster, isFalse);
+      expect(one.recurrenceRule, isNull);
+      expect(one.recurrenceEndAt, isNull);
+      expect(one.calendarEventId, isNull);
+      expect(one.seriesId, 'm1');
+      expect(one.doneAt, isNull);
+      expect(one.sortOrder, weekly.sortOrder);
+    });
+
+    test('기간 마스터면 회차도 같은 길이', () {
+      final ranged = master(
+        rule: const RecurrenceRule(freq: RecurrenceFreq.weekly),
+        dueAt: dt(2026, 1, 1, 9),
+        endAt: dt(2026, 1, 3, 18),
+        id: 'r1',
+      );
+      final one = RecurrenceMaterializer.materializeOne(
+        ranged,
+        dt(2026, 1, 29),
+        now,
+      )!;
+      expect(one.dueAt, dt(2026, 1, 29, 9));
+      expect(one.endAt, dt(2026, 1, 31, 18));
+    });
+
+    test('발생일이 아닌 날짜는 null — 아무 칸에나 실체를 만들지 않는다', () {
+      expect(
+        RecurrenceMaterializer.materializeOne(weekly, dt(2026, 1, 28), now),
+        isNull, // 수요일
+      );
+    });
+
+    test('anchor 이전 날짜는 null', () {
+      expect(
+        RecurrenceMaterializer.materializeOne(weekly, dt(2025, 12, 25), now),
+        isNull,
+      );
+    });
+
+    test('종료일(recurrenceEndAt) 을 넘은 날짜는 null', () {
+      final bounded = master(
+        rule: const RecurrenceRule(freq: RecurrenceFreq.weekly),
+        dueAt: dt(2026, 1, 1, 10),
+        recurrenceEndAt: dt(2026, 1, 20),
+        id: 'b1',
+      );
+      expect(
+        RecurrenceMaterializer.materializeOne(bounded, dt(2026, 1, 15), now),
+        isNotNull,
+      );
+      expect(
+        RecurrenceMaterializer.materializeOne(bounded, dt(2026, 1, 29), now),
+        isNull,
+      );
+    });
+
+    test('반복 마스터가 아니면 null', () {
+      final plain = Todo(
+        id: 'p1',
+        title: '일반',
+        category: Category.work,
+        dueAt: dt(2026, 1, 1),
+        doneAt: null,
+        createdAt: dt(2026, 1, 1),
+        updatedAt: dt(2026, 1, 1),
+      );
+      expect(
+        RecurrenceMaterializer.materializeOne(plain, dt(2026, 1, 29), now),
+        isNull,
+      );
+    });
+  });
 }
