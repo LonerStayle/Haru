@@ -6,6 +6,7 @@ import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
+import '../calendar/google_auth_service.dart';
 import '../home/today_providers.dart';
 import '../timeline/timeline_screen.dart';
 import '../todo_actions/todo_actions_controller.dart';
@@ -519,6 +520,7 @@ class _CalendarHeader extends StatelessWidget {
                       ?.copyWith(fontWeight: FontWeight.w800),
             ),
           const Spacer(),
+          if (showMonthNav) const _GoogleEventsToggle(),
           if (onToggleCollapse != null && showMonthNav)
             IconButton(
               key: const ValueKey('calendar-collapse-toggle'),
@@ -532,6 +534,33 @@ class _CalendarHeader extends StatelessWidget {
             ),
           _SegmentToggle(segment: segment, onSegment: onSegment),
         ],
+      ),
+    );
+  }
+}
+
+/// 구글 캘린더 이벤트 표시 on/off.
+///
+/// 연동이 구성돼 있지 않으면 버튼 자체를 숨긴다 — 눌러도 아무 일이 없는 버튼이
+/// 헤더에 남아 있을 이유가 없다.
+class _GoogleEventsToggle extends ConsumerWidget {
+  const _GoogleEventsToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(googleCalendarAvailableProvider)) {
+      return const SizedBox.shrink();
+    }
+    final on = ref.watch(showGoogleEventsProvider);
+    return IconButton(
+      key: const ValueKey('calendar-google-toggle'),
+      onPressed: () => ref.read(showGoogleEventsProvider.notifier).toggle(),
+      icon: Icon(on ? Icons.event_available : Icons.event_busy_outlined),
+      color: on ? GoogleEventEntry.eventColor : null,
+      tooltip: on ? 'Google 일정 숨기기' : 'Google 일정 표시',
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }

@@ -206,12 +206,14 @@ final showGoogleEventsProvider =
 /// 이벤트가 깜빡인다. 한 세션에서 방문한 달 수만큼만 캐시가 쌓이므로 부담도 없다.
 ///
 /// 조회 실패는 서비스가 빈 리스트로 삼키므로 여기서도 화면을 막지 않는다.
+///
+/// 표시 on/off 게이트는 여기가 아니라 [calendarBucketsProvider] 에 있다 — 그래야
+/// 껐다 켜도 이미 받아둔 결과를 그대로 쓰고 재조회가 일어나지 않는다.
 final googleEventsProvider =
     FutureProvider.family<List<GoogleEventEntry>, CalendarRange>((
       ref,
       range,
     ) async {
-      if (!ref.watch(showGoogleEventsProvider)) return const [];
       final service = ref.watch(googleEventsServiceProvider);
       if (service == null) return const [];
       // timeMax 는 exclusive — 마지막 날이 잘리지 않게 하루 더 준다.
@@ -231,9 +233,12 @@ final calendarBucketsProvider = Provider.family
     .autoDispose<AsyncValue<Map<DateTime, List<CalendarEntry>>>, CalendarRange>(
       (ref, range) {
         final entries = ref.watch(calendarEntriesProvider(range));
-        final google =
-            ref.watch(googleEventsProvider(range)).asData?.value ??
-            const <GoogleEventEntry>[];
+        // 토글이 꺼져 있으면 googleEventsProvider 를 아예 watch 하지 않는다 →
+        // 조회 자체가 일어나지 않는다.
+        final google = ref.watch(showGoogleEventsProvider)
+            ? ref.watch(googleEventsProvider(range)).asData?.value ??
+                  const <GoogleEventEntry>[]
+            : const <GoogleEventEntry>[];
         return entries.whenData(
           (list) => bucketByDate(
             entries: [...list, ...google],
