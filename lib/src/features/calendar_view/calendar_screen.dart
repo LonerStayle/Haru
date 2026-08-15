@@ -19,6 +19,9 @@ import 'calendar_providers.dart';
 import 'calendar_undated_drawer.dart';
 import 'calendar_week_row.dart';
 
+/// 데스크탑 우측 선택일 패널의 폭.
+const double _panelWidth = 340;
+
 /// 캘린더 화면의 두 보기 방식.
 enum CalendarSegment {
   /// 월 달력 격자 + 선택일 목록.
@@ -58,6 +61,12 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   /// 모바일에서 달력을 접어 목록을 넓게 보는 상태.
   bool _gridCollapsed = false;
+
+  /// 데스크탑에서 우측 선택일 패널을 접은 상태.
+  ///
+  /// 접으면 격자가 그만큼 넓어진다 — 칸이 넓어야 기간 막대 제목이 잘리지 않는다.
+  /// 모바일의 [_gridCollapsed] 와 같은 성격(세션 내에서만 유지)이라 영속 저장하지 않는다.
+  bool _panelCollapsed = false;
 
   @override
   void initState() {
@@ -199,6 +208,11 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                 onToggleCollapse: compact
                     ? () => setState(() => _gridCollapsed = !_gridCollapsed)
                     : null,
+                panelCollapsed: _panelCollapsed,
+                // 우측 패널은 데스크탑에만 있다 — 모바일은 아래위 분할이라 대상이 없다.
+                onTogglePanel: compact
+                    ? null
+                    : () => setState(() => _panelCollapsed = !_panelCollapsed),
               ),
               Expanded(
                 child: _segment == CalendarSegment.list
@@ -229,9 +243,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(flex: 3, child: _buildPager(today)),
-        const VerticalDivider(width: 1, thickness: AppTokens.hairline),
-        SizedBox(width: 340, child: _buildPanel()),
+        Expanded(child: _buildPager(today)),
+        // 접으면 격자가 패널 폭만큼 넓어진다. 애니메이션 없이 즉시 전환하는 건
+        // 모바일의 달력 접기와 같은 규약 — 폭이 크게 바뀌는 전환은 중간 프레임이
+        // 오히려 어수선하다.
+        if (!_panelCollapsed) ...[
+          const VerticalDivider(width: 1, thickness: AppTokens.hairline),
+          SizedBox(width: _panelWidth, child: _buildPanel()),
+        ],
       ],
     );
   }
@@ -454,6 +473,8 @@ class _CalendarHeader extends StatelessWidget {
     required this.onToday,
     required this.onSegment,
     this.onToggleCollapse,
+    this.panelCollapsed = false,
+    this.onTogglePanel,
   });
 
   final DateTime focusedMonth;
@@ -464,6 +485,12 @@ class _CalendarHeader extends StatelessWidget {
   final VoidCallback onToday;
   final void Function(CalendarSegment) onSegment;
   final VoidCallback? onToggleCollapse;
+
+  /// 데스크탑 우측 선택일 패널이 접혀 있는가.
+  final bool panelCollapsed;
+
+  /// 우측 패널 접기/펼치기. null 이면 버튼 미표시 (모바일).
+  final VoidCallback? onTogglePanel;
 
   @override
   Widget build(BuildContext context) {
@@ -543,6 +570,21 @@ class _CalendarHeader extends StatelessWidget {
             ),
           const Spacer(),
           if (showMonthNav) const _GoogleEventsToggle(),
+          if (onTogglePanel != null && showMonthNav)
+            IconButton(
+              key: const ValueKey('calendar-panel-toggle'),
+              onPressed: onTogglePanel,
+              icon: Icon(
+                panelCollapsed
+                    ? Icons.view_sidebar_outlined
+                    : Icons.view_sidebar,
+              ),
+              tooltip: panelCollapsed ? '목록 패널 펼치기' : '목록 패널 접기',
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
           if (onToggleCollapse != null && showMonthNav)
             IconButton(
               key: const ValueKey('calendar-collapse-toggle'),

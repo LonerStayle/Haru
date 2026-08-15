@@ -208,6 +208,42 @@ void main() {
     });
   });
 
+  group('데스크탑 우측 패널 접기', () {
+    testWidgets('토글로 접었다 폈다 — 접으면 선택일 패널이 사라진다', (tester) async {
+      await mount(
+        tester,
+        todos: [make(id: 't1', dueAt: DateTime(2026, 8, 15))],
+      );
+
+      // 기본은 펼침 — 선택일 헤더가 보인다.
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.text('8월 15일 (토)'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+    });
+
+    testWidgets('접으면 격자가 패널 폭만큼 넓어진다', (tester) async {
+      await mount(tester);
+      final before = tester.getSize(cell(DateTime(2026, 8, 15))).width;
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+
+      final after = tester.getSize(cell(DateTime(2026, 8, 15))).width;
+      expect(after, greaterThan(before));
+    });
+
+    testWidgets('모바일에는 패널 토글이 없다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(find.byKey(const ValueKey('calendar-panel-toggle')), findsNothing);
+    });
+  });
+
   group('모바일 레이아웃', () {
     testWidgets('달력 접기 토글이 있고, 접으면 격자가 사라진다', (tester) async {
       await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
