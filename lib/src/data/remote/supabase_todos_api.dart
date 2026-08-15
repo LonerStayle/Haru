@@ -60,9 +60,13 @@ class SupabaseTodosApi implements RemoteTodosApi {
     'user_id': userId,
     'title': t.title,
     'category': t.category.id,
-    'due_at': t.dueAt?.toIso8601String(),
-    'done_at': t.doneAt?.toIso8601String(),
-    'started_at': t.startedAt?.toIso8601String(),
+    // ⚠️ 모든 시각은 **반드시 toUtc() 후** 직렬화한다. local 로 만든 DateTime 을 그대로
+    // toIso8601String() 하면 오프셋 없는 문자열("2026-09-13T19:00:00.000")이 나가고,
+    // Postgres timestamptz 는 그걸 UTC 로 해석한다 → 저장값이 로컬 오프셋만큼 밀린다.
+    // (실제 사고: 한국시간 9/13 19시 일정이 19:00Z 로 저장돼 달력에 9/14 04시로 표시.)
+    'due_at': t.dueAt?.toUtc().toIso8601String(),
+    'done_at': t.doneAt?.toUtc().toIso8601String(),
+    'started_at': t.startedAt?.toUtc().toIso8601String(),
     'created_at': t.createdAt.toUtc().toIso8601String(),
     // updatedAt 은 LWW 키 — UTC 로 전송해 로컬 저장(UTC)과 round-trip 일치.
     'updated_at': t.updatedAt.toUtc().toIso8601String(),
@@ -78,7 +82,7 @@ class SupabaseTodosApi implements RemoteTodosApi {
     // v1.2 — 상세 메모
     'description': t.description,
     // fast-tasks — 날짜·기간 모델
-    'end_at': t.endAt?.toIso8601String(),
+    'end_at': t.endAt?.toUtc().toIso8601String(),
     'is_all_day': t.isAllDay,
     'time_anchor': t.timeAnchor,
   };

@@ -63,6 +63,64 @@ void main() {
     });
   });
 
+  group('local DateTime 도 UTC 로 전송 (타임존 밀림 회귀 가드)', () {
+    // 실제 사고: 한국시간 9/13 19시 일정이 원격에 19:00Z 로 저장돼 달력에 9/14 04시로
+    // 떴다. local 로 만든 DateTime 을 toUtc() 없이 toIso8601String() 하면 오프셋이
+    // 없는 문자열이 나가고, Postgres timestamptz 는 그걸 UTC 로 해석하기 때문.
+    // 기존 테스트가 전부 DateTime.utc 만 써서 이 구멍을 못 잡았다.
+    //
+    // 검증은 **머신 타임존과 무관**하다 — local 플래그 DateTime 은 UTC 타임존에서도
+    // 'Z' 가 안 붙으므로, 접미사만 봐도 회귀가 잡힌다.
+    Todo localTimed() => Todo(
+      id: 'tz',
+      title: '플레이브 콘서트',
+      category: Category.work,
+      dueAt: DateTime(2026, 9, 13, 19), // local 19시
+      endAt: DateTime(2026, 9, 13, 21),
+      doneAt: DateTime(2026, 9, 13, 22),
+      startedAt: DateTime(2026, 9, 13, 18),
+      createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1),
+      calendarEventId: null,
+    );
+
+    test('due_at / end_at / done_at / started_at 이 Z 접미사로 나간다', () {
+      final row = _toRowForCheck(localTimed(), 'u');
+      for (final key in ['due_at', 'end_at', 'done_at', 'started_at']) {
+        expect(
+          row[key],
+          endsWith('Z'),
+          reason: '$key 가 오프셋 없이 나가면 Postgres 가 UTC 로 오해한다',
+        );
+      }
+    });
+
+    test('전송값이 같은 순간을 가리킨다 (벽시계 복사가 아니라 변환)', () {
+      final todo = localTimed();
+      final row = _toRowForCheck(todo, 'u');
+      expect(
+        DateTime.parse(row['due_at'] as String).isAtSameMomentAs(todo.dueAt!),
+        isTrue,
+      );
+      expect(
+        DateTime.parse(row['end_at'] as String).isAtSameMomentAs(todo.endAt!),
+        isTrue,
+      );
+    });
+
+    test('round-trip — 보낸 뒤 다시 읽어도 같은 순간', () {
+      final todo = localTimed();
+      final back = _fromRowForCheck(_toRowForCheck(todo, 'u'));
+      expect(back.dueAt!.isAtSameMomentAs(todo.dueAt!), isTrue);
+      expect(back.endAt!.isAtSameMomentAs(todo.endAt!), isTrue);
+      expect(
+        back.dueAt!.toLocal().day,
+        todo.dueAt!.day,
+        reason: '달력이 쓰는 로컬 날짜가 하루 밀리면 안 된다',
+      );
+    });
+  });
+
   group('v1.1 — parent_id / type / sort_order 매핑', () {
     test('_toRow — 트리 노드 (parent_id set, sort_order=5)', () {
       final todo = Todo(
@@ -201,6 +259,9 @@ void main() {
       'category',
       'due_at',
       'done_at',
+      // 실제 _toRow 에는 있는데 helper 에만 빠져 있던 컬럼 — 그래서 이 가드가
+      // "동일 매핑" 을 지켜주지 못했다. 키 셋을 실제 구현에 맞춘다.
+      'started_at',
       'created_at',
       'updated_at',
       'calendar_event_id',
@@ -416,8 +477,9 @@ Map<String, dynamic> _toRowForCheck(Todo t, String userId) => {
   'user_id': userId,
   'title': t.title,
   'category': t.category.id,
-  'due_at': t.dueAt?.toIso8601String(),
-  'done_at': t.doneAt?.toIso8601String(),
+  'due_at': t.dueAt?.toUtc().toIso8601String(),
+  'done_at': t.doneAt?.toUtc().toIso8601String(),
+  'started_at': t.startedAt?.toUtc().toIso8601String(),
   'created_at': t.createdAt.toUtc().toIso8601String(),
   'updated_at': t.updatedAt.toUtc().toIso8601String(),
   'calendar_event_id': t.calendarEventId,
@@ -427,7 +489,7 @@ Map<String, dynamic> _toRowForCheck(Todo t, String userId) => {
   'type': t.type.name,
   'sort_order': t.sortOrder,
   'description': t.description,
-  'end_at': t.endAt?.toIso8601String(),
+  'end_at': t.endAt?.toUtc().toIso8601String(),
   'is_all_day': t.isAllDay,
   'time_anchor': t.timeAnchor,
 };
