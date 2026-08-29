@@ -8,7 +8,9 @@ import '../../domain/category.dart';
 import '../../domain/group.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
-import '../../domain/todo.dart' show Todo, TodoDateMode, TodoType;
+import '../../domain/todo.dart' show Todo, TodoDateMode, TodoStatus, TodoType;
+import '../../ui/widgets/in_progress_triangle.dart';
+import '../../ui/widgets/undone_square.dart';
 import '../calendar/calendar_providers.dart';
 import '../calendar/calendar_settings.dart';
 import '../category/categories_controller.dart';
@@ -28,6 +30,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     this.initialCategory = Category.daily,
     required this.onSubmit,
     this.onUpdate,
+    this.onStatusChanged,
     this.initialTodo,
     this.prefillFrom,
     this.now,
@@ -64,6 +67,18 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   /// 호출. 호출자는 todoActionsProvider.update 또는 동등 mutation 수행.
   final void Function(Todo updated)? onUpdate;
 
+  /// 3-상태(□/△/◯) 칩 탭 전용 저장 콜백 — **[onUpdate] 와 반드시 구분**한다.
+  ///
+  /// 상태 변경은 의미상 목록 타일의 체크·세모 토글과 같은 행위라 **자리(sortOrder)가
+  /// 튀면 안 된다**. 반면 [onUpdate] 가 태우는 `TodoActionsController.update` 는
+  /// "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 bump 한다. 그래서 호출자는 이
+  /// 콜백을 `TodoActionsController.updatePreservingOrder` 로 연결해야 한다.
+  ///
+  /// ⚠️ RISK(side-effect): null 이면 [onUpdate] 로 폴백하므로 **조용히 bump 되는**
+  /// 회귀가 된다 (그 화면에서만 상태를 바꾸면 항목이 맨 위로 튀어오른다). 시트를 여는
+  /// 곳은 전부 이 콜백을 연결해 둘 것 — 폴백은 안전망일 뿐 기본 경로가 아니다.
+  final void Function(Todo updated)? onStatusChanged;
+
   /// v1.2 — null 이면 add 모드 (기존), non-null 이면 edit 모드. _titleCtrl /
   /// _descriptionCtrl / _category / _dueAt / _type 가 모두 prefill 된다.
   final Todo? initialTodo;
@@ -98,6 +113,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     Category initialCategory = Category.daily,
     required void Function(AddTodoSubmission) onSubmit,
     void Function(Todo updated)? onUpdate,
+    void Function(Todo updated)? onStatusChanged,
     Todo? initialTodo,
     Todo? prefillFrom,
     String? parentId,
@@ -117,6 +133,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
           initialCategory: initialCategory,
           onSubmit: onSubmit,
           onUpdate: onUpdate,
+          onStatusChanged: onStatusChanged,
           initialTodo: initialTodo,
           prefillFrom: prefillFrom,
           parentId: parentId,
@@ -167,6 +184,16 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   /// v1.1 — 추가할 항목의 종류. note 면 일정/캘린더 영역은 비활성 (의미 없음).
   TodoType _type = TodoType.task;
 
+  /// 편집 중인 항목의 3-상태 원본값 — 시트가 들고 있는 doneAt / startedAt.
+  ///
+  /// ⚠️ RISK(race): 이 둘을 굳이 state 로 들고 있는 이유가 있다. 상태 칩(□/△/◯) 탭은
+  /// **즉시 저장**인데, [_applyEdit] 가 `widget.initialTodo`(시트를 열던 순간의 옛
+  /// 스냅샷)를 그대로 베이스로 쓰면 시트를 닫는 순간의 자동 저장이 방금 바꾼 상태를
+  /// 옛 값으로 되돌린다. 두 저장 경로가 같은 값을 보도록 베이스를 여기로 모은다.
+  /// (타임스탬프까지 그대로 재사용해야 무변경 판정이 서고 헛저장이 안 생긴다.)
+  DateTime? _doneAt;
+  DateTime? _startedAt;
+
   /// date-repeat — 반복 주기. null = 반복 안 함(단발). non-null 이면 마스터로 저장.
   /// 추가 모드 전용 (편집 모드에서 규칙 수정은 별도 동작 — PRD FR-6).
   RecurrenceFreq? _recurrenceFreq;
@@ -185,6 +212,13 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
 
   /// edit 모드 (initialTodo != null) 여부 — 시그니처 / 버튼 라벨 / submit 분기 사용.
   bool get _isEditMode => widget.initialTodo != null;
+
+  /// 시트가 현재 들고 있는 3-상태. 상태 섹션의 채움 표시와 전이 계산의 기준.
+  TodoStatus get _status {
+    if (_doneAt != null) return TodoStatus.done;
+    if (_startedAt != null) return TodoStatus.inProgress;
+    return TodoStatus.undone;
+  }
 
   /// Task C — "하위 추가" 모드 (parentId 지정 + edit 아님). 카테고리 선택 UI 를 숨기고
   /// 부모 category 로 프리셋한다.
@@ -208,6 +242,10 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     _dueAt = source?.dueAt ?? widget.initialDueAt;
     _allDay = widget.initialAllDay;
     _type = source?.type ?? TodoType.task;
+    // 3-상태는 편집 대상에서만 가져온다 — 복사(prefillFrom)는 체크·진행 표식을
+    // 물려받지 않는다 (복사본은 항상 새 미완료 항목).
+    _doneAt = widget.initialTodo?.doneAt;
+    _startedAt = widget.initialTodo?.startedAt;
     // prefill 시 description 이 비어있지 않으면 펼친 상태로 시작.
     _showDescription = (source?.description ?? '').isNotEmpty;
     _restoreDateMode(source);
@@ -376,9 +414,11 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       // §14-C — task→note 전환 시 doneAt 제거. note 는 체크 개념이 없어 옛 doneAt 이
       // 남으면 note→task 복귀 때 갑자기 완료로 표시되는 사고가 난다.
       // (dueAt/isAllDay 는 _serializeDate 가 note 일 때 이미 null/false 로 비운다.)
-      doneAt: isNote ? null : initial.doneAt,
+      // 3-상태는 initial(옛 스냅샷)이 아니라 시트가 들고 있는 값을 쓴다 — 상태 칩의
+      // 즉시 저장이 닫힘 저장에 덮여 되돌아가지 않게 하는 지점이다.
+      doneAt: isNote ? null : _doneAt,
       // 진행중 표식도 note 전환 시 제거 (note 는 진행 개념 없음).
-      startedAt: isNote ? null : initial.startedAt,
+      startedAt: isNote ? null : _startedAt,
       // ⚠️ RISK(side-effect): note 전환 시에도 calendarEventId 를 **남긴다**.
       // 여기서 미리 지우면 저장소 데코레이터가 링크를 못 봐서 삭제 작업을 만들지
       // 못하고, 구글 캘린더에 고아 이벤트가 남는다 (기존 결함이 정확히 그것이었다).
@@ -518,6 +558,31 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         ],
       ),
     );
+  }
+
+  /// 상태 칩(□ 미완료 / △ 진행중 / ◯ 완료) 탭 — **즉시 저장**.
+  ///
+  /// 시트를 닫지 않아도 목록에 바로 반영된다. 전이 규칙(불변식: startedAt/doneAt
+  /// 동시 세팅 금지)은 도메인 헬퍼 [Todo.withStatus] 하나에만 두고, 계산 결과를 시트
+  /// state 로 받아 둔다 — 그래야 나중의 닫힘 저장이 같은 값을 그대로 써서 헛저장 없이
+  /// no-op 으로 걸러지고, 보존된 sortOrder 가 그 no-op 덕에 다시 bump 되지 않는다.
+  ///
+  /// 넘기는 값은 **저장된 스냅샷에서 상태만 바꾼 것**이다 — 시트에 입력 중인 제목·
+  /// 카테고리 등은 싣지 않는다. 그건 내용 편집이라 "맨 위로" 규칙이 적용되는 [_applyEdit]
+  /// (닫힘 저장 / 저장 버튼) 의 몫이고, 여기 섞으면 상태 탭이 그 규칙까지 끌고 온다.
+  void _setStatus(TodoStatus next) {
+    final initial = widget.initialTodo;
+    if (initial == null || _type == TodoType.note || _status == next) return;
+    final applied = initial
+        .copyWith(doneAt: _doneAt, startedAt: _startedAt)
+        .withStatus(next, now: widget.now);
+    setState(() {
+      _doneAt = applied.doneAt;
+      _startedAt = applied.startedAt;
+    });
+    // 순서 보존 경로로 저장한다. onStatusChanged 미연결 시의 onUpdate 폴백은 안전망일
+    // 뿐 — 그 경로로 가면 sortOrder 가 bump 되어 항목이 맨 위로 튄다.
+    (widget.onStatusChanged ?? widget.onUpdate)?.call(applied);
   }
 
   /// task ↔ note 토글. note 로 바꿀 때는 일정 관련 state 를 안전하게 reset.
@@ -943,6 +1008,19 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                     _SectionLabel(text: '종류'),
                     const SizedBox(height: AppTokens.space8),
                     _TypeToggle(selected: _type, onSelect: _setType),
+                    // 3-상태(□ 미완료 / △ 진행중 / ◯ 완료). 편집 모드 전용 —
+                    // 신규 추가는 아직 저장 대상 Todo 가 없다. note 는 상태 개념이
+                    // 없으므로 바로 위 종류 토글을 메모로 바꾸면 이 섹션이 사라진다.
+                    if (_isEditMode && _type == TodoType.task) ...[
+                      const SizedBox(height: AppTokens.space16),
+                      _SectionLabel(text: '상태'),
+                      const SizedBox(height: AppTokens.space8),
+                      _StatusSelector(
+                        selected: _status,
+                        color: _category.color,
+                        onSelect: _setStatus,
+                      ),
+                    ],
                     const SizedBox(height: AppTokens.space16),
                     // note 면 일정 영역 자체를 숨김 — 의미 없음.
                     if (_type == TodoType.task) ...[
@@ -1976,6 +2054,142 @@ class _DescriptionToggle extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 편집 시트의 "상태" 섹션 — □ 미완료 / △ 진행중 / ◯ 완료 세 칸.
+///
+/// 목록 타일의 세모·체크 원과 같은 시각 언어를 그대로 쓴다 — 현재 상태만 카테고리색으로
+/// **채우고**, 나머지는 같은 색 옅은(0.55) **외곽선**. 기호만으로는 뜻이 안 읽히므로
+/// 짧은 한국어 라벨을 붙였다.
+class _StatusSelector extends StatelessWidget {
+  const _StatusSelector({
+    required this.selected,
+    required this.color,
+    required this.onSelect,
+  });
+
+  final TodoStatus selected;
+
+  /// 카테고리색 — 시트에서 카테고리를 바꾸면 기호 색도 따라간다.
+  final Color color;
+
+  final ValueChanged<TodoStatus> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AppTokens.space8,
+      runSpacing: AppTokens.space8,
+      children: [
+        for (final status in TodoStatus.values)
+          _StatusChip(
+            key: ValueKey('status-${status.name}'),
+            status: status,
+            color: color,
+            selected: selected == status,
+            onTap: () => onSelect(status),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    super.key,
+    required this.status,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final TodoStatus status;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// 상태별 한국어 라벨 — 상태별 보기 칩(`TodoStatusFilter`)과 같은 말을 쓴다.
+  String get _label => switch (status) {
+    TodoStatus.undone => '미완료',
+    TodoStatus.inProgress => '진행중',
+    TodoStatus.done => '완료',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // 선택된 칸만 카테고리색 테두리 + 옅은 바탕으로 띄운다 (기호의 채움과 이중 신호).
+    final bg = selected
+        ? color.withValues(alpha: 0.14)
+        : scheme.surfaceContainerHighest;
+    final fg = selected
+        ? scheme.onSurface
+        : scheme.onSurface.withValues(alpha: 0.78);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+      side: selected ? BorderSide(color: color, width: 1.4) : BorderSide.none,
+    );
+
+    return Material(
+      color: bg,
+      shape: shape,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space12,
+            vertical: AppTokens.space8,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _StatusGlyph(status: status, active: selected, color: color),
+              const SizedBox(width: AppTokens.space8),
+              Text(
+                _label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: fg,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 상태 기호 하나 — 네모 / 세모 / 원. 세모와 원은 목록 타일이 쓰는 것과 같은 위젯·아이콘.
+class _StatusGlyph extends StatelessWidget {
+  const _StatusGlyph({
+    required this.status,
+    required this.active,
+    required this.color,
+  });
+
+  final TodoStatus status;
+  final bool active;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case TodoStatus.undone:
+        return UndoneSquare(active: active, color: color);
+      case TodoStatus.inProgress:
+        return InProgressTriangle(active: active, color: color);
+      case TodoStatus.done:
+        // 타일의 완료 체크와 동일한 아이콘 쌍 — 채움(체크 원) / 옅은 링.
+        return Icon(
+          active ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+          size: 18,
+          color: active ? color : color.withValues(alpha: 0.55),
+        );
+    }
   }
 }
 

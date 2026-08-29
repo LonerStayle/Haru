@@ -84,24 +84,30 @@ class TodoActionsController {
     return synced;
   }
 
-  /// v1.6 — 캘린더 드래그 전용 저장 경로. **sortOrder 를 보존**한다.
+  /// **sortOrder 를 보존해야 하는 저장 경로 일반.**
   ///
-  /// [update] 는 "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 형제 min-1 로
-  /// bump 하는데, 달력에서 항목을 다른 날짜 칸으로 끄는 건 *순서* 조작이 아니라
-  /// *일정* 조작이다. 그 경로에 bump 가 새면 날짜만 옮겼는데 '오늘'/'전체보기'
-  /// 목록에서 맨 위로 튀어오른다 — 사용자가 시키지 않은 변화다.
+  /// 이 앱의 확립된 불변식은 "순서는 명시적 조작으로만 바뀐다" 이다. [update] 만
+  /// 예외로 "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 형제 min-1 로 bump
+  /// 하는데, 그건 **제목·내용을 고쳤을 때**의 규칙이다. 내용 편집이 아닌 변경에
+  /// 그 bump 가 새면 사용자가 시키지 않은 자리 이동이 된다. 그런 변경은 전부 이
+  /// 경로로 저장한다:
+  ///  - 달력에서 항목을 다른 날짜 칸으로 끌기 (v1.6) — *일정* 조작이지 *순서* 조작이
+  ///    아니다. bump 가 새면 날짜만 옮겼는데 '오늘'/'전체보기' 맨 위로 튀어오른다.
+  ///  - 편집 시트의 3-상태(□/△/◯) 탭 — 의미상 목록 타일의 체크·세모 토글과 같은
+  ///    행위다. [toggle] / [toggleInProgress] 가 자리를 안 바꾸므로 이쪽도 안 바꾼다.
   ///
-  /// [moved] 는 `applyDateDrop` 이 만든 값이어야 한다 (날짜 외 필드는 원본과 동일).
-  /// 저장된 값과 내용이 같으면 아무것도 쓰지 않는다 — updatedAt 도 보존된다.
+  /// [updated] 는 원본에서 **의도한 필드만** 바꾼 값이어야 한다 (예: `applyDateDrop`
+  /// 의 결과, [Todo.withStatus] 의 결과). 저장된 값과 내용이 같으면 아무것도 쓰지
+  /// 않는다 — updatedAt 도 보존된다.
   ///
-  /// 저장된 sortOrder 를 우선 쓰는 이유: 드래그 중인 화면의 Todo 는 스트림 지연으로
+  /// 저장된 sortOrder 를 우선 쓰는 이유: 화면이 들고 있는 Todo 는 스트림 지연으로
   /// 살짝 옛 값일 수 있는데, 그걸 그대로 되쓰면 다른 화면의 재정렬을 되돌릴 수 있다.
-  Future<Todo> setDueAt(Todo moved) async {
-    final current = await _repo.getById(moved.id);
-    if (current != null && _isUnchanged(current, moved)) return current;
-    final synced = moved.copyWith(
+  Future<Todo> updatePreservingOrder(Todo updated) async {
+    final current = await _repo.getById(updated.id);
+    if (current != null && _isUnchanged(current, updated)) return current;
+    final synced = updated.copyWith(
       updatedAt: _now(),
-      sortOrder: current?.sortOrder ?? moved.sortOrder,
+      sortOrder: current?.sortOrder ?? updated.sortOrder,
     );
     await _repo.upsert(synced);
     return synced;

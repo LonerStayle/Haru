@@ -185,6 +185,8 @@ class _Results extends ConsumerWidget {
       initialTodo: todo,
       onSubmit: (_) {},
       onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+      onStatusChanged: (updated) =>
+          ref.read(todoActionsProvider).updatePreservingOrder(updated),
       onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
     );
   }

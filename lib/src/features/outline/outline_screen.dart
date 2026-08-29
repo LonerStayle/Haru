@@ -708,6 +708,8 @@ class _OutlineNode extends ConsumerWidget {
       initialTodo: node,
       onSubmit: (_) {},
       onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+      onStatusChanged: (updated) =>
+          ref.read(todoActionsProvider).updatePreservingOrder(updated),
       onRequestMove: (t) => showMoveTodoSheet(context, ref, item: t),
     );
 
@@ -1031,6 +1033,8 @@ class _NoteCard extends ConsumerWidget {
       initialTodo: note,
       onSubmit: (_) {},
       onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
+      onStatusChanged: (updated) =>
+          ref.read(todoActionsProvider).updatePreservingOrder(updated),
       onRequestMove: (t) => showMoveTodoSheet(context, ref, item: t),
     );
 
