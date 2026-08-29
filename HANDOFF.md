@@ -2,7 +2,7 @@
 
 > ralph 자동 루프 + 사람 reader 모두 이 파일 하나로 컨텍스트 복원 가능하게 작성.
 > 매 iter 시작 시 CLAUDE.md / PROMPT.md / IMPLEMENTATION_PLAN.md 와 함께 이 파일도 읽는다.
-> 마지막 업데이트: **2026-08-09 (상태별 보기 — 카테고리·상세 상단 5칩 필터: 전체/미완료/진행중/완료/메모. 스키마 변경 없음)**
+> 마지막 업데이트: **2026-08-29 (Microsoft 365(Teams) 캘린더 양방향 연동 + 캘린더 계층 provider 중립화. ⚠️ DB 스키마 변경됨 — § 2 참조)**
 
 ---
 
@@ -35,6 +35,7 @@
 | **진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 (2026-07-18)** | ✅ 종료 | 602/602 PASS. **DB 스키마 변경됨 (drift v8→9 `todos.started_at`) → Supabase schema.sql 재실행 필요.** 아래 "진행중 3-상태 내역" 참조. 대표님 직접 요청 |
 | **상태별 보기 — 카테고리·상세 5칩 필터 (2026-08-09)** | ✅ 종료 (워크트리 `상태별보기`, 미커밋) | 625/625 PASS. **스키마 변경 없음**. 아래 "상태별 보기 내역" 참조. 대표님 직접 요청 |
 | **§15 앱 내 캘린더 화면 (2026-08-15)** | ✅ 종료 (워크트리 `앱내캘린더`, 미머지) | 896/896 PASS. **스키마 변경 없음 (drift v9 유지)**. 아래 "앱 내 캘린더 내역" 참조. 대표님 직접 요청 |
+| **Microsoft 365(Teams) 캘린더 양방향 연동 (2026-08-29)** | ✅ 종료 (워크트리 `worktree-agent-a21e7d257f63a4c10`) | 1283/1283 PASS. **DB 스키마 변경됨 (drift v10→11 + Supabase `todos.calendar_provider`) → schema.sql 재실행 필요.** + **대표님 Azure 앱 등록 필요.** 아래 "Microsoft 365 연동 내역" 참조 |
 
 ### 현 상태 (2026-06-06)
 
@@ -135,6 +136,53 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 
 ---
 
+### Microsoft 365(Teams) 연동 내역 — 2026-08-29
+
+대표님 직접 요청 (fast-tasks Task 2): "Teams 캘린더도 구글과 같은 수준으로 양방향".
+
+**대표님 작업 가이드**: `docs/features/2026-08-29-fast-tasks-detail-status-teams-drag/teams-연동-대표님-작업-가이드.md`
+**코드 설계 메모**: 같은 폴더의 `teams-연동-설계메모.md`
+
+**무엇이 바뀌었나**
+- 캘린더 계층이 **provider 중립**이 됐다. 게이트웨이가 주고받는 타입은 `CalEvent`
+  하나이고, `gcal.Event` 는 `google_calendar_gateway.dart` 안에서만 존재한다.
+  동기화 로직(큐 flush · 증분 수신 · echo 차단 · LWW · 삭제 규칙)은 두 서비스가 공유한다.
+- 신규 `MicrosoftGraphGateway` (Microsoft Graph) + `MicrosoftCalendarAuth`
+  (순수 Dart OAuth2 + PKCE, macOS·Android 공통 loopback 리다이렉트).
+- 설정 화면 **한 개가 두 서비스를 담당**한다 (`CalendarSettingsScreen(provider:)`).
+  설정 시트에 `Google Calendar` / `Microsoft 365` 두 항목.
+- 할 일마다 `calendarProvider` 로 어느 서비스에 묶였는지 기록. **null = 구글**(하위호환).
+- 동기화 서비스·코디네이터가 서비스별로 하나씩, 스케줄러가 둘을 순차로 돈다.
+
+**⚠️ 대표님 액션 (둘 다 해야 동작합니다)**
+1. **Supabase `schema.sql` 재실행** — `make sql` → SQL Editor 붙여넣고 Run.
+   `todos.calendar_provider` 컬럼이 추가된다. **이걸 안 하면 PGRST204 로 todos
+   동기화 전체가 멈춘다** (과거 같은 원인으로 며칠 멈춘 사고 있음).
+   미실행분(fast-tasks / started_at / calendar_id·origin)도 **한 번에 같이 적용**된다.
+2. **Azure 앱 등록** — 위 작업 가이드의 STEP 1~5 를 따라 `MS_OAUTH_CLIENT_ID` /
+   `MS_OAUTH_TENANT` 를 `.env.local` 에 넣는다. 키가 없으면 설정에서 Microsoft
+   항목 자체가 숨겨지고, 구글 연동만 이전과 동일하게 동작한다.
+3. 배포 빌드 전 **`flutter clean`** — 증분 빌드는 옛 env 값을 쓴다.
+
+**알아둘 함정**
+- **큐·링크·토큰이 전부 provider 로 갈린다.** `dueOps(now, provider:)`,
+  `pull` 의 `byEventId` 필터, 코디네이터의 `_persist` 가 자기 칸만 건드린다.
+  하나라도 놓치면 구글 이벤트 id 가 그래프로 날아가 404 만 반복하거나, 한쪽 수신이
+  다른 쪽 링크를 지운다.
+- **그래프 증분 응답에는 앱 서명이 안 실릴 수 있다.** 그래서 병합에 "내용이 같으면
+  echo" 규칙과 "연결된 할 일의 날짜 모드를 형태 힌트로" 규칙을 넣었다. 이 둘을
+  제거하면 서명 없는 서비스에서 push↔pull 루프 또는 날짜 모드 변질이 재발한다.
+- **그래프 시각은 소수점 7자리다.** Dart `DateTime.parse` 는 6자리까지만 받는다.
+  자르는 코드를 지우면 모든 일정이 조용히 사라진다.
+- **연결 해제는 `clearProvider`** — `clear()` 는 다른 서비스 대기열까지 날린다.
+- Outlook 은 완료 표시(색)를 반영하지 않는다. 의도된 범위 밖이다.
+
+**신규 의존성**: `crypto`(PKCE SHA-256), `url_launcher`(Android 동의 화면).
+둘 다 이미 transitive 였던 공식 패키지를 직접 의존으로 승격한 것이다.
+Android 매니페스트에 `<queries>` VIEW/https 선언 추가 (Android 11+ 브라우저 탐색).
+
+---
+
 ### 앱 내 캘린더 내역 — 2026-08-15 (워크트리 `앱내캘린더`)
 
 요구사항 / 기술설계: `docs/features/2026-08-15-앱내캘린더/`
@@ -187,6 +235,8 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | **Google Cloud Console — Android OAuth client + calendar scope** | ✅ **완료 (2026-08-09)** — `SoloTodo - 안드로이드` 클라이언트의 SHA-1 을 현 keystore 지문(`76:EC:F3:...`)으로 교체 저장. calendar/calendar.events 범위 등록 확인. 게시 상태 프로덕션(외부)이라 테스트 사용자 불필요 — 동의 시 "확인되지 않은 앱" 경고는 고급→이동으로 통과. SHA-1 반영까지 최대 몇 시간 걸릴 수 있음. |
 | `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ✅ 채워짐 (`431288523948-6u98...`). serverClientId(`-n9pn...` 웹) 도 있음. |
 | **Supabase 캘린더 양방향 마이그레이션 (todos.calendar_id / calendar_origin)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — schema.sql 재실행. 위 fast-tasks·started_at 미실행분도 **같이 적용**되니 한 번만 돌리면 된다. 미실행 시 PGRST204 로 todos 동기화 전체 정지. |
+| **Supabase Microsoft 병존 마이그레이션 (todos.calendar_provider)** | ⚠️ **대표님 액션 필요 (2026-08-29)** — schema.sql 재실행. 위 미실행분도 **같이 적용**되니 한 번만 돌리면 된다. 미실행 시 PGRST204 로 todos 동기화 전체 정지. |
+| **Azure 앱 등록 (Microsoft 365 / Teams 캘린더)** | ⚠️ **대표님 액션 필요 (2026-08-29)** — `docs/features/2026-08-29-fast-tasks-detail-status-teams-drag/teams-연동-대표님-작업-가이드.md` STEP 1~5. `.env.local` 에 `MS_OAUTH_CLIENT_ID` / `MS_OAUTH_TENANT`. 미설정 시 설정 화면에서 Microsoft 항목이 숨겨질 뿐 앱은 정상 동작. |
 | **Google 재동의 (scope 확대: `calendar.calendarlist.readonly` 추가)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — 새 빌드 첫 실행 시 동의 화면 1회. 캘린더 **목록 조회**에 필요한 권한이라 없으면 설정 화면에서 캘린더를 고를 수 없다. macOS 는 저장 토큰의 scope 가 부족하면 앱이 자동으로 재동의를 띄운다(토큰 파일에 scope 를 함께 저장하도록 변경됨). |
 | 갤럭시 S24 (SM S921N) release APK 설치 | ✅ (단 fast-tasks 변경분은 재빌드·재설치 필요) |
 | 로컬 DB 백업 | `~/solo_todo_db_backup/solo_todo_*.sqlite` (1회성, 이제 클라우드 동기화되므로 불필요시 삭제 가능) |
@@ -321,6 +371,10 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 - **Todo.category 는 todos 테이블에 id 만 저장** — label/color/icon 은 categories 테이블에 있으므로 **TodosDao 가 categories 와 join** 해서 복원. `Category.fromId` 는 builtin 만 알아 사용자 카테고리에 throw → join + placeholder fallback 으로 해소. SupabaseTodosApi._fromRow 도 tryFromId+placeholder (로컬 저장은 id 만 쓰므로 안전).
 - **AddTodoSheet 는 ConsumerStatefulWidget** — categoriesProvider watch. 카테고리 선택 비교는 **id 기준** (freezed 전체 동등은 DB 인스턴스↔const 차이로 어긋남).
 - **모바일 FAB 는 endFloat** — endContained 는 NavigationBar 에 도킹돼 destination 을 덮음. endFloat 가 바 위로 띄운다.
+- **캘린더 provider 를 놓치면 조용히 엉뚱한 API 로 간다** — 큐(`calendar_ops.provider`)·
+  링크(`todos.calendar_provider`)·토큰(`CalendarSettings.viewFor`) 셋이 모두 서비스별로
+  갈려 있다. `null` 은 언제나 구글로 읽는다(`CalendarProvider.fromWire`) — 이 규칙을
+  바꾸면 대표님의 기존 구글 연동 데이터가 통째로 미아가 된다.
 - **할 일 이동 = parentId + 서브트리 category 동시 갱신** — 자식은 부모 카테고리를 상속하는 구조라, 본인만 옮기면 자손이 옛 카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다. `TodoActionsController.moveTo` / `update` 가 `MovePolicy.descendants` 로 자손 category 를 함께 맞춘다. 새 이동 경로를 만들 때 이 동기화를 빼먹지 말 것.
 - **이동 목적지는 자기 자신·자손 금지** — 자기 밑으로 들어간 노드는 어느 root 에서도 도달 불가라 화면에서 통째로 사라진다. `MovePolicy.canMove` 가 단일 출처(컨트롤러 + 시트 비활성 표시 양쪽이 같은 규칙을 쓴다).
 
