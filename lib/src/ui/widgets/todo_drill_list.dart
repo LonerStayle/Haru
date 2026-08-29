@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/policies/todo_sort_policy.dart';
 import '../../domain/todo.dart';
@@ -33,6 +34,13 @@ import 'todo_status_filter.dart';
 /// 자손에 있는 완료 항목이 안 보여 카운트와 어긋난다. 평탄 목록에서는 소속을 알 수 있도록
 /// 각 타일에 부모 경로(breadcrumb)를 얹고, 순서가 의미를 잃으므로 재정렬은 끈다.
 /// 평탄 목록에도 [sortMode] 는 그대로 적용된다(일정순으로 보는 중이면 필터 결과도 일정순).
+///
+/// **재정렬 발견성**: 드래그는 핸들 없이 **길게 누르기**로 시작하므로, 그냥 두면 순서를
+/// 바꿀 수 있다는 사실이 화면에 전혀 드러나지 않는다. 그래서 목록 맨 위에 옅은 한 줄
+/// 안내를 둔다 — 재정렬이 되는 상태면 "길게 눌러 순서 변경" 힌트를, 꺼져 있는 상태면
+/// (일정순 / 상태별 보기) 그 **사유**를 보여 준다. 둘은 상호 배타이고, 항목이 1개 이하면
+/// 순서 개념이 없으므로 둘 다 감춘다(항상 떠 있는 잔소리 방지).
+/// 정렬 모드는 자동으로 바꾸지 않는다 — 안내만 하고 선택은 사용자에게 맡긴다.
 class TodoDrillListSliver extends StatefulWidget {
   const TodoDrillListSliver({
     super.key,
@@ -230,7 +238,7 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
         );
       }
       final byId = {for (final t in widget.allTodos) t.id: t};
-      return SliverList(
+      final flatSliver = SliverList(
         delegate: SliverChildBuilderDelegate(
           (context, i) => tile(
             matched[i],
@@ -240,6 +248,16 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
           ),
           childCount: matched.length,
         ),
+      );
+      // 필터 중에는 순서가 의미를 잃어 재정렬이 꺼져 있다 — 그 사유를 한 줄로 알린다.
+      if (matched.length < _reorderHintMinItems) return flatSliver;
+      return SliverMainAxisGroup(
+        slivers: [
+          const SliverToBoxAdapter(
+            child: _ReorderHintRow(_ReorderHintKind.filterBlocked),
+          ),
+          flatSliver,
+        ],
       );
     }
 
@@ -258,26 +276,107 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
             ),
           );
 
-    if (done.isEmpty) return activeSliver;
+    // 힌트 / 사유는 상호 배타 — 끌 수 있으면 "길게 눌러", 아니면 왜 안 되는지.
+    // 활성 항목이 1개 이하면 바꿀 순서 자체가 없으므로 아무것도 띄우지 않는다.
+    final hint = active.length < _reorderHintMinItems
+        ? null
+        : (canReorder
+              ? _ReorderHintKind.draggable
+              : _ReorderHintKind.sortBlocked);
+
+    if (hint == null && done.isEmpty) return activeSliver;
 
     return SliverMainAxisGroup(
       slivers: [
+        if (hint != null) SliverToBoxAdapter(child: _ReorderHintRow(hint)),
         activeSliver,
-        SliverToBoxAdapter(
-          child: _DrillDoneCollapseRow(
-            count: done.length,
-            expanded: _doneExpanded,
-            onTap: () => setState(() => _doneExpanded = !_doneExpanded),
-          ),
-        ),
-        if (_doneExpanded)
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => tile(done[i], reorderable: false, index: i),
-              childCount: done.length,
+        if (done.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: _DrillDoneCollapseRow(
+              count: done.length,
+              expanded: _doneExpanded,
+              onTap: () => setState(() => _doneExpanded = !_doneExpanded),
             ),
           ),
+          if (_doneExpanded)
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, i) => tile(done[i], reorderable: false, index: i),
+                childCount: done.length,
+              ),
+            ),
+        ],
       ],
+    );
+  }
+}
+
+/// 재정렬 안내를 띄우기 시작하는 최소 항목 수 — 1개짜리 목록엔 바꿀 순서가 없다.
+const int _reorderHintMinItems = 2;
+
+/// 목록 맨 위 한 줄 안내의 종류.
+enum _ReorderHintKind {
+  /// 재정렬 가능 — 길게 누르면 끌 수 있다는 힌트.
+  draggable,
+
+  /// 일정순 보기라 꺼짐.
+  sortBlocked,
+
+  /// 상태별 보기(필터) 중이라 꺼짐.
+  filterBlocked,
+}
+
+/// 드래그 재정렬 발견성 — 목록 맨 위의 옅은 한 줄.
+///
+/// 핸들(⠿)을 타일마다 붙이면 목록이 시끄러워지므로, 대신 이 한 줄만 둔다.
+/// 색·크기 모두 낮은 강조(muted)로 잡아 항목 자체의 가독성을 해치지 않게 한다.
+/// 모바일은 한 단계 더 촘촘하게 (폭이 좁아 두 줄로 접히는 경우가 많다).
+class _ReorderHintRow extends StatelessWidget {
+  const _ReorderHintRow(this.kind);
+
+  final _ReorderHintKind kind;
+
+  String get _text => switch (kind) {
+    _ReorderHintKind.draggable => '길게 눌러 순서를 바꿀 수 있어요',
+    _ReorderHintKind.sortBlocked => '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요',
+    _ReorderHintKind.filterBlocked => '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요',
+  };
+
+  IconData get _icon => kind == _ReorderHintKind.draggable
+      ? Icons.drag_indicator_rounded
+      : Icons.info_outline_rounded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final compact = AppPlatform.isMobile;
+    final style =
+        (compact ? theme.textTheme.labelSmall : theme.textTheme.labelMedium)
+            ?.copyWith(color: scheme.onSurfaceVariant, height: 1.3);
+    return Padding(
+      key: ValueKey('drill-reorder-hint-${kind.name}'),
+      padding: EdgeInsets.only(
+        left: AppTokens.space4,
+        right: AppTokens.space4,
+        bottom: compact ? AppTokens.space8 : AppTokens.space12,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            // 아이콘 광학 중심을 첫 줄 텍스트에 맞춘다.
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              _icon,
+              size: compact ? 14 : 16,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+            ),
+          ),
+          const SizedBox(width: AppTokens.space4),
+          Expanded(child: Text(_text, style: style)),
+        ],
+      ),
     );
   }
 }

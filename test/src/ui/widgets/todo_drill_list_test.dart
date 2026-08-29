@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
@@ -38,6 +39,7 @@ void main() {
     required List<Todo> allTodos,
     void Function(Todo)? onDrillDown,
     void Function(Todo)? onEdit,
+    void Function(List<Todo>, int, int)? onReorderSiblings,
     TodoSortMode sortMode = TodoSortMode.manual,
     TodoStatusFilter filter = TodoStatusFilter.all,
     List<Todo>? filterPool,
@@ -60,7 +62,7 @@ void main() {
                 onMove: (_) {},
                 onCopy: (_) {},
                 onDelete: (_) {},
-                onReorderSiblings: (_, _, _) {},
+                onReorderSiblings: onReorderSiblings ?? (_, _, _) {},
                 sortMode: sortMode,
               ),
             ],
@@ -70,6 +72,25 @@ void main() {
     );
     await tester.pump();
   }
+
+  /// 롱프레스(ReorderableDelayedDragStartListener) 후 [dy] 만큼 끌어 놓는다.
+  /// 한 번에 옮기면 지연 인식기가 놓치므로 잘게 나눠 민다.
+  Future<void> dragTile(WidgetTester tester, String title, double dy) async {
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text(title)),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    final step = dy / 10;
+    for (var i = 0; i < 10; i++) {
+      await gesture.moveBy(Offset(0, step));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+  }
+
+  double gapBetween(WidgetTester tester, String from, String to) =>
+      tester.getCenter(find.text(to)).dy - tester.getCenter(find.text(from)).dy;
 
   /// 화면에 그려진 순서대로 제목을 수집 (세로 위치 기준).
   List<String> visibleTitles(WidgetTester tester, List<String> candidates) {
@@ -392,6 +413,158 @@ void main() {
       expect(find.text('루트 미완료'), findsOneWidget);
       expect(find.text('자식 완료'), findsNothing); // 자손은 드릴다운으로만
       expect(find.byKey(const ValueKey('todo-tile-breadcrumb')), findsNothing);
+    });
+  });
+
+  // 드래그는 핸들 없이 롱프레스로만 시작하므로, "끌 수 있다 / 왜 못 끄는지" 를
+  // 목록 맨 위 한 줄로 알린다. 힌트와 사유는 상호 배타 + 1개짜리 목록엔 둘 다 없음.
+  group('드래그 재정렬 발견성', () {
+    const hintKey = ValueKey('drill-reorder-hint-draggable');
+    const sortBlockedKey = ValueKey('drill-reorder-hint-sortBlocked');
+    const filterBlockedKey = ValueKey('drill-reorder-hint-filterBlocked');
+    const hintText = '길게 눌러 순서를 바꿀 수 있어요';
+    const sortBlockedText = '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요';
+    const filterBlockedText = '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요';
+
+    final a = make(id: 'a', title: '하위 하나');
+    final b = make(id: 'b', title: '하위 둘');
+
+    testWidgets('수동 정렬 + 전체 보기 → "길게 눌러" 힌트만 (사유 안내 없음)', (tester) async {
+      await mount(tester, items: [a, b], allTodos: [a, b]);
+
+      expect(find.byKey(hintKey), findsOneWidget);
+      expect(find.text(hintText), findsOneWidget);
+      expect(find.byKey(sortBlockedKey), findsNothing);
+      expect(find.byKey(filterBlockedKey), findsNothing);
+    });
+
+    testWidgets('항목이 1개 이하면 힌트도 사유 안내도 없다', (tester) async {
+      await mount(tester, items: [a], allTodos: [a]);
+      expect(find.byKey(hintKey), findsNothing);
+      expect(find.byKey(sortBlockedKey), findsNothing);
+
+      // 활성 0 + 완료 1 (접기 행만 남는 경우) 도 마찬가지.
+      final done = make(
+        id: 'd',
+        title: '끝난 일',
+        doneAt: DateTime.utc(2026, 5, 30, 12),
+      );
+      await mount(tester, items: [done], allTodos: [done]);
+      expect(find.byKey(hintKey), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+    });
+
+    testWidgets('일정순 → 사유 안내로 바뀌고 힌트는 사라진다', (tester) async {
+      await mount(
+        tester,
+        items: [a, b],
+        allTodos: [a, b],
+        sortMode: TodoSortMode.dueDate,
+      );
+
+      expect(find.byKey(sortBlockedKey), findsOneWidget);
+      expect(find.text(sortBlockedText), findsOneWidget);
+      expect(find.byKey(hintKey), findsNothing);
+    });
+
+    testWidgets('일정순 — 롱프레스로 끌어도 재정렬 콜백이 오지 않는다', (tester) async {
+      final reorders = <(List<Todo>, int, int)>[];
+      await mount(
+        tester,
+        items: [a, b],
+        allTodos: [a, b],
+        sortMode: TodoSortMode.dueDate,
+        onReorderSiblings: (items, oldIndex, newIndex) =>
+            reorders.add((items, oldIndex, newIndex)),
+      );
+
+      await dragTile(tester, '하위 하나', gapBetween(tester, '하위 하나', '하위 둘') + 8);
+
+      expect(reorders, isEmpty, reason: '일정순에서는 드래그 자체가 꺼져 있어야 한다');
+      expect(find.text(sortBlockedText), findsOneWidget);
+    });
+
+    testWidgets('상태별 보기 필터 중 → 같은 톤의 사유 안내', (tester) async {
+      final done1 = make(
+        id: 'd1',
+        title: '끝난 하나',
+        doneAt: DateTime.utc(2026, 5, 30, 12),
+      );
+      final done2 = make(
+        id: 'd2',
+        title: '끝난 둘',
+        doneAt: DateTime.utc(2026, 5, 30, 13),
+      );
+      final pool = [done1, done2];
+      await mount(
+        tester,
+        items: pool,
+        allTodos: pool,
+        filter: TodoStatusFilter.done,
+        filterPool: pool,
+      );
+
+      expect(find.byKey(filterBlockedKey), findsOneWidget);
+      expect(find.text(filterBlockedText), findsOneWidget);
+      expect(find.byKey(hintKey), findsNothing);
+      expect(find.byKey(sortBlockedKey), findsNothing);
+    });
+
+    testWidgets('필터 결과가 1건이면 안내를 띄우지 않는다', (tester) async {
+      final done1 = make(
+        id: 'd1',
+        title: '끝난 하나',
+        doneAt: DateTime.utc(2026, 5, 30, 12),
+      );
+      await mount(
+        tester,
+        items: [done1],
+        allTodos: [done1],
+        filter: TodoStatusFilter.done,
+        filterPool: [done1],
+      );
+
+      expect(find.byKey(filterBlockedKey), findsNothing);
+      expect(find.text('끝난 하나'), findsOneWidget);
+    });
+
+    testWidgets('모바일 폭에서도 안내 한 줄이 넘치지 않는다', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      addTearDown(() => AppPlatform.debugFormFactorOverride = null);
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await mount(
+        tester,
+        items: [a, b],
+        allTodos: [a, b],
+        sortMode: TodoSortMode.dueDate,
+      );
+
+      // 가장 긴 문구(사유 안내)를 좁은 폭에 그려도 오버플로 예외가 없어야 한다.
+      expect(tester.takeException(), isNull);
+      expect(find.text(sortBlockedText), findsOneWidget);
+    });
+
+    testWidgets('수동 정렬 — 롱프레스 드래그로 형제 재정렬 콜백이 온다', (tester) async {
+      final reorders = <(List<Todo>, int, int)>[];
+      await mount(
+        tester,
+        items: [a, b],
+        allTodos: [a, b],
+        onReorderSiblings: (items, oldIndex, newIndex) =>
+            reorders.add((items, oldIndex, newIndex)),
+      );
+
+      await dragTile(tester, '하위 하나', gapBetween(tester, '하위 하나', '하위 둘') + 8);
+
+      expect(reorders, isNotEmpty, reason: '롱프레스 드래그는 재정렬로 이어져야 한다');
+      final (siblings, oldIndex, newIndex) = reorders.last;
+      // 넘겨받는 형제 집합은 이 레벨의 활성 항목뿐 (완료·다른 가지 없음).
+      expect(siblings.map((t) => t.id).toList(), ['a', 'b']);
+      expect(oldIndex, 0);
+      expect(newIndex, greaterThan(1), reason: '아래 항목보다 더 내려갔으므로 뒤로 이동');
     });
   });
 }

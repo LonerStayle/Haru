@@ -44,6 +44,7 @@ void main() {
     TodoType type = TodoType.task,
     DateTime? doneAt,
     DateTime? dueAt,
+    int sortOrder = 0,
   }) => Todo(
     id: id,
     title: title,
@@ -55,7 +56,30 @@ void main() {
     calendarEventId: null,
     parentId: parentId,
     type: type,
+    sortOrder: sortOrder,
   );
+
+  /// 롱프레스(ReorderableDelayedDragStartListener) 후 [dy] 만큼 끌어 놓는다.
+  /// 한 번에 옮기면 지연 인식기가 놓치므로 잘게 나눠 민다.
+  Future<void> dragTile(WidgetTester tester, String title, double dy) async {
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text(title)),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    final step = dy / 10;
+    for (var i = 0; i < 10; i++) {
+      await gesture.moveBy(Offset(0, step));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+    // 재정렬은 비동기 upsert — 저장이 끝날 틈을 준다.
+    await tester.pump(Duration.zero);
+    await tester.pump(Duration.zero);
+  }
+
+  double gapBetween(WidgetTester tester, String from, String to) =>
+      tester.getCenter(find.text(to)).dy - tester.getCenter(find.text(from)).dy;
 
   /// 화면에 그려진 순서대로 제목을 수집 (세로 위치 기준).
   List<String> visibleTitles(WidgetTester tester, List<String> candidates) {
@@ -321,6 +345,112 @@ void main() {
       await tester.pump();
 
       expect(find.text('진행중 항목이 없어요'), findsOneWidget);
+    });
+  });
+
+  // 대표님 체감 "하위 할일에서는 드래그로 순서를 못 바꾼다" 의 실물 확인.
+  // 롱프레스 → 실제 드래그 → 저장까지 한 줄로 이어지는지, 그리고 그 저장이
+  // **형제 범위에만** 닿는지(다른 가지는 그대로) 를 실기기와 같은 제스처로 고정한다.
+  group('하위 형제 드래그 재정렬', () {
+    const hintText = '길게 눌러 순서를 바꿀 수 있어요';
+    const sortBlockedText = '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요';
+    const filterBlockedText = '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요';
+
+    /// 부모 p 의 직속 자식 3 + "건드리면 안 되는" 다른 가지 2건
+    /// (c1 의 자식 g1 / p 와 무관한 root r1).
+    ({Todo p, Todo c1, Todo c2, Todo c3, Todo g1, Todo r1}) tree() => (
+      p: make(id: 'p', title: '부모 폴더'),
+      c1: make(id: 'c1', title: '설계', parentId: 'p', sortOrder: 0),
+      c2: make(id: 'c2', title: '구현', parentId: 'p', sortOrder: 1),
+      c3: make(id: 'c3', title: '배포', parentId: 'p', sortOrder: 2),
+      g1: make(id: 'g1', title: '손자', parentId: 'c1', sortOrder: 5),
+      r1: make(id: 'r1', title: '남의 가지', sortOrder: 9),
+    );
+
+    Future<void> seed(List<Todo> todos) async {
+      for (final t in todos) {
+        await repo.upsert(t);
+      }
+    }
+
+    testWidgets('수동 정렬 — 롱프레스 드래그로 형제 순서가 실제로 바뀐다', (tester) async {
+      final t = tree();
+      final all = [t.p, t.c1, t.c2, t.c3, t.g1, t.r1];
+      await seed(all);
+
+      await mount(tester, t.p, children: [t.c1, t.c2, t.c3], allTodos: all);
+      expect(find.text(hintText), findsOneWidget);
+
+      // '설계'(첫째)를 '구현' 아래로.
+      await dragTile(tester, '설계', gapBetween(tester, '설계', '구현') + 8);
+
+      expect((await repo.getById('c2'))!.sortOrder, 0);
+      expect((await repo.getById('c1'))!.sortOrder, 1);
+      expect((await repo.getById('c3'))!.sortOrder, 2);
+    });
+
+    testWidgets('재정렬은 형제 sortOrder 만 건드린다 (다른 가지 불변)', (tester) async {
+      final t = tree();
+      final all = [t.p, t.c1, t.c2, t.c3, t.g1, t.r1];
+      await seed(all);
+
+      await mount(tester, t.p, children: [t.c1, t.c2, t.c3], allTodos: all);
+      await dragTile(tester, '설계', gapBetween(tester, '설계', '구현') + 8);
+
+      // 자식 가지(g1) 와 다른 root(r1) 는 재부여 대상이 아니다.
+      expect((await repo.getById('g1'))!.sortOrder, 5);
+      expect((await repo.getById('r1'))!.sortOrder, 9);
+      // 부모 자신도 그대로.
+      expect((await repo.getById('p'))!.sortOrder, 0);
+    });
+
+    testWidgets('일정순 — 안내가 뜨고 드래그해도 sortOrder 가 그대로', (tester) async {
+      final t = tree();
+      final all = [t.p, t.c1, t.c2, t.c3, t.g1, t.r1];
+      await seed(all);
+
+      await mount(
+        tester,
+        t.p,
+        children: [t.c1, t.c2, t.c3],
+        allTodos: all,
+        sortStore: _MemorySortModeStore()..stored = TodoSortMode.dueDate,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(sortBlockedText), findsOneWidget);
+      expect(find.text(hintText), findsNothing);
+
+      await dragTile(tester, '설계', gapBetween(tester, '설계', '구현') + 8);
+
+      expect((await repo.getById('c1'))!.sortOrder, 0);
+      expect((await repo.getById('c2'))!.sortOrder, 1);
+      expect((await repo.getById('c3'))!.sortOrder, 2);
+    });
+
+    testWidgets('상태별 보기 칩을 누르면 같은 톤의 사유 안내', (tester) async {
+      final p = make(id: 'p', title: '부모 폴더');
+      final d1 = make(
+        id: 'd1',
+        title: '끝난 하나',
+        parentId: 'p',
+        doneAt: now,
+        sortOrder: 0,
+      );
+      final d2 = make(
+        id: 'd2',
+        title: '끝난 둘',
+        parentId: 'p',
+        doneAt: now,
+        sortOrder: 1,
+      );
+
+      await mount(tester, p, children: [d1, d2], allTodos: [p, d1, d2]);
+      await tester.tap(find.byKey(const ValueKey('status-filter-done')));
+      await tester.pump();
+
+      expect(find.text(filterBlockedText), findsOneWidget);
+      expect(find.text(hintText), findsNothing);
     });
   });
 }
