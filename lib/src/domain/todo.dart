@@ -224,6 +224,7 @@ abstract class Todo with _$Todo {
   /// 함께 지우고, false 면 할 일은 남기고 연결만 끊는다. 값 비교를 `== 'gcal'` 로
   /// 흩뿌리면 서비스가 늘 때마다 빠뜨리는 곳이 생긴다.
   bool get isFromCalendar => calendarOrigin != 'app';
+
   /// 현재 3-상태. note 는 상태 개념이 없어 항상 [TodoStatus.undone].
   TodoStatus get status {
     if (isDone) return TodoStatus.done;
