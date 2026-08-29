@@ -43,14 +43,14 @@ final todoRepositoryProvider = Provider<TodoRepository>((ref) {
           userIdGetter: () => ref.read(currentUserProvider)?.id,
         );
 
-  // Google Calendar 연동이 켜져 있을 때만 캘린더 데코레이터를 한 겹 씌운다.
+  // 캘린더 연동(구글 / Microsoft 중 하나라도)이 켜져 있을 때만 데코레이터를 씌운다.
   // **꺼져 있으면 아예 끼우지 않는다** — 연동 없이도 앱이 이전과 완전히 동일하게
   // 동작한다는 것을 조립 단계에서 보장한다 (판정 함수에 의존하지 않는다).
   //
   // 주의: 동기화 서비스 자신은 이 provider 를 쓰면 안 된다. 수신 결과를 여기에
   // 쓰면 다시 캘린더 큐에 쌓여 되쏘게 된다 — `calendarSyncRepositoryProvider` 참고.
   final calendarConnected = ref.watch(
-    calendarSettingsProvider.select((s) => s.connected),
+    calendarSettingsProvider.select((s) => s.anyConnected),
   );
   if (!calendarConnected) return base;
 

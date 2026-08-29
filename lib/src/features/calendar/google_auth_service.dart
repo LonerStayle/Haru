@@ -12,6 +12,11 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/env.dart';
 import '../../core/platform.dart';
+import 'calendar_auth.dart';
+
+// [CalendarAuth] 는 provider 중립 파일로 옮겼다. 기존 import 경로
+// (`google_auth_service.dart`) 를 그대로 쓰는 호출부가 여럿이라 여기서 다시 내보낸다.
+export 'calendar_auth.dart' show CalendarAuth;
 
 /// Calendar 이벤트 CRUD 에 필요한 scope (읽기/쓰기 포함).
 const calendarEventsScope = 'https://www.googleapis.com/auth/calendar.events';
@@ -56,10 +61,7 @@ const calendarScopes = _scopes;
 bool storedScopesCoverRequired(
   List<String>? storedScopes,
   List<String> requiredScopes,
-) {
-  if (storedScopes == null) return false;
-  return requiredScopes.every(storedScopes.contains);
-}
+) => scopesCoverRequired(storedScopes, requiredScopes);
 
 /// 토큰 파일 원본 JSON 문자열을 (refreshToken, scopes) 로 파싱하는 순수 함수.
 /// 파일 I/O 를 분리해 두어 "JSON 이 깨져 있어도 예외 없이 null" 동작을 파일
@@ -82,48 +84,20 @@ bool storedScopesCoverRequired(
   }
 }
 
-/// 플랫폼 중립 Calendar 인증 추상화.
-///
-/// macOS desktop 과 Android 는 OAuth 방식이 **근본적으로 다르다**:
-/// - **Android** → [MobileCalendarAuth]: google_sign_in (Credential Manager).
-///   패키지명 + SHA-1 로 Google Cloud Console 에서 자동 매칭.
-/// - **macOS** → [DesktopCalendarAuth]: google_sign_in 의 GIDSignIn 은 토큰을
-///   키체인에 저장하는데, 키체인 액세스 그룹 접근에는 유효한 app-identifier 서명
-///   (= Apple 개발팀) 이 필요하다. ad-hoc 서명(로컬 개발) 에선 "keychain error" 로
-///   실패한다. 그래서 macOS 는 googleapis_auth 의 **데스크톱 OAuth 플로우**
-///   (브라우저 동의 → localhost 리다이렉트 → refresh token 로컬 저장) 로 우회한다.
-///   키체인·Apple 서명이 일절 필요 없다.
-abstract class CalendarAuth {
-  /// Calendar API 호출용 인증된 [http.Client]. 사용자가 동의를 거부/취소하면 null.
-  /// 호출자가 사용 후 반드시 close() 한다.
-  Future<http.Client?> authedClient();
-
-  Future<void> signOut();
-}
-
 // ---------------------------------------------------------------------------
-// Android — google_sign_in (Credential Manager) 기반
+// Google 인증 — macOS desktop 과 Android 는 OAuth 방식이 **근본적으로 다르다**:
+// - **Android** → [MobileCalendarAuth]: google_sign_in (Credential Manager).
+//   패키지명 + SHA-1 로 Google Cloud Console 에서 자동 매칭.
+// - **macOS** → [DesktopCalendarAuth]: google_sign_in 의 GIDSignIn 은 토큰을
+//   키체인에 저장하는데, 키체인 액세스 그룹 접근에는 유효한 app-identifier 서명
+//   (= Apple 개발팀) 이 필요하다. ad-hoc 서명(로컬 개발) 에선 "keychain error" 로
+//   실패한다. 그래서 macOS 는 googleapis_auth 의 **데스크톱 OAuth 플로우**
+//   (브라우저 동의 → localhost 리다이렉트 → refresh token 로컬 저장) 로 우회한다.
+//   키체인·Apple 서명이 일절 필요 없다.
+//
+// (Microsoft 는 두 플랫폼 모두 `microsoft_auth_service.dart` 의 순수 Dart
+//  PKCE 플로우 하나로 통일했다.)
 // ---------------------------------------------------------------------------
-
-/// 헤더만 주입하는 얇은 http.Client (google_sign_in 인가 헤더용).
-class _HeaderClient extends http.BaseClient {
-  _HeaderClient(this._headers);
-
-  final Map<String, String> _headers;
-  final http.Client _inner = http.Client();
-
-  @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
-    request.headers.addAll(_headers);
-    return _inner.send(request);
-  }
-
-  @override
-  void close() {
-    _inner.close();
-    super.close();
-  }
-}
 
 class MobileCalendarAuth implements CalendarAuth {
   MobileCalendarAuth(this._clientId);
@@ -169,7 +143,7 @@ class MobileCalendarAuth implements CalendarAuth {
     }
     final headers = await client.authorizationHeaders(_scopes);
     if (headers == null) return null;
-    return _HeaderClient(headers);
+    return HeaderClient(headers);
   }
 
   @override

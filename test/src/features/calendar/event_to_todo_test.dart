@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/recurrence.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_service.dart';
 import 'package:solo_todo/src/features/calendar/event_to_todo.dart';
 
@@ -102,17 +102,13 @@ void main() {
     test('캘린더에서 시간만 옮겨도 모드는 유지된다', () {
       // 앱이 startTime 으로 내보낸 이벤트를 사람이 캘린더에서 2시간 뒤로 끌었다.
       // ignore: invalid_use_of_visible_for_testing_member
-      final e = CalendarService.buildEvent(
-        make(dueAt: DateTime.utc(2026, 8, 20, 14)),
-      );
-      e.start = gcal.EventDateTime(
-        dateTime: DateTime.utc(2026, 8, 20, 16),
-        timeZone: 'UTC',
-      );
-      e.end = gcal.EventDateTime(
-        dateTime: DateTime.utc(2026, 8, 20, 17),
-        timeZone: 'UTC',
-      );
+      final e =
+          CalendarService.buildEvent(
+            make(dueAt: DateTime.utc(2026, 8, 20, 14)),
+          ).copyWith(
+            start: CalEventTime.at(DateTime.utc(2026, 8, 20, 16)),
+            end: CalEventTime.at(DateTime.utc(2026, 8, 20, 17)),
+          );
       final p = eventToTodoPatch(e)!;
       expect(p.dateMode, TodoDateMode.startTime);
       expect(p.dueAt!.toUtc(), DateTime.utc(2026, 8, 20, 16));
@@ -121,10 +117,10 @@ void main() {
   });
 
   group('서명 없는 이벤트 — 사람이 캘린더에서 만든 것', () {
-    gcal.Event allDay(DateTime start, DateTime endExclusive) => gcal.Event(
-      summary: '회의',
-      start: gcal.EventDateTime(date: start),
-      end: gcal.EventDateTime(date: endExclusive),
+    CalEvent allDay(DateTime start, DateTime endExclusive) => CalEvent(
+      title: '회의',
+      start: CalEventTime.allDay(start),
+      end: CalEventTime.allDay(endExclusive),
     );
 
     test('종일 하루 → allDay', () {
@@ -147,10 +143,10 @@ void main() {
 
     test('시간 이벤트 → range', () {
       final p = eventToTodoPatch(
-        gcal.Event(
-          summary: '스탠드업',
-          start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 9)),
-          end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 9, 30)),
+        CalEvent(
+          title: '스탠드업',
+          start: CalEventTime.at(DateTime.utc(2026, 8, 20, 9)),
+          end: CalEventTime.at(DateTime.utc(2026, 8, 20, 9, 30)),
         ),
       )!;
       expect(p.dateMode, TodoDateMode.range);
@@ -161,18 +157,53 @@ void main() {
 
     test('제목이 없으면 빈 문자열이 아니라 안내 제목을 준다', () {
       final p = eventToTodoPatch(
-        gcal.Event(
-          start: gcal.EventDateTime(date: DateTime(2026, 8, 20)),
-          end: gcal.EventDateTime(date: DateTime(2026, 8, 21)),
+        CalEvent(
+          start: CalEventTime.allDay(DateTime(2026, 8, 20)),
+          end: CalEventTime.allDay(DateTime(2026, 8, 21)),
         ),
       )!;
       expect(p.title.trim(), isNotEmpty);
     });
   });
 
+  group('형태 힌트 — 서명이 없는 서비스의 왕복 안정성', () {
+    test('힌트가 있으면 1시간 블록이 range 로 변질되지 않는다', () {
+      final e = CalEvent(
+        title: '회의',
+        start: CalEventTime.at(DateTime.utc(2026, 8, 20, 14)),
+        end: CalEventTime.at(DateTime.utc(2026, 8, 20, 15)),
+      );
+      final p = eventToTodoPatch(e, shapeHint: TodoDateMode.startTime)!;
+      expect(p.dateMode, TodoDateMode.startTime);
+      expect(p.endAt, isNull);
+    });
+
+    test('형태와 어긋나는 힌트는 무시한다 — 종일이 시간 일정으로 바뀐 경우', () {
+      // 사람이 캘린더에서 종일 일정을 시간 일정으로 바꿨다. 힌트(allDay)를 따르면
+      // 그 변경을 영영 못 받는다.
+      final e = CalEvent(
+        title: '회의',
+        start: CalEventTime.at(DateTime.utc(2026, 8, 20, 14)),
+        end: CalEventTime.at(DateTime.utc(2026, 8, 20, 15)),
+      );
+      final p = eventToTodoPatch(e, shapeHint: TodoDateMode.allDay)!;
+      expect(p.dateMode, TodoDateMode.range);
+      expect(p.isAllDay, isFalse);
+    });
+
+    test('서명이 있으면 서명이 힌트를 이긴다', () {
+      // ignore: invalid_use_of_visible_for_testing_member
+      final e = CalendarService.buildEvent(
+        make(dueAt: DateTime.utc(2026, 8, 20, 18), timeAnchor: 'end'),
+      );
+      final p = eventToTodoPatch(e, shapeHint: TodoDateMode.startTime)!;
+      expect(p.dateMode, TodoDateMode.endTime);
+    });
+  });
+
   group('매핑 불가', () {
     test('시작 시각이 없으면 null — 할 일로 만들 수 없다', () {
-      expect(eventToTodoPatch(gcal.Event(summary: '무기한')), isNull);
+      expect(eventToTodoPatch(const CalEvent(title: '무기한')), isNull);
     });
   });
 
@@ -194,12 +225,14 @@ void main() {
       expect(p.recurrenceEndAt, DateTime.utc(2026, 12, 31));
     });
 
-    test('미지원 RRULE 은 반복 없이 단일 할 일로 폴백', () {
-      final e = gcal.Event(
-        summary: '매월 첫 월요일',
-        start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 10)),
-        end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 11)),
-        recurrence: ['RRULE:FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1'],
+    test('표현 불가 반복은 반복 없이 단일 할 일로 폴백', () {
+      // 게이트웨이가 "반복이긴 한데 표현 불가" 로 번역해 넘긴 형태
+      // (구글의 BYSETPOS RRULE, 그래프의 relativeMonthly 가 모두 여기로 온다).
+      final e = CalEvent(
+        title: '매월 첫 월요일',
+        start: CalEventTime.at(DateTime.utc(2026, 8, 20, 10)),
+        end: CalEventTime.at(DateTime.utc(2026, 8, 20, 11)),
+        recurrence: const CalRecurrence(),
       );
       final p = eventToTodoPatch(e)!;
       expect(p.recurrence, isNull);
@@ -208,10 +241,10 @@ void main() {
 
     test('반복이 없으면 unsupportedRecurrence 는 false', () {
       final p = eventToTodoPatch(
-        gcal.Event(
-          summary: '단발',
-          start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 10)),
-          end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 11)),
+        CalEvent(
+          title: '단발',
+          start: CalEventTime.at(DateTime.utc(2026, 8, 20, 10)),
+          end: CalEventTime.at(DateTime.utc(2026, 8, 20, 11)),
         ),
       )!;
       expect(p.unsupportedRecurrence, isFalse);
@@ -228,7 +261,7 @@ void main() {
     });
 
     test('서명 없는 이벤트는 빈 서명', () {
-      final sig = readHaruSignature(gcal.Event(summary: 'x'));
+      final sig = readHaruSignature(const CalEvent(title: 'x'));
       expect(sig.todoId, isNull);
       expect(sig.rev, isNull);
     });

@@ -1,12 +1,12 @@
 // foundation 전체를 들이면 그쪽 `Category` 가 도메인 `Category` 와 충돌한다.
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import '../../data/local/app_database.dart';
 import '../../data/local/calendar_ops_dao.dart';
 import '../../data/todo_repository.dart';
 import '../../domain/category.dart';
 import '../../domain/todo.dart';
+import 'calendar_event.dart';
 import 'calendar_gateway.dart';
 import 'calendar_merge.dart';
 import 'calendar_service.dart';
@@ -83,7 +83,11 @@ class PullResult {
       '연결해제 $unlinked, 건너뜀 $skipped)';
 }
 
-/// 앱 → 캘린더 방향의 실행부. 큐에 쌓인 작업을 구글에 반영한다.
+/// 앱 → 캘린더 방향의 실행부. 큐에 쌓인 작업을 캘린더 서비스에 반영한다.
+///
+/// **서비스 하나당 인스턴스 하나**다 ([gateway] 의 provider 가 곧 이 서비스의
+/// 담당 범위). 큐에서도 자기 provider 의 작업만 집어간다 — 섞이면 구글 이벤트 id 가
+/// 그래프로 날아가 404 만 반복한다.
 ///
 /// 기존 Supabase outbox 와 달리 **항목이 서로 독립**이다. 하나가 실패해도 나머지를
 /// 계속 진행한다 — 캘린더 작업은 서로 순서 의존이 없고, 한 건의 rate limit 때문에
@@ -103,6 +107,9 @@ class CalendarSyncService {
   final CalendarOpsDao ops;
   final TodoRepository repo;
   final DateTime Function() _now;
+
+  /// 이 인스턴스가 담당하는 서비스.
+  CalendarProvider get provider => gateway.provider;
 
   /// 재시도 상한. 넘으면 큐에서 내리고 마지막 오류만 남긴다 —
   /// 고칠 수 없는 작업이 큐에 영원히 남아 매 동기화를 지연시키는 것을 막는다.
@@ -129,7 +136,7 @@ class CalendarSyncService {
   bool _flushing = false;
 
   Future<PushResult> _doFlush() async {
-    final due = await ops.dueOps(_now());
+    final due = await ops.dueOps(_now(), provider: provider);
     var succeeded = 0;
     var retryable = 0;
     var dropped = 0;
@@ -194,7 +201,11 @@ class CalendarSyncService {
         // 남겨두면 나중에 다시 날짜를 넣었을 때 이미 없는 이벤트를 갱신하려 든다.
         if (todo != null && todo.calendarEventId == eventId) {
           await repo.upsert(
-            todo.copyWith(calendarEventId: null, calendarId: null),
+            todo.copyWith(
+              calendarEventId: null,
+              calendarId: null,
+              calendarProvider: null,
+            ),
           );
         }
         return true;
@@ -235,15 +246,22 @@ class CalendarSyncService {
   }
 
   // ignore: invalid_use_of_visible_for_testing_member
-  static gcal.Event _buildEvent(Todo todo) => CalendarService.buildEvent(todo);
+  static CalEvent _buildEvent(Todo todo) => CalendarService.buildEvent(todo);
 
   /// 생성된 이벤트 id 를 할 일에 붙인다.
   ///
   /// **`updatedAt` 을 건드리지 않는다.** 이벤트에 심어둔 서명(`haruRev`)이 push 시점의
   /// `updatedAt` 이라, 여기서 시각을 갱신하면 서명과 어긋나 다음 수신에서 자기 변경을
   /// echo 로 인식하지 못한다.
-  Future<void> _saveLink(Todo todo, String eventId, String calendarId) => repo
-      .upsert(todo.copyWith(calendarEventId: eventId, calendarId: calendarId));
+  Future<void> _saveLink(Todo todo, String eventId, String calendarId) =>
+      repo.upsert(
+        todo.copyWith(
+          calendarEventId: eventId,
+          calendarId: calendarId,
+          // 어느 서비스에 묶였는지 함께 남긴다 — 이후 수정·삭제가 이 값으로 라우팅된다.
+          calendarProvider: provider.wire,
+        ),
+      );
 
   // ── 캘린더 → 앱 ─────────────────────────────────────────────────────────
 
@@ -258,13 +276,18 @@ class CalendarSyncService {
     required CalendarSettings settings,
     required Category Function(String calendarId) categoryFor,
   }) async {
-    if (settings.readCalendarIds.isEmpty) return const PullResult();
+    final view = settings.viewFor(provider);
+    if (view.readCalendarIds.isEmpty) return const PullResult();
 
     // 링크 조회를 위해 한 번만 전체를 읽는다 — 이벤트마다 DB 를 뒤지지 않기 위함.
     final all = await repo.watchAll().first;
+    // **이 서비스에 묶인 할 일만** 짝짓기 후보다. 두 서비스를 동시에 켜면 서로의
+    // 이벤트 id 를 넘볼 수 있고, 그러면 한쪽 수신이 다른 쪽 링크를 덮어쓴다.
     final byEventId = <String, Todo>{
       for (final t in all)
-        if (t.calendarEventId != null) t.calendarEventId!: t,
+        if (t.calendarEventId != null &&
+            CalendarProvider.fromWire(t.calendarProvider) == provider)
+          t.calendarEventId!: t,
     };
     final knownTodoIds = all.map((t) => t.id).toSet();
 
@@ -276,10 +299,10 @@ class CalendarSyncService {
     final newTokens = <String, String>{};
     final expired = <String>{};
 
-    for (final calendarId in settings.readCalendarIds) {
+    for (final calendarId in view.readCalendarIds) {
       EventPage page;
       try {
-        page = await _fetchChanges(calendarId, settings.syncTokens[calendarId]);
+        page = await _fetchChanges(calendarId, view.syncTokens[calendarId]);
       } on _SyncTokenExpired {
         expired.add(calendarId);
         try {
@@ -325,14 +348,18 @@ class CalendarSyncService {
 
         if (verdict == ImportVerdict.cancelled) {
           if (linked == null) continue;
-          if (linked.calendarOrigin == 'gcal') {
-            // 구글이 원본이었다 — 원본이 사라졌으니 할 일도 지운다.
+          if (linked.isFromCalendar) {
+            // 캘린더가 원본이었다 — 원본이 사라졌으니 할 일도 지운다.
             await repo.deleteById(linked.id);
             deleted++;
           } else {
             // 앱이 원본이다 — 할 일은 대표님 것이므로 남기고 연결만 끊는다.
             await repo.upsert(
-              linked.copyWith(calendarEventId: null, calendarId: null),
+              linked.copyWith(
+                calendarEventId: null,
+                calendarId: null,
+                calendarProvider: null,
+              ),
             );
             unlinked++;
           }
@@ -400,7 +427,7 @@ class CalendarSyncService {
       _now().toUtc().subtract(const Duration(days: 30));
 
   Future<Todo?> _importEvent(
-    gcal.Event event,
+    CalEvent event,
     String calendarId,
     Category Function(String) categoryFor,
   ) async {
@@ -428,9 +455,10 @@ class CalendarSyncService {
         ).copyWith(
           calendarEventId: event.id,
           calendarId: calendarId,
-          // 출처를 기록해야 삭제 규칙이 성립한다 — 구글에서 지워졌을 때
+          // 출처를 기록해야 삭제 규칙이 성립한다 — 캘린더에서 지워졌을 때
           // 할 일을 함께 지울지, 연결만 끊을지가 이 값으로 갈린다.
-          calendarOrigin: 'gcal',
+          calendarOrigin: provider.originTag,
+          calendarProvider: provider.wire,
         );
     await repo.upsert(todo);
     return todo;

@@ -1,4 +1,5 @@
 import '../../domain/todo.dart';
+import 'calendar_event.dart';
 
 /// 한 번의 Todo 저장이 캘린더에 무엇을 해야 하는지.
 enum CalendarOpKind {
@@ -17,12 +18,18 @@ enum CalendarOpKind {
 
 /// [decideCalendarOp] 의 결과. 큐 row 를 만드는 데 필요한 것만 담는다.
 class CalendarOpDecision {
-  const CalendarOpDecision(this.kind, {this.eventId, this.calendarId});
+  const CalendarOpDecision(
+    this.kind, {
+    this.eventId,
+    this.calendarId,
+    this.provider = CalendarProvider.google,
+  });
 
   const CalendarOpDecision.none()
     : kind = CalendarOpKind.none,
       eventId = null,
-      calendarId = null;
+      calendarId = null,
+      provider = CalendarProvider.google;
 
   final CalendarOpKind kind;
 
@@ -33,9 +40,14 @@ class CalendarOpDecision {
   /// 들어있는** 캘린더다 — 사용자가 쓰기 캘린더를 바꿔도 옛 이벤트를 찾아가야 한다.
   final String? calendarId;
 
+  /// 어느 서비스로 보낼 작업인가. create 는 설정의 기본 서비스, update/delete 는
+  /// **할 일이 이미 묶여 있는** 서비스다 — 구글 이벤트를 그래프로 보내면 404 만 난다.
+  final CalendarProvider provider;
+
   @override
   String toString() =>
-      'CalendarOpDecision($kind, event: $eventId, calendar: $calendarId)';
+      'CalendarOpDecision($kind, event: $eventId, calendar: $calendarId, '
+      'provider: ${provider.wire})';
 }
 
 /// 이 필드들이 바뀌면 이벤트도 바뀌어야 한다.
@@ -75,22 +87,29 @@ bool _eligible(Todo t) =>
 /// - [addToCalendar] 는 편집 시트의 "Google Calendar 에 등록" 토글(신규 생성 여부만
 ///   좌우한다 — 이미 등록된 항목의 갱신·삭제는 토글과 무관하게 따라가야 한다).
 /// - [writeCalendarId] 는 설정에서 고른 쓰기 캘린더.
+/// - [createProvider] 는 **새로 만들 때만** 쓰는 대상 서비스. 이미 이벤트가 있는
+///   할 일은 그 할 일에 기록된 서비스를 따라간다 (하위호환: 기록이 없으면 구글).
 CalendarOpDecision decideCalendarOp({
   required Todo? prev,
   required Todo next,
   required bool addToCalendar,
   required String writeCalendarId,
+  CalendarProvider createProvider = CalendarProvider.google,
 }) {
   final eventId = next.calendarEventId;
 
   if (eventId != null) {
     // 이미 캘린더에 있다. 사라져야 하는가?
     final calendarId = next.calendarId ?? prev?.calendarId ?? writeCalendarId;
+    final linkedProvider = CalendarProvider.fromWire(
+      next.calendarProvider ?? prev?.calendarProvider,
+    );
     if (!_eligible(next)) {
       return CalendarOpDecision(
         CalendarOpKind.delete,
         eventId: eventId,
         calendarId: calendarId,
+        provider: linkedProvider,
       );
     }
     // 변경 전 상태를 모르면(다른 기기가 만든 항목이 처음 도착한 경우 등) 되쏘지
@@ -103,6 +122,7 @@ CalendarOpDecision decideCalendarOp({
       CalendarOpKind.update,
       eventId: eventId,
       calendarId: calendarId,
+      provider: linkedProvider,
     );
   }
 
@@ -111,6 +131,7 @@ CalendarOpDecision decideCalendarOp({
     return CalendarOpDecision(
       CalendarOpKind.create,
       calendarId: writeCalendarId,
+      provider: createProvider,
     );
   }
   return const CalendarOpDecision.none();

@@ -28,6 +28,7 @@ create table if not exists solo_todo.todos (
   calendar_event_id text,
   calendar_id       text,
   calendar_origin   text not null default 'app',
+  calendar_provider text,
   -- v1.1 — 트리 / 메모 모델 컬럼
   parent_id         text,                                       -- 부모 todo id, null = root
   type              text not null default 'task',               -- 'task' | 'note'
@@ -210,6 +211,12 @@ alter table solo_todo.todos add column if not exists started_at timestamptz;
 -- 지울지 말지를 가르는 근거. 기본 'app' 이라 기존 row 는 앱 기원으로 간주.
 alter table solo_todo.todos add column if not exists calendar_id     text;
 alter table solo_todo.todos add column if not exists calendar_origin text not null default 'app';
+
+-- 23) todos.calendar_provider (Microsoft 365 연동 병존)
+-- 'google' | 'microsoft'. null 은 구글로 읽는다 — 이 컬럼이 생기기 전 데이터는
+-- 전부 구글 연동이었기 때문이다. 이 컬럼이 없으면 PGRST204 로 todos 동기화가
+-- 통째로 멈춘다 (컬럼 추가 후 아래 notify pgrst 까지 반드시 실행).
+alter table solo_todo.todos add column if not exists calendar_provider text;
 
 -- ─────────────────────────────────────────────────────────────────────
 -- v1.1 → v1.2 마이그레이션 (기존 환경 — schema.sql 이미 실행된 프로젝트)

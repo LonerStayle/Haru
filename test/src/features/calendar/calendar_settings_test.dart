@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings.dart';
 
 /// 인메모리 저장소 — Notifier 로직(복원/사용자 우선/저장 실패 무시)을 shared_preferences
@@ -23,17 +24,25 @@ class _FakeStore implements CalendarSettingsPreference {
   }
 
   @override
-  Future<void> setSyncToken(String calendarId, String token) async {
-    final tokens = Map<String, String>.of(stored.syncTokens)
+  Future<void> setSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+    String token,
+  ) async {
+    final view = stored.viewFor(provider);
+    final tokens = Map<String, String>.of(view.syncTokens)
       ..[calendarId] = token;
-    stored = stored.copyWith(syncTokens: tokens);
+    stored = stored.withConnection(provider, view.copyWith(syncTokens: tokens));
   }
 
   @override
-  Future<void> clearSyncToken(String calendarId) async {
-    final tokens = Map<String, String>.of(stored.syncTokens)
-      ..remove(calendarId);
-    stored = stored.copyWith(syncTokens: tokens);
+  Future<void> clearSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+  ) async {
+    final view = stored.viewFor(provider);
+    final tokens = Map<String, String>.of(view.syncTokens)..remove(calendarId);
+    stored = stored.withConnection(provider, view.copyWith(syncTokens: tokens));
   }
 }
 
@@ -46,12 +55,17 @@ class _ThrowingStore implements CalendarSettingsPreference {
       throw StateError('저장소 없음');
 
   @override
-  Future<void> setSyncToken(String calendarId, String token) async =>
-      throw StateError('저장소 없음');
+  Future<void> setSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+    String token,
+  ) async => throw StateError('저장소 없음');
 
   @override
-  Future<void> clearSyncToken(String calendarId) async =>
-      throw StateError('저장소 없음');
+  Future<void> clearSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+  ) async => throw StateError('저장소 없음');
 }
 
 void main() {
@@ -149,7 +163,7 @@ void main() {
 
       await container
           .read(calendarSettingsProvider.notifier)
-          .setSyncToken('primary', 'new-token');
+          .setSyncToken(CalendarProvider.google, 'primary', 'new-token');
 
       expect(container.read(calendarSettingsProvider).syncTokens, {
         'primary': 'new-token',
@@ -158,7 +172,7 @@ void main() {
 
       await container
           .read(calendarSettingsProvider.notifier)
-          .clearSyncToken('work');
+          .clearSyncToken(CalendarProvider.google, 'work');
 
       expect(container.read(calendarSettingsProvider).syncTokens, {
         'primary': 'new-token',
@@ -276,7 +290,11 @@ void main() {
         ),
       );
 
-      await preference.setSyncToken('secondary', 'new-token');
+      await preference.setSyncToken(
+        CalendarProvider.google,
+        'secondary',
+        'new-token',
+      );
       var loaded = await preference.load();
       expect(loaded.syncTokens, {
         'primary': 'old-token',
@@ -284,7 +302,7 @@ void main() {
       });
       expect(loaded.writeCalendarId, 'work'); // 건드리지 않음.
 
-      await preference.clearSyncToken('primary');
+      await preference.clearSyncToken(CalendarProvider.google, 'primary');
       loaded = await preference.load();
       expect(loaded.syncTokens, {'secondary': 'new-token'});
     });

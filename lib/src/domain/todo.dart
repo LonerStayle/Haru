@@ -71,14 +71,20 @@ abstract class Todo with _$Todo {
     // [calendarId] — calendarEventId 가 속한 Google Calendar id. null = 미등록
     // 또는 레거시(과거엔 'primary' 하드코딩이었으므로 null 이면 primary 로 간주).
     String? calendarId,
-    // [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 에서
-    // 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
-    // origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
-    // 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
-    // ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
-    // 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
-    // todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
+    // [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 유입)
+    // | 'msgraph'(Microsoft 365 유입). **삭제 규칙의 유일한 근거**: 캘린더 쪽 이벤트가
+    // 삭제됐을 때 origin='app' 이면 할 일은 남기고 연결만 해제, 그 외(캘린더 유입)면
+    // 할 일도 함께 삭제한다 ([isFromCalendar]). 반드시 Supabase 로 전파되어
+    // macOS/Android 양쪽이 같은 판단을 한다.
+    // ⚠️ RISK(breaking): 이 세 필드는 Supabase 의 `calendar_id` / `calendar_origin` /
+    // `calendar_provider` 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이
+    // 배포하면 PGRST204 로 todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 필요).
     @Default('app') String calendarOrigin,
+    // [calendarProvider] — 이 할 일이 연결된 캘린더 서비스 ('google' | 'microsoft').
+    // **null 은 구글**이다 — 이 필드가 생기기 전 데이터(전부 구글 연동)와의 하위호환이
+    // 여기서 성립하므로 기본값을 넣지 않고 nullable 로 둔다. 큐가 어느 게이트웨이로
+    // 작업을 보낼지, 수신한 이벤트를 어느 할 일과 짝지을지가 이 값으로 갈린다.
+    String? calendarProvider,
     String? parentId,
     @Default(TodoType.task) TodoType type,
     @Default(0) int sortOrder,
@@ -126,6 +132,7 @@ abstract class Todo with _$Todo {
     bool isSeriesMaster = false,
     String? calendarId,
     String calendarOrigin = 'app',
+    String? calendarProvider,
   }) {
     final n = (now ?? DateTime.now)();
     return Todo(
@@ -140,6 +147,7 @@ abstract class Todo with _$Todo {
       calendarEventId: null,
       calendarId: calendarId,
       calendarOrigin: calendarOrigin,
+      calendarProvider: calendarProvider,
       parentId: parentId,
       type: type,
       sortOrder: sortOrder,
@@ -190,6 +198,13 @@ abstract class Todo with _$Todo {
         ? copyWith(startedAt: null, updatedAt: n)
         : copyWith(startedAt: n, doneAt: null, updatedAt: n);
   }
+
+  /// 캘린더에서 유입된 할 일인가 (앱에서 만든 것이 아닌가).
+  ///
+  /// 삭제 규칙의 단일 판정 — 캘린더 쪽 일정이 지워졌을 때 이 값이 true 면 할 일도
+  /// 함께 지우고, false 면 할 일은 남기고 연결만 끊는다. 값 비교를 `== 'gcal'` 로
+  /// 흩뿌리면 서비스가 늘 때마다 빠뜨리는 곳이 생긴다.
+  bool get isFromCalendar => calendarOrigin != 'app';
 
   /// 캘린더 이벤트 id 갱신.
   Todo withCalendarEvent(String? eventId, {DateTime Function()? now}) {

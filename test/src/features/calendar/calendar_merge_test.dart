@@ -1,10 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_merge.dart';
 import 'package:solo_todo/src/features/calendar/calendar_service.dart';
+
+/// 사람이 캘린더에서 고친 것처럼 보이게 하는 옛 서명.
+const _staleSignature = {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'};
 
 void main() {
   final t0 = DateTime.utc(2026, 8, 15, 9);
@@ -40,12 +43,12 @@ void main() {
   );
 
   /// 앱이 방금 push 한 상태 그대로의 이벤트 (서명 rev == todo.updatedAt).
-  gcal.Event pushedEvent(Todo t, {DateTime? serverUpdated}) {
+  CalEvent pushedEvent(Todo t, {DateTime? serverUpdated}) {
     // ignore: invalid_use_of_visible_for_testing_member
-    final e = CalendarService.buildEvent(t);
-    e.id = 'ev-1';
-    e.updated = serverUpdated ?? t.updatedAt.add(const Duration(seconds: 1));
-    return e;
+    return CalendarService.buildEvent(t).copyWith(
+      id: 'ev-1',
+      updated: serverUpdated ?? t.updatedAt.add(const Duration(seconds: 1)),
+    );
   }
 
   group('echo 차단 — 우리가 쓴 변경은 되돌아와도 무시한다', () {
@@ -88,12 +91,11 @@ void main() {
   group('LWW — 나중에 바뀐 쪽이 이긴다', () {
     test('캘린더가 더 최신이면 앱을 갱신한다', () {
       final local = todo(title: '옛 제목');
-      final e = pushedEvent(local)
-        ..summary = '캘린더에서 고친 제목'
-        ..extendedProperties = gcal.EventExtendedProperties(
-          private: {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'},
-        )
-        ..updated = local.updatedAt.add(const Duration(minutes: 10));
+      final e = pushedEvent(local).copyWith(
+        title: '캘린더에서 고친 제목',
+        appProperties: _staleSignature,
+        updated: local.updatedAt.add(const Duration(minutes: 10)),
+      );
 
       final r = mergeEventIntoTodo(event: e, local: local);
       expect(r.kind, MergeKind.updated);
@@ -102,12 +104,11 @@ void main() {
 
     test('앱이 더 최신이면 무시한다', () {
       final local = todo(updatedAt: t0.add(const Duration(hours: 2)));
-      final e = pushedEvent(local)
-        ..summary = '캘린더 쪽 옛 제목'
-        ..extendedProperties = gcal.EventExtendedProperties(
-          private: {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'},
-        )
-        ..updated = t0.add(const Duration(minutes: 1));
+      final e = pushedEvent(local).copyWith(
+        title: '캘린더 쪽 옛 제목',
+        appProperties: _staleSignature,
+        updated: t0.add(const Duration(minutes: 1)),
+      );
 
       expect(
         mergeEventIntoTodo(event: e, local: local).kind,
@@ -117,12 +118,11 @@ void main() {
 
     test('동률이면 앱이 이긴다', () {
       final local = todo();
-      final e = pushedEvent(local)
-        ..summary = '동시 수정'
-        ..extendedProperties = gcal.EventExtendedProperties(
-          private: {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'},
-        )
-        ..updated = local.updatedAt;
+      final e = pushedEvent(local).copyWith(
+        title: '동시 수정',
+        appProperties: _staleSignature,
+        updated: local.updatedAt,
+      );
 
       expect(
         mergeEventIntoTodo(event: e, local: local).kind,
@@ -132,17 +132,16 @@ void main() {
   });
 
   group('병합 범위 — 날짜와 제목만 덮는다', () {
-    Todo mergedOf(gcal.Event e, Todo local) =>
+    Todo mergedOf(CalEvent e, Todo local) =>
         mergeEventIntoTodo(event: e, local: local).merged!;
 
-    gcal.Event calendarEdit(Todo local, void Function(gcal.Event) edit) {
-      final e = pushedEvent(local)
-        ..extendedProperties = gcal.EventExtendedProperties(
-          private: {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'},
-        )
-        ..updated = local.updatedAt.add(const Duration(minutes: 10));
-      edit(e);
-      return e;
+    CalEvent calendarEdit(Todo local, CalEvent Function(CalEvent) edit) {
+      return edit(
+        pushedEvent(local).copyWith(
+          appProperties: _staleSignature,
+          updated: local.updatedAt.add(const Duration(minutes: 10)),
+        ),
+      );
     }
 
     test('카테고리·부모·정렬·메모는 보존된다', () {
@@ -152,7 +151,10 @@ void main() {
         sortOrder: 7,
         description: '내 메모',
       );
-      final m = mergedOf(calendarEdit(local, (e) => e.summary = '새 제목'), local);
+      final m = mergedOf(
+        calendarEdit(local, (e) => e.copyWith(title: '새 제목')),
+        local,
+      );
       expect(m.title, '새 제목');
       expect(m.category.id, Category.daily.id);
       expect(m.parentId, 'parent-1');
@@ -163,23 +165,23 @@ void main() {
     test('완료 상태는 캘린더가 건드리지 않는다', () {
       final done = DateTime.utc(2026, 8, 19, 10);
       final local = todo(doneAt: done);
-      final m = mergedOf(calendarEdit(local, (e) => e.summary = '새 제목'), local);
+      final m = mergedOf(
+        calendarEdit(local, (e) => e.copyWith(title: '새 제목')),
+        local,
+      );
       expect(m.doneAt, done);
     });
 
     test('시간을 옮기면 dueAt 이 따라간다', () {
       final local = todo();
       final m = mergedOf(
-        calendarEdit(local, (e) {
-          e.start = gcal.EventDateTime(
-            dateTime: DateTime.utc(2026, 8, 21, 16),
-            timeZone: 'UTC',
-          );
-          e.end = gcal.EventDateTime(
-            dateTime: DateTime.utc(2026, 8, 21, 17),
-            timeZone: 'UTC',
-          );
-        }),
+        calendarEdit(
+          local,
+          (e) => e.copyWith(
+            start: CalEventTime.at(DateTime.utc(2026, 8, 21, 16)),
+            end: CalEventTime.at(DateTime.utc(2026, 8, 21, 17)),
+          ),
+        ),
         local,
       );
       expect(m.dueAt!.toUtc(), DateTime.utc(2026, 8, 21, 16));
@@ -187,14 +189,17 @@ void main() {
 
     test('updatedAt 은 이벤트의 서버 시각으로 올라간다 — 재푸시 루프 방지', () {
       final local = todo();
-      final e = calendarEdit(local, (x) => x.summary = '새 제목');
+      final e = calendarEdit(local, (x) => x.copyWith(title: '새 제목'));
       final m = mergedOf(e, local);
       expect(m.updatedAt, e.updated);
     });
 
     test('링크 정보는 유지된다', () {
       final local = todo();
-      final m = mergedOf(calendarEdit(local, (e) => e.summary = '새 제목'), local);
+      final m = mergedOf(
+        calendarEdit(local, (e) => e.copyWith(title: '새 제목')),
+        local,
+      );
       expect(m.calendarEventId, 'ev-1');
       expect(m.calendarId, 'write@cal');
     });
@@ -203,8 +208,11 @@ void main() {
   group('매핑 불가', () {
     test('시작 시각이 없는 이벤트는 병합하지 않는다', () {
       final local = todo();
-      final e = gcal.Event(id: 'ev-1', summary: 'x')
-        ..updated = local.updatedAt.add(const Duration(minutes: 10));
+      final e = CalEvent(
+        id: 'ev-1',
+        title: 'x',
+        updated: local.updatedAt.add(const Duration(minutes: 10)),
+      );
       expect(
         mergeEventIntoTodo(event: e, local: local).kind,
         MergeKind.unmappable,
@@ -213,15 +221,34 @@ void main() {
 
     test('서버 수정 시각이 없으면 비교할 수 없어 무시한다', () {
       final local = todo();
-      final e = pushedEvent(local)
-        ..extendedProperties = gcal.EventExtendedProperties(
-          private: {'haruTodoId': 'todo-1', 'haruRev': '옛-rev'},
-        )
-        ..updated = null;
+      // 내용까지 같으면 시각을 볼 것도 없이 echo 라, 내용을 어긋나게 해서
+      // "시각 비교 불가" 경로만 남긴다.
+      final base = pushedEvent(
+        local,
+      ).copyWith(title: '캘린더 쪽 다른 제목', appProperties: _staleSignature);
+      final e = CalEvent(
+        id: base.id,
+        title: base.title,
+        description: base.description,
+        start: base.start,
+        end: base.end,
+        appProperties: base.appProperties,
+      );
+      expect(e.updated, isNull);
       expect(
         mergeEventIntoTodo(event: e, local: local).kind,
         MergeKind.localWins,
       );
+    });
+
+    test('내용이 완전히 같으면 서명이 달라도 echo — 서명 없는 서비스의 루프 차단', () {
+      final local = todo();
+      final e = pushedEvent(local).copyWith(
+        // 그래프의 증분 응답처럼 서명이 통째로 비어 있는 상황.
+        appProperties: const {},
+        updated: local.updatedAt.add(const Duration(hours: 1)),
+      );
+      expect(mergeEventIntoTodo(event: e, local: local).kind, MergeKind.echo);
     });
   });
 }

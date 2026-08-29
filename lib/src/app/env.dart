@@ -33,6 +33,19 @@ class Env {
     'GOOGLE_OAUTH_SERVER_CLIENT_ID',
   );
 
+  /// Azure 앱 등록의 "애플리케이션(클라이언트) ID" — Microsoft 365(Teams) 캘린더 연동.
+  /// 비어 있으면 Microsoft 연동 항목 자체가 설정 화면에서 숨겨진다.
+  static const String microsoftOAuthClientId = String.fromEnvironment(
+    'MS_OAUTH_CLIENT_ID',
+  );
+
+  /// Microsoft 로그인 테넌트. 회사 계정(직장/학교) 전용이므로 기본은
+  /// `organizations` 다. 조직 정책이 특정 테넌트만 허용하면 그 GUID 를 넣는다.
+  static const String microsoftOAuthTenant = String.fromEnvironment(
+    'MS_OAUTH_TENANT',
+    defaultValue: 'organizations',
+  );
+
   // --- configured flags ---------------------------------------------------
 
   /// Supabase 두 키 (URL + anon key) 가 모두 채워졌을 때만 true.
@@ -46,6 +59,11 @@ class Env {
       googleOAuthClientIdDesktop.isNotEmpty ||
       googleOAuthClientIdAndroid.isNotEmpty;
 
+  /// Microsoft 365 캘린더 연동이 설정됐는가. 클라이언트 ID 하나면 충분하다 —
+  /// PKCE 플로우라 client secret 이 없다.
+  static bool get isMicrosoftCalendarConfigured =>
+      microsoftOAuthClientId.isNotEmpty;
+
   // --- diagnostics --------------------------------------------------------
 
   /// 채워지지 않은 모든 환경변수 키의 목록. 빈 리스트면 모든 의존이 설정됨.
@@ -53,6 +71,9 @@ class Env {
   /// Supabase 두 키는 둘 다 필요 (개별 누락 모두 보고).
   /// Google OAuth 는 desktop / Android 둘 중 하나라도 있으면 OK 로 보지만,
   /// 둘 다 비어 있으면 둘 다 누락으로 보고.
+  ///
+  /// Microsoft 키는 **누락으로 보고하지 않는다** — 선택 연동이라 비어 있는 것이
+  /// 정상 상태이고, 없으면 설정 화면에서 항목이 조용히 숨겨질 뿐이다.
   static List<String> get missingKeys {
     final missing = <String>[];
     if (supabaseUrl.isEmpty) missing.add('SUPABASE_URL');

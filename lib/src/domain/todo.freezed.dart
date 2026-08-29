@@ -19,14 +19,19 @@ mixin _$Todo {
 // 완료(doneAt set) 시엔 null 로 비워진다. (note 는 항상 null.)
  DateTime? get startedAt; DateTime get createdAt; DateTime get updatedAt; String? get calendarEventId;// [calendarId] — calendarEventId 가 속한 Google Calendar id. null = 미등록
 // 또는 레거시(과거엔 'primary' 하드코딩이었으므로 null 이면 primary 로 간주).
- String? get calendarId;// [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 에서
-// 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
-// origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
-// 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
-// ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
-// 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
-// todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
- String get calendarOrigin; String? get parentId; TodoType get type; int get sortOrder;// v1.2 — 상세 메모 (long text). nullable + 누락 시 null 로 안전 fallback.
+ String? get calendarId;// [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 유입)
+// | 'msgraph'(Microsoft 365 유입). **삭제 규칙의 유일한 근거**: 캘린더 쪽 이벤트가
+// 삭제됐을 때 origin='app' 이면 할 일은 남기고 연결만 해제, 그 외(캘린더 유입)면
+// 할 일도 함께 삭제한다 ([isFromCalendar]). 반드시 Supabase 로 전파되어
+// macOS/Android 양쪽이 같은 판단을 한다.
+// ⚠️ RISK(breaking): 이 세 필드는 Supabase 의 `calendar_id` / `calendar_origin` /
+// `calendar_provider` 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이
+// 배포하면 PGRST204 로 todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 필요).
+ String get calendarOrigin;// [calendarProvider] — 이 할 일이 연결된 캘린더 서비스 ('google' | 'microsoft').
+// **null 은 구글**이다 — 이 필드가 생기기 전 데이터(전부 구글 연동)와의 하위호환이
+// 여기서 성립하므로 기본값을 넣지 않고 nullable 로 둔다. 큐가 어느 게이트웨이로
+// 작업을 보낼지, 수신한 이벤트를 어느 할 일과 짝지을지가 이 값으로 갈린다.
+ String? get calendarProvider; String? get parentId; TodoType get type; int get sortOrder;// v1.2 — 상세 메모 (long text). nullable + 누락 시 null 로 안전 fallback.
  String? get description;// ── 날짜·기간 모델 (fast-tasks 4/5/1) — dueAt 은 앵커로 그대로 유지 ──────────
 // [endAt] — 기간 모드의 종료 시각. 단일 모드면 null.
  DateTime? get endAt;// [isAllDay] — true 면 시간 미표시 (화면 어디에도 00:00 을 찍지 않음).
@@ -51,16 +56,16 @@ $TodoCopyWith<Todo> get copyWith => _$TodoCopyWithImpl<Todo>(this as Todo, _$ide
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Todo&&(identical(other.id, id) || other.id == id)&&(identical(other.title, title) || other.title == title)&&(identical(other.category, category) || other.category == category)&&(identical(other.dueAt, dueAt) || other.dueAt == dueAt)&&(identical(other.doneAt, doneAt) || other.doneAt == doneAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.calendarEventId, calendarEventId) || other.calendarEventId == calendarEventId)&&(identical(other.calendarId, calendarId) || other.calendarId == calendarId)&&(identical(other.calendarOrigin, calendarOrigin) || other.calendarOrigin == calendarOrigin)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.type, type) || other.type == type)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.description, description) || other.description == description)&&(identical(other.endAt, endAt) || other.endAt == endAt)&&(identical(other.isAllDay, isAllDay) || other.isAllDay == isAllDay)&&(identical(other.timeAnchor, timeAnchor) || other.timeAnchor == timeAnchor)&&(identical(other.seriesId, seriesId) || other.seriesId == seriesId)&&(identical(other.recurrenceRule, recurrenceRule) || other.recurrenceRule == recurrenceRule)&&(identical(other.recurrenceEndAt, recurrenceEndAt) || other.recurrenceEndAt == recurrenceEndAt)&&(identical(other.isSeriesMaster, isSeriesMaster) || other.isSeriesMaster == isSeriesMaster));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Todo&&(identical(other.id, id) || other.id == id)&&(identical(other.title, title) || other.title == title)&&(identical(other.category, category) || other.category == category)&&(identical(other.dueAt, dueAt) || other.dueAt == dueAt)&&(identical(other.doneAt, doneAt) || other.doneAt == doneAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.calendarEventId, calendarEventId) || other.calendarEventId == calendarEventId)&&(identical(other.calendarId, calendarId) || other.calendarId == calendarId)&&(identical(other.calendarOrigin, calendarOrigin) || other.calendarOrigin == calendarOrigin)&&(identical(other.calendarProvider, calendarProvider) || other.calendarProvider == calendarProvider)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.type, type) || other.type == type)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.description, description) || other.description == description)&&(identical(other.endAt, endAt) || other.endAt == endAt)&&(identical(other.isAllDay, isAllDay) || other.isAllDay == isAllDay)&&(identical(other.timeAnchor, timeAnchor) || other.timeAnchor == timeAnchor)&&(identical(other.seriesId, seriesId) || other.seriesId == seriesId)&&(identical(other.recurrenceRule, recurrenceRule) || other.recurrenceRule == recurrenceRule)&&(identical(other.recurrenceEndAt, recurrenceEndAt) || other.recurrenceEndAt == recurrenceEndAt)&&(identical(other.isSeriesMaster, isSeriesMaster) || other.isSeriesMaster == isSeriesMaster));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,id,title,category,dueAt,doneAt,startedAt,createdAt,updatedAt,calendarEventId,calendarId,calendarOrigin,parentId,type,sortOrder,description,endAt,isAllDay,timeAnchor,seriesId,recurrenceRule,recurrenceEndAt,isSeriesMaster]);
+int get hashCode => Object.hashAll([runtimeType,id,title,category,dueAt,doneAt,startedAt,createdAt,updatedAt,calendarEventId,calendarId,calendarOrigin,calendarProvider,parentId,type,sortOrder,description,endAt,isAllDay,timeAnchor,seriesId,recurrenceRule,recurrenceEndAt,isSeriesMaster]);
 
 @override
 String toString() {
-  return 'Todo(id: $id, title: $title, category: $category, dueAt: $dueAt, doneAt: $doneAt, startedAt: $startedAt, createdAt: $createdAt, updatedAt: $updatedAt, calendarEventId: $calendarEventId, calendarId: $calendarId, calendarOrigin: $calendarOrigin, parentId: $parentId, type: $type, sortOrder: $sortOrder, description: $description, endAt: $endAt, isAllDay: $isAllDay, timeAnchor: $timeAnchor, seriesId: $seriesId, recurrenceRule: $recurrenceRule, recurrenceEndAt: $recurrenceEndAt, isSeriesMaster: $isSeriesMaster)';
+  return 'Todo(id: $id, title: $title, category: $category, dueAt: $dueAt, doneAt: $doneAt, startedAt: $startedAt, createdAt: $createdAt, updatedAt: $updatedAt, calendarEventId: $calendarEventId, calendarId: $calendarId, calendarOrigin: $calendarOrigin, calendarProvider: $calendarProvider, parentId: $parentId, type: $type, sortOrder: $sortOrder, description: $description, endAt: $endAt, isAllDay: $isAllDay, timeAnchor: $timeAnchor, seriesId: $seriesId, recurrenceRule: $recurrenceRule, recurrenceEndAt: $recurrenceEndAt, isSeriesMaster: $isSeriesMaster)';
 }
 
 
@@ -71,7 +76,7 @@ abstract mixin class $TodoCopyWith<$Res>  {
   factory $TodoCopyWith(Todo value, $Res Function(Todo) _then) = _$TodoCopyWithImpl;
 @useResult
 $Res call({
- String id, String title,@JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) Category category, DateTime? dueAt, DateTime? doneAt, DateTime? startedAt, DateTime createdAt, DateTime updatedAt, String? calendarEventId, String? calendarId, String calendarOrigin, String? parentId, TodoType type, int sortOrder, String? description, DateTime? endAt, bool isAllDay, String timeAnchor, String? seriesId, String? recurrenceRule, DateTime? recurrenceEndAt, bool isSeriesMaster
+ String id, String title,@JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) Category category, DateTime? dueAt, DateTime? doneAt, DateTime? startedAt, DateTime createdAt, DateTime updatedAt, String? calendarEventId, String? calendarId, String calendarOrigin, String? calendarProvider, String? parentId, TodoType type, int sortOrder, String? description, DateTime? endAt, bool isAllDay, String timeAnchor, String? seriesId, String? recurrenceRule, DateTime? recurrenceEndAt, bool isSeriesMaster
 });
 
 
@@ -88,7 +93,7 @@ class _$TodoCopyWithImpl<$Res>
 
 /// Create a copy of Todo
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? title = null,Object? category = null,Object? dueAt = freezed,Object? doneAt = freezed,Object? startedAt = freezed,Object? createdAt = null,Object? updatedAt = null,Object? calendarEventId = freezed,Object? calendarId = freezed,Object? calendarOrigin = null,Object? parentId = freezed,Object? type = null,Object? sortOrder = null,Object? description = freezed,Object? endAt = freezed,Object? isAllDay = null,Object? timeAnchor = null,Object? seriesId = freezed,Object? recurrenceRule = freezed,Object? recurrenceEndAt = freezed,Object? isSeriesMaster = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? title = null,Object? category = null,Object? dueAt = freezed,Object? doneAt = freezed,Object? startedAt = freezed,Object? createdAt = null,Object? updatedAt = null,Object? calendarEventId = freezed,Object? calendarId = freezed,Object? calendarOrigin = null,Object? calendarProvider = freezed,Object? parentId = freezed,Object? type = null,Object? sortOrder = null,Object? description = freezed,Object? endAt = freezed,Object? isAllDay = null,Object? timeAnchor = null,Object? seriesId = freezed,Object? recurrenceRule = freezed,Object? recurrenceEndAt = freezed,Object? isSeriesMaster = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
@@ -101,7 +106,8 @@ as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore
 as DateTime,calendarEventId: freezed == calendarEventId ? _self.calendarEventId : calendarEventId // ignore: cast_nullable_to_non_nullable
 as String?,calendarId: freezed == calendarId ? _self.calendarId : calendarId // ignore: cast_nullable_to_non_nullable
 as String?,calendarOrigin: null == calendarOrigin ? _self.calendarOrigin : calendarOrigin // ignore: cast_nullable_to_non_nullable
-as String,parentId: freezed == parentId ? _self.parentId : parentId // ignore: cast_nullable_to_non_nullable
+as String,calendarProvider: freezed == calendarProvider ? _self.calendarProvider : calendarProvider // ignore: cast_nullable_to_non_nullable
+as String?,parentId: freezed == parentId ? _self.parentId : parentId // ignore: cast_nullable_to_non_nullable
 as String?,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as TodoType,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,description: freezed == description ? _self.description : description // ignore: cast_nullable_to_non_nullable
@@ -206,10 +212,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? calendarProvider,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Todo() when $default != null:
-return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
+return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.calendarProvider,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
   return orElse();
 
 }
@@ -227,10 +233,10 @@ return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_th
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? calendarProvider,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)  $default,) {final _that = this;
 switch (_that) {
 case _Todo():
-return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
+return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.calendarProvider,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -247,10 +253,10 @@ return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_th
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson)  Category category,  DateTime? dueAt,  DateTime? doneAt,  DateTime? startedAt,  DateTime createdAt,  DateTime updatedAt,  String? calendarEventId,  String? calendarId,  String calendarOrigin,  String? calendarProvider,  String? parentId,  TodoType type,  int sortOrder,  String? description,  DateTime? endAt,  bool isAllDay,  String timeAnchor,  String? seriesId,  String? recurrenceRule,  DateTime? recurrenceEndAt,  bool isSeriesMaster)?  $default,) {final _that = this;
 switch (_that) {
 case _Todo() when $default != null:
-return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
+return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_that.startedAt,_that.createdAt,_that.updatedAt,_that.calendarEventId,_that.calendarId,_that.calendarOrigin,_that.calendarProvider,_that.parentId,_that.type,_that.sortOrder,_that.description,_that.endAt,_that.isAllDay,_that.timeAnchor,_that.seriesId,_that.recurrenceRule,_that.recurrenceEndAt,_that.isSeriesMaster);case _:
   return null;
 
 }
@@ -262,7 +268,7 @@ return $default(_that.id,_that.title,_that.category,_that.dueAt,_that.doneAt,_th
 @JsonSerializable()
 
 class _Todo extends Todo {
-  const _Todo({required this.id, required this.title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) required this.category, this.dueAt, this.doneAt, this.startedAt, required this.createdAt, required this.updatedAt, this.calendarEventId, this.calendarId, this.calendarOrigin = 'app', this.parentId, this.type = TodoType.task, this.sortOrder = 0, this.description, this.endAt, this.isAllDay = false, this.timeAnchor = 'start', this.seriesId, this.recurrenceRule, this.recurrenceEndAt, this.isSeriesMaster = false}): super._();
+  const _Todo({required this.id, required this.title, @JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) required this.category, this.dueAt, this.doneAt, this.startedAt, required this.createdAt, required this.updatedAt, this.calendarEventId, this.calendarId, this.calendarOrigin = 'app', this.calendarProvider, this.parentId, this.type = TodoType.task, this.sortOrder = 0, this.description, this.endAt, this.isAllDay = false, this.timeAnchor = 'start', this.seriesId, this.recurrenceRule, this.recurrenceEndAt, this.isSeriesMaster = false}): super._();
   factory _Todo.fromJson(Map<String, dynamic> json) => _$TodoFromJson(json);
 
 @override final  String id;
@@ -279,14 +285,20 @@ class _Todo extends Todo {
 // [calendarId] — calendarEventId 가 속한 Google Calendar id. null = 미등록
 // 또는 레거시(과거엔 'primary' 하드코딩이었으므로 null 이면 primary 로 간주).
 @override final  String? calendarId;
-// [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 에서
-// 유입된 할 일). **삭제 규칙의 유일한 근거**: 구글 캘린더 쪽 이벤트가 삭제됐을 때
-// origin='app' 이면 할 일은 남기고 캘린더 연결만 해제, origin='gcal' 이면 할 일도
-// 함께 삭제한다. 반드시 Supabase 로 전파되어 macOS/Android 양쪽이 같은 판단을 한다.
-// ⚠️ RISK(breaking): 이 두 필드는 Supabase 의 `calendar_id` / `calendar_origin`
-// 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이 배포하면 PGRST204 로
-// todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 까지 필요).
+// [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 유입)
+// | 'msgraph'(Microsoft 365 유입). **삭제 규칙의 유일한 근거**: 캘린더 쪽 이벤트가
+// 삭제됐을 때 origin='app' 이면 할 일은 남기고 연결만 해제, 그 외(캘린더 유입)면
+// 할 일도 함께 삭제한다 ([isFromCalendar]). 반드시 Supabase 로 전파되어
+// macOS/Android 양쪽이 같은 판단을 한다.
+// ⚠️ RISK(breaking): 이 세 필드는 Supabase 의 `calendar_id` / `calendar_origin` /
+// `calendar_provider` 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이
+// 배포하면 PGRST204 로 todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 필요).
 @override@JsonKey() final  String calendarOrigin;
+// [calendarProvider] — 이 할 일이 연결된 캘린더 서비스 ('google' | 'microsoft').
+// **null 은 구글**이다 — 이 필드가 생기기 전 데이터(전부 구글 연동)와의 하위호환이
+// 여기서 성립하므로 기본값을 넣지 않고 nullable 로 둔다. 큐가 어느 게이트웨이로
+// 작업을 보낼지, 수신한 이벤트를 어느 할 일과 짝지을지가 이 값으로 갈린다.
+@override final  String? calendarProvider;
 @override final  String? parentId;
 @override@JsonKey() final  TodoType type;
 @override@JsonKey() final  int sortOrder;
@@ -324,16 +336,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Todo&&(identical(other.id, id) || other.id == id)&&(identical(other.title, title) || other.title == title)&&(identical(other.category, category) || other.category == category)&&(identical(other.dueAt, dueAt) || other.dueAt == dueAt)&&(identical(other.doneAt, doneAt) || other.doneAt == doneAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.calendarEventId, calendarEventId) || other.calendarEventId == calendarEventId)&&(identical(other.calendarId, calendarId) || other.calendarId == calendarId)&&(identical(other.calendarOrigin, calendarOrigin) || other.calendarOrigin == calendarOrigin)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.type, type) || other.type == type)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.description, description) || other.description == description)&&(identical(other.endAt, endAt) || other.endAt == endAt)&&(identical(other.isAllDay, isAllDay) || other.isAllDay == isAllDay)&&(identical(other.timeAnchor, timeAnchor) || other.timeAnchor == timeAnchor)&&(identical(other.seriesId, seriesId) || other.seriesId == seriesId)&&(identical(other.recurrenceRule, recurrenceRule) || other.recurrenceRule == recurrenceRule)&&(identical(other.recurrenceEndAt, recurrenceEndAt) || other.recurrenceEndAt == recurrenceEndAt)&&(identical(other.isSeriesMaster, isSeriesMaster) || other.isSeriesMaster == isSeriesMaster));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Todo&&(identical(other.id, id) || other.id == id)&&(identical(other.title, title) || other.title == title)&&(identical(other.category, category) || other.category == category)&&(identical(other.dueAt, dueAt) || other.dueAt == dueAt)&&(identical(other.doneAt, doneAt) || other.doneAt == doneAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.calendarEventId, calendarEventId) || other.calendarEventId == calendarEventId)&&(identical(other.calendarId, calendarId) || other.calendarId == calendarId)&&(identical(other.calendarOrigin, calendarOrigin) || other.calendarOrigin == calendarOrigin)&&(identical(other.calendarProvider, calendarProvider) || other.calendarProvider == calendarProvider)&&(identical(other.parentId, parentId) || other.parentId == parentId)&&(identical(other.type, type) || other.type == type)&&(identical(other.sortOrder, sortOrder) || other.sortOrder == sortOrder)&&(identical(other.description, description) || other.description == description)&&(identical(other.endAt, endAt) || other.endAt == endAt)&&(identical(other.isAllDay, isAllDay) || other.isAllDay == isAllDay)&&(identical(other.timeAnchor, timeAnchor) || other.timeAnchor == timeAnchor)&&(identical(other.seriesId, seriesId) || other.seriesId == seriesId)&&(identical(other.recurrenceRule, recurrenceRule) || other.recurrenceRule == recurrenceRule)&&(identical(other.recurrenceEndAt, recurrenceEndAt) || other.recurrenceEndAt == recurrenceEndAt)&&(identical(other.isSeriesMaster, isSeriesMaster) || other.isSeriesMaster == isSeriesMaster));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hashAll([runtimeType,id,title,category,dueAt,doneAt,startedAt,createdAt,updatedAt,calendarEventId,calendarId,calendarOrigin,parentId,type,sortOrder,description,endAt,isAllDay,timeAnchor,seriesId,recurrenceRule,recurrenceEndAt,isSeriesMaster]);
+int get hashCode => Object.hashAll([runtimeType,id,title,category,dueAt,doneAt,startedAt,createdAt,updatedAt,calendarEventId,calendarId,calendarOrigin,calendarProvider,parentId,type,sortOrder,description,endAt,isAllDay,timeAnchor,seriesId,recurrenceRule,recurrenceEndAt,isSeriesMaster]);
 
 @override
 String toString() {
-  return 'Todo(id: $id, title: $title, category: $category, dueAt: $dueAt, doneAt: $doneAt, startedAt: $startedAt, createdAt: $createdAt, updatedAt: $updatedAt, calendarEventId: $calendarEventId, calendarId: $calendarId, calendarOrigin: $calendarOrigin, parentId: $parentId, type: $type, sortOrder: $sortOrder, description: $description, endAt: $endAt, isAllDay: $isAllDay, timeAnchor: $timeAnchor, seriesId: $seriesId, recurrenceRule: $recurrenceRule, recurrenceEndAt: $recurrenceEndAt, isSeriesMaster: $isSeriesMaster)';
+  return 'Todo(id: $id, title: $title, category: $category, dueAt: $dueAt, doneAt: $doneAt, startedAt: $startedAt, createdAt: $createdAt, updatedAt: $updatedAt, calendarEventId: $calendarEventId, calendarId: $calendarId, calendarOrigin: $calendarOrigin, calendarProvider: $calendarProvider, parentId: $parentId, type: $type, sortOrder: $sortOrder, description: $description, endAt: $endAt, isAllDay: $isAllDay, timeAnchor: $timeAnchor, seriesId: $seriesId, recurrenceRule: $recurrenceRule, recurrenceEndAt: $recurrenceEndAt, isSeriesMaster: $isSeriesMaster)';
 }
 
 
@@ -344,7 +356,7 @@ abstract mixin class _$TodoCopyWith<$Res> implements $TodoCopyWith<$Res> {
   factory _$TodoCopyWith(_Todo value, $Res Function(_Todo) _then) = __$TodoCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String title,@JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) Category category, DateTime? dueAt, DateTime? doneAt, DateTime? startedAt, DateTime createdAt, DateTime updatedAt, String? calendarEventId, String? calendarId, String calendarOrigin, String? parentId, TodoType type, int sortOrder, String? description, DateTime? endAt, bool isAllDay, String timeAnchor, String? seriesId, String? recurrenceRule, DateTime? recurrenceEndAt, bool isSeriesMaster
+ String id, String title,@JsonKey(fromJson: _categoryFromJson, toJson: _categoryToJson) Category category, DateTime? dueAt, DateTime? doneAt, DateTime? startedAt, DateTime createdAt, DateTime updatedAt, String? calendarEventId, String? calendarId, String calendarOrigin, String? calendarProvider, String? parentId, TodoType type, int sortOrder, String? description, DateTime? endAt, bool isAllDay, String timeAnchor, String? seriesId, String? recurrenceRule, DateTime? recurrenceEndAt, bool isSeriesMaster
 });
 
 
@@ -361,7 +373,7 @@ class __$TodoCopyWithImpl<$Res>
 
 /// Create a copy of Todo
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? title = null,Object? category = null,Object? dueAt = freezed,Object? doneAt = freezed,Object? startedAt = freezed,Object? createdAt = null,Object? updatedAt = null,Object? calendarEventId = freezed,Object? calendarId = freezed,Object? calendarOrigin = null,Object? parentId = freezed,Object? type = null,Object? sortOrder = null,Object? description = freezed,Object? endAt = freezed,Object? isAllDay = null,Object? timeAnchor = null,Object? seriesId = freezed,Object? recurrenceRule = freezed,Object? recurrenceEndAt = freezed,Object? isSeriesMaster = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? title = null,Object? category = null,Object? dueAt = freezed,Object? doneAt = freezed,Object? startedAt = freezed,Object? createdAt = null,Object? updatedAt = null,Object? calendarEventId = freezed,Object? calendarId = freezed,Object? calendarOrigin = null,Object? calendarProvider = freezed,Object? parentId = freezed,Object? type = null,Object? sortOrder = null,Object? description = freezed,Object? endAt = freezed,Object? isAllDay = null,Object? timeAnchor = null,Object? seriesId = freezed,Object? recurrenceRule = freezed,Object? recurrenceEndAt = freezed,Object? isSeriesMaster = null,}) {
   return _then(_Todo(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
@@ -374,7 +386,8 @@ as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore
 as DateTime,calendarEventId: freezed == calendarEventId ? _self.calendarEventId : calendarEventId // ignore: cast_nullable_to_non_nullable
 as String?,calendarId: freezed == calendarId ? _self.calendarId : calendarId // ignore: cast_nullable_to_non_nullable
 as String?,calendarOrigin: null == calendarOrigin ? _self.calendarOrigin : calendarOrigin // ignore: cast_nullable_to_non_nullable
-as String,parentId: freezed == parentId ? _self.parentId : parentId // ignore: cast_nullable_to_non_nullable
+as String,calendarProvider: freezed == calendarProvider ? _self.calendarProvider : calendarProvider // ignore: cast_nullable_to_non_nullable
+as String?,parentId: freezed == parentId ? _self.parentId : parentId // ignore: cast_nullable_to_non_nullable
 as String?,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as TodoType,sortOrder: null == sortOrder ? _self.sortOrder : sortOrder // ignore: cast_nullable_to_non_nullable
 as int,description: freezed == description ? _self.description : description // ignore: cast_nullable_to_non_nullable

@@ -8,6 +8,7 @@ import '../../data/syncing_todo_repository.dart';
 import '../../data/todo_repository.dart';
 import '../auth/auth_providers.dart';
 import '../category/categories_controller.dart';
+import 'calendar_event.dart';
 import 'calendar_settings.dart';
 import 'calendar_settings_screen.dart';
 import 'calendar_sync_coordinator.dart';
@@ -35,40 +36,58 @@ final calendarSyncRepositoryProvider = Provider<TodoRepository>((ref) {
   );
 });
 
-/// push/pull 실행부. 게이트웨이가 없으면(키 미설정) null.
-final calendarSyncServiceProvider = Provider<CalendarSyncService?>((ref) {
-  final gateway = ref.watch(calendarGatewayProvider);
-  if (gateway == null) return null;
-  return CalendarSyncService(
-    gateway: gateway,
-    ops: ref.watch(appDatabaseProvider).calendarOpsDao,
-    repo: ref.watch(calendarSyncRepositoryProvider),
-  );
-});
+/// 서비스별 push/pull 실행부. 게이트웨이가 없으면(키 미설정) null.
+final calendarSyncServiceFor =
+    Provider.family<CalendarSyncService?, CalendarProvider>((ref, provider) {
+      final gateway = ref.watch(gatewayForProvider(provider));
+      if (gateway == null) return null;
+      return CalendarSyncService(
+        gateway: gateway,
+        ops: ref.watch(appDatabaseProvider).calendarOpsDao,
+        repo: ref.watch(calendarSyncRepositoryProvider),
+      );
+    });
 
-/// push→pull 순서와 설정 반영을 맡는 오케스트레이터.
-final calendarSyncCoordinatorProvider = Provider<CalendarSyncCoordinator?>((
-  ref,
-) {
-  final service = ref.watch(calendarSyncServiceProvider);
-  if (service == null) return null;
-  return CalendarSyncCoordinator(
-    service: service,
-    preference: ref.watch(calendarSettingsPreferenceProvider),
-    readSettings: () => ref.read(calendarSettingsProvider),
-    writeSettings: (s) =>
-        ref.read(calendarSettingsProvider.notifier).update((_) => s),
-    activeCategories: () =>
-        ref.read(activeCategoriesProvider).asData?.value ?? const [],
-  );
-});
+/// 구글 실행부 — 기존 호출부/테스트 호환용 별칭.
+final calendarSyncServiceProvider = Provider<CalendarSyncService?>(
+  (ref) => ref.watch(calendarSyncServiceFor(CalendarProvider.google)),
+);
+
+/// 서비스별 push→pull 오케스트레이터.
+final calendarSyncCoordinatorFor =
+    Provider.family<CalendarSyncCoordinator?, CalendarProvider>((
+      ref,
+      provider,
+    ) {
+      final service = ref.watch(calendarSyncServiceFor(provider));
+      if (service == null) return null;
+      return CalendarSyncCoordinator(
+        service: service,
+        preference: ref.watch(calendarSettingsPreferenceProvider),
+        readSettings: () => ref.read(calendarSettingsProvider),
+        writeSettings: (s) =>
+            ref.read(calendarSettingsProvider.notifier).update((_) => s),
+        activeCategories: () =>
+            ref.read(activeCategoriesProvider).asData?.value ?? const [],
+      );
+    });
+
+/// 연결 가능한 모든 서비스의 코디네이터. 키가 없는 서비스는 애초에 빠진다.
+final calendarSyncCoordinatorsProvider =
+    Provider<List<CalendarSyncCoordinator>>(
+      (ref) => [
+        for (final p in CalendarProvider.values)
+          ?ref.watch(calendarSyncCoordinatorFor(p)),
+      ],
+    );
 
 /// 자동 동기화 스케줄러. `AppShell` 이 watch 해서 살아있게 한다.
+/// 코디네이터가 하나도 없으면(키 미설정) null — 스케줄러를 띄울 이유가 없다.
 final calendarSyncSchedulerProvider = Provider<CalendarSyncScheduler?>((ref) {
-  final coordinator = ref.watch(calendarSyncCoordinatorProvider);
-  if (coordinator == null) return null;
+  final coordinators = ref.watch(calendarSyncCoordinatorsProvider);
+  if (coordinators.isEmpty) return null;
   final scheduler = CalendarSyncScheduler(
-    coordinator: coordinator,
+    coordinators: coordinators,
     autoSyncEnabled: () => ref.read(calendarSettingsProvider).autoSync,
   );
   ref.onDispose(scheduler.dispose);
@@ -88,8 +107,8 @@ final calendarIntentProvider = Provider<void Function(bool)>((ref) {
 
 /// 설정 화면의 "지금 동기화" 버튼이 쓰는 실행부.
 ///
-/// C2 가 남겨둔 자리를 채운다 — 화면 코드는 그대로 두고 이 override 만으로
-/// 버튼이 살아난다.
+/// 화면 코드는 그대로 두고 이 override 만으로 버튼이 살아난다.
+/// 연결된 **모든** 서비스를 한 번에 돌린다.
 final calendarSyncNowOverride = calendarSyncNowActionProvider.overrideWith((
   ref,
 ) {

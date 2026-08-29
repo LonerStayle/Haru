@@ -5,9 +5,11 @@ import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../calendar/calendar_event.dart';
 import '../calendar/calendar_settings.dart';
 import '../calendar/calendar_settings_screen.dart';
 import '../calendar/google_auth_service.dart';
+import '../calendar/microsoft_auth_service.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import 'archive_screen.dart';
@@ -140,6 +142,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
               _archiveTile(theme, scheme),
               const Divider(height: AppTokens.hairline),
               _calendarTile(theme, scheme),
+              _microsoftCalendarTile(theme, scheme),
               const Divider(height: AppTokens.hairline),
               _infoTile(theme, scheme),
               const SizedBox(height: AppTokens.space8),
@@ -214,19 +217,45 @@ class _SettingsSheetState extends State<SettingsSheet> {
   ///
   /// OAuth 키가 빌드에 없으면 (`googleCalendarAvailableProvider == false`) 항목
   /// 자체를 숨긴다. 눌러봐야 아무것도 할 수 없는 항목을 보여줄 이유가 없다.
-  Widget _calendarTile(ThemeData theme, ColorScheme scheme) {
+  Widget _calendarTile(ThemeData theme, ColorScheme scheme) => _calendarEntry(
+    theme,
+    scheme,
+    provider: CalendarProvider.google,
+    entryKey: const ValueKey('calendar-entry'),
+    icon: Icons.event_outlined,
+  );
+
+  /// Microsoft 365 (Teams) 연동 진입. Azure 클라이언트 ID 가 없으면 숨겨진다.
+  Widget _microsoftCalendarTile(ThemeData theme, ColorScheme scheme) =>
+      _calendarEntry(
+        theme,
+        scheme,
+        provider: CalendarProvider.microsoft,
+        entryKey: const ValueKey('microsoft-calendar-entry'),
+        icon: Icons.groups_outlined,
+      );
+
+  /// 두 서비스가 같은 모양의 항목을 쓴다 — 하나만 고치고 다른 쪽을 빠뜨리는 일을 막는다.
+  Widget _calendarEntry(
+    ThemeData theme,
+    ColorScheme scheme, {
+    required CalendarProvider provider,
+    required Key entryKey,
+    required IconData icon,
+  }) {
     return Consumer(
       builder: (context, ref, _) {
-        if (!ref.watch(googleCalendarAvailableProvider)) {
-          return const SizedBox.shrink();
-        }
+        final available = provider == CalendarProvider.microsoft
+            ? ref.watch(microsoftCalendarAvailableProvider)
+            : ref.watch(googleCalendarAvailableProvider);
+        if (!available) return const SizedBox.shrink();
         final connected = ref.watch(
-          calendarSettingsProvider.select((s) => s.connected),
+          calendarSettingsProvider.select((s) => s.viewFor(provider).connected),
         );
 
         return InkWell(
-          key: const ValueKey('calendar-entry'),
-          onTap: () => CalendarSettingsScreen.show(context),
+          key: entryKey,
+          onTap: () => CalendarSettingsScreen.show(context, provider: provider),
           child: Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppTokens.space16,
@@ -242,7 +271,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
                     borderRadius: BorderRadius.circular(AppTokens.radiusM),
                   ),
                   child: Icon(
-                    Icons.event_outlined,
+                    icon,
                     size: 22,
                     color: scheme.onSurface.withValues(alpha: 0.7),
                   ),
@@ -253,7 +282,7 @@ class _SettingsSheetState extends State<SettingsSheet> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Google Calendar',
+                        provider.label,
                         style: theme.textTheme.bodyLarge?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),

@@ -1,39 +1,48 @@
-import 'package:googleapis/calendar/v3.dart' as gcal;
+import 'calendar_event.dart';
 
-/// Google Calendar API 호출의 얇은 이음매.
+/// 캘린더 서비스 호출의 얇은 이음매. **provider 중립**이다.
 ///
 /// 기존 [CalendarService] 는 메서드 안에서 직접 `gcal.CalendarApi(client)` 를 만들어
 /// **실제 구글 인증 없이는 호출 경로를 한 줄도 테스트할 수 없었다.** 이 인터페이스를
 /// 끼워서 동기화 로직(큐 flush · 증분 수신 · echo 차단 · LWW 병합 · 삭제 규칙)을
 /// 전부 메모리 fake 위에서 검증한다.
 ///
+/// 주고받는 타입은 [CalEvent] 하나뿐이다 — 구글의 `gcal.Event` 나 Microsoft Graph 의
+/// JSON 은 구현체 안에서만 존재한다. 그래서 서비스를 하나 더 붙여도 병합·필터·큐
+/// 로직을 복제할 필요가 없다.
+///
 /// 구현:
-/// - `GoogleCalendarGateway` — 실제 API (`google_calendar_gateway.dart`)
+/// - `GoogleCalendarGateway` — Google Calendar API (`google_calendar_gateway.dart`)
+/// - `MicrosoftGraphGateway` — Microsoft Graph (`microsoft_graph_gateway.dart`)
 /// - `FakeCalendarGateway` — 테스트용 메모리 구현 (`test/.../fake_calendar_gateway.dart`)
 abstract class CalendarGateway {
+  /// 이 게이트웨이가 말을 거는 서비스. 큐 라우팅·링크 기록의 근거다.
+  CalendarProvider get provider;
+
   /// 사용자가 접근 가능한 캘린더 목록. 설정 화면이 쓰기 1개 + 읽기 N개를 고르는 데 쓴다.
   Future<List<CalendarInfo>> listCalendars();
 
   /// 이벤트 생성. 생성된 eventId — 서버가 id 를 주지 않으면 null.
-  Future<String?> insertEvent(String calendarId, gcal.Event event);
+  Future<String?> insertEvent(String calendarId, CalEvent event);
 
   /// 이벤트 갱신. 대상이 이미 없으면(404/410) **멱등 성공** — 아래 "삭제 계열 멱등" 참조.
-  Future<void> updateEvent(String calendarId, String eventId, gcal.Event event);
+  Future<void> updateEvent(String calendarId, String eventId, CalEvent event);
 
   /// 이벤트 삭제. 이미 없으면(404/410) **멱등 성공** — 목표 상태가 이미 달성됐다.
   Future<void> deleteEvent(String calendarId, String eventId);
 
   /// 변경분 수신.
   ///
-  /// - [syncToken] 이 있으면 그것만 전달한다 (증분). Calendar API 는 syncToken 과
-  ///   시간 범위 파라미터의 동시 사용을 거부하므로 [timeMin] 은 무시된다.
+  /// - [syncToken] 이 있으면 그것만 전달한다 (증분). 구글의 `syncToken` 과 그래프의
+  ///   `deltaLink` 가 같은 자리를 쓴다 — 호출자에게는 둘 다 불투명한 문자열이다.
+  ///   Calendar API 는 syncToken 과 시간 범위 파라미터의 동시 사용을 거부하므로
+  ///   [timeMin] 은 무시된다.
   /// - 없으면 [timeMin] 기준 전체 조회.
-  /// - 반복 일정은 **마스터 1건**으로 받는다 (`singleEvents: false`). 개별 회차로
-  ///   펼치면 앱에 수백 건이 쏟아진다.
-  /// - 삭제 감지를 위해 취소된 이벤트(`status == 'cancelled'`)도 결과에 포함된다.
+  /// - 반복 일정은 **마스터 1건**으로 받는다. 개별 회차로 펼치면 앱에 수백 건이 쏟아진다.
+  /// - 삭제 감지를 위해 취소된 이벤트([CalEvent.cancelled])도 결과에 포함된다.
   /// - 페이지네이션은 게이트웨이가 내부에서 소진한다 — 호출자는 완결된 결과만 본다.
   ///
-  /// syncToken 이 만료되면 [CalendarErrorKind.syncTokenExpired] 로 throw 한다.
+  /// 토큰이 만료되면 [CalendarErrorKind.syncTokenExpired] 로 throw 한다.
   Future<EventPage> listChanges(
     String calendarId, {
     String? syncToken,
@@ -59,7 +68,8 @@ class CalendarInfo {
   /// 계정의 기본 캘린더인지. 쓰기 캘린더의 기본 선택값이 된다.
   final bool primary;
 
-  /// Google 의 접근 권한 — `owner` | `writer` | `reader` | `freeBusyReader` | `none`.
+  /// 접근 권한 — `owner` | `writer` | `reader` | `freeBusyReader` | `none`
+  /// (구글 표기를 그대로 쓰고, 그래프의 `canEdit` 는 owner/reader 로 번역한다).
   /// 공휴일·구독 캘린더는 `reader` 라, 쓰기를 시도하면 403 이 난다.
   final String accessRole;
 
@@ -86,8 +96,8 @@ class CalendarInfo {
 class EventPage {
   const EventPage({required this.events, this.nextSyncToken});
 
-  /// 이번에 바뀐 이벤트들. 삭제는 `status == 'cancelled'` 인 tombstone 으로 온다.
-  final List<gcal.Event> events;
+  /// 이번에 바뀐 이벤트들. 삭제는 [CalEvent.cancelled] 인 tombstone 으로 온다.
+  final List<CalEvent> events;
 
   /// 다음 호출에 넘길 토큰. null 이면 다음 회차도 전체 조회로 간다.
   final String? nextSyncToken;
@@ -98,6 +108,7 @@ class EventPage {
 }
 
 /// 게이트웨이 오류 분류. 호출자는 이 값만 보고 "재인증 / 재시도 / 포기 / 재동기화" 를 고른다.
+/// 두 서비스의 오류 코드가 여기로 모인다.
 enum CalendarErrorKind {
   /// 401 · invalid_grant · scope 부족(403 insufficientPermissions).
   /// 재인증 전에는 어떤 재시도도 무의미하다. 큐는 보존하고 설정에 "재연결 필요" 를 띄운다.
@@ -106,7 +117,8 @@ enum CalendarErrorKind {
   /// 403 rateLimitExceeded · 429. 지수 백오프 후 같은 요청을 다시 보내면 된다.
   rateLimited,
 
-  /// [CalendarGateway.listChanges] 의 410 — syncToken 만료.
+  /// [CalendarGateway.listChanges] 의 410 — syncToken / deltaLink 만료
+  /// (그래프는 `resyncRequired` 코드로 온다).
   /// 토큰을 폐기하고 전체 재동기화 1회로 폴백한다.
   ///
   /// **왜 [EventPage] 의 플래그가 아니라 예외인가**: 410 이면 이번 호출은 결과가

@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/local/local_todo_repository.dart';
@@ -7,6 +6,7 @@ import 'package:solo_todo/src/data/todo_repository.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_service.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings.dart';
 import 'package:solo_todo/src/features/calendar/calendar_sync_service.dart';
@@ -47,19 +47,19 @@ void main() {
   Future<PullResult> pull({CalendarSettings? s}) =>
       sync.pull(settings: s ?? settings, categoryFor: (_) => Category.work);
 
-  gcal.Event remote({
+  CalEvent remote({
     String id = 'ev-1',
     String summary = '구글 일정',
     DateTime? start,
     bool organizerSelf = true,
   }) {
     final s = start ?? DateTime.utc(2026, 8, 20, 10);
-    return gcal.Event(
+    return CalEvent(
       id: id,
-      summary: summary,
-      start: gcal.EventDateTime(dateTime: s),
-      end: gcal.EventDateTime(dateTime: s.add(const Duration(hours: 1))),
-      organizer: gcal.EventOrganizer(self: organizerSelf),
+      title: summary,
+      start: CalEventTime.at(s),
+      end: CalEventTime.at(s.add(const Duration(hours: 1))),
+      organizerIsSelf: organizerSelf,
     );
   }
 
@@ -138,7 +138,7 @@ void main() {
       final todo = appTodo();
       await repo.upsert(todo);
       // ignore: invalid_use_of_visible_for_testing_member
-      final e = CalendarService.buildEvent(todo)..id = 'ev-1';
+      final e = CalendarService.buildEvent(todo).copyWith(id: 'ev-1');
       gateway.seedEvent(cal, e);
 
       final r = await pull();

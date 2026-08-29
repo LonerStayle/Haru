@@ -1,11 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/local/local_todo_repository.dart';
 import 'package:solo_todo/src/data/todo_repository.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
 import 'package:solo_todo/src/features/calendar/calendar_sync_service.dart';
 
@@ -135,7 +135,7 @@ void main() {
 
       await sync.flushPending();
 
-      expect(gateway.eventById(cal, 'ev-1')!.summary, '최신 제목');
+      expect(gateway.eventById(cal, 'ev-1')!.title, '최신 제목');
     });
 
     test('삭제는 할 일이 없어도 진행한다 — 이벤트만 남은 상태를 정리', () async {
@@ -256,9 +256,9 @@ void main() {
 }
 
 /// 이미 구글 쪽에 있는 이벤트를 흉내내는 최소 형태.
-gcal.Event _event(String id) => gcal.Event(
+CalEvent _event(String id) => CalEvent(
   id: id,
-  summary: '옛 제목',
-  start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 14)),
-  end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 15)),
+  title: '옛 제목',
+  start: CalEventTime.at(DateTime.utc(2026, 8, 20, 14)),
+  end: CalEventTime.at(DateTime.utc(2026, 8, 20, 15)),
 );

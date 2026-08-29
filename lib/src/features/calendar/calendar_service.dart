@@ -1,58 +1,62 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import '../../domain/todo.dart';
+import 'calendar_event.dart';
 import 'google_auth_service.dart';
 
-/// Todo → Google Calendar Event 매핑의 **단일 출처**.
+/// Todo → 캘린더 이벤트 매핑의 **단일 출처**.
 ///
 /// 예전에는 이 클래스가 API 호출까지 직접 했지만, 그러면 실제 구글 인증 없이는
 /// 한 줄도 테스트할 수 없었다. 호출은 `CalendarGateway` 로 옮기고 여기에는 매핑만
 /// 남겼다 — 동기화 서비스·큐·되가져오기가 전부 이 매핑을 공유한다.
+///
+/// 결과는 **provider 중립** [CalEvent] 다. 구글의 `gcal.Event` 나 Microsoft Graph
+/// JSON 으로의 번역은 각 게이트웨이가 맡는다. 그래서 서비스를 하나 더 붙여도
+/// "할 일을 어떤 일정으로 볼 것인가" 규칙은 여기 한 곳에만 있다.
 class CalendarService {
   const CalendarService();
 
   /// 기본 대상 캘린더. 사용자가 설정에서 고르기 전(또는 레거시 항목)의 값이다.
   static const defaultCalendarId = 'primary';
 
-  /// fast-tasks — Todo 의 날짜·기간 모델을 Google Calendar Event 로 매핑. 단일 출처.
+  /// fast-tasks — Todo 의 날짜·기간 모델을 캘린더 이벤트로 매핑. 단일 출처.
   ///
   /// - 하루종일 / 기간+isAllDay → all-day 이벤트 (start.date / end.date,
-  ///   end.date 는 종료+1일 — Google 의 exclusive 종료 규칙).
+  ///   end.date 는 종료+1일 — 두 서비스 공통의 exclusive 종료 규칙).
   /// - 단일 시간 (start/end anchor) → 그 시각 기준 기본 1시간 이벤트.
   /// - 기간(!isAllDay) → start.dateTime=dueAt, end.dateTime=endAt.
   ///
   /// [isAllDayHint] 는 호출자가 모델 없이 종일 의도를 줄 때의 fallback —
   /// todo 자체의 모드가 우선한다.
   @visibleForTesting
-  static gcal.Event buildEvent(Todo todo, {bool isAllDayHint = false}) {
+  static CalEvent buildEvent(Todo todo, {bool isAllDayHint = false}) {
     final desc = '${todo.category.label} · 하루 자동 등록';
     final due = todo.dueAt!;
 
-    gcal.Event allDayEvent(DateTime start, DateTime endInclusive) {
+    CalEvent allDayEvent(DateTime start, DateTime endInclusive) {
       final s = start.toLocal();
       final e = endInclusive.toLocal();
       final startDate = DateTime(s.year, s.month, s.day);
-      // Google 종일 이벤트의 end.date 는 exclusive → 종료 다음날.
+      // 종일 이벤트의 end.date 는 exclusive → 종료 다음날.
       final endDate = DateTime(
         e.year,
         e.month,
         e.day,
       ).add(const Duration(days: 1));
-      return gcal.Event(
-        summary: todo.title,
+      return CalEvent(
+        title: todo.title,
         description: desc,
-        start: gcal.EventDateTime(date: startDate),
-        end: gcal.EventDateTime(date: endDate),
+        start: CalEventTime.allDay(startDate),
+        end: CalEventTime.allDay(endDate),
       );
     }
 
-    gcal.Event timedEvent(DateTime start, DateTime end) => gcal.Event(
-      summary: todo.title,
+    CalEvent timedEvent(DateTime start, DateTime end) => CalEvent(
+      title: todo.title,
       description: desc,
-      start: gcal.EventDateTime(dateTime: start.toUtc(), timeZone: 'UTC'),
-      end: gcal.EventDateTime(dateTime: end.toUtc(), timeZone: 'UTC'),
+      start: CalEventTime.at(start.toUtc()),
+      end: CalEventTime.at(end.toUtc()),
     );
 
     final event = switch (todo.dateMode) {
@@ -69,35 +73,37 @@ class CalendarService {
             : timedEvent(due, todo.endAt ?? due),
     };
 
-    // date-repeat: 반복 마스터면 RRULE 1개를 이벤트에 부착해 반복 일정으로 등록한다.
-    // 인스턴스/일반 Todo 는 단일 이벤트 — 반복은 마스터의 RRULE 이 커버하므로 부착 X.
+    // date-repeat: 반복 마스터면 규칙 1개를 이벤트에 부착해 반복 일정으로 등록한다.
+    // 인스턴스/일반 Todo 는 단일 이벤트 — 반복은 마스터의 규칙이 커버하므로 부착 X.
     final rule = todo.recurrence;
-    if (todo.isRecurringMaster && rule != null) {
-      event.recurrence = [rule.toRRule(todo.recurrenceEndAt)];
-    }
+    final recurrence = todo.isRecurringMaster && rule != null
+        ? CalRecurrence(rule: rule, until: todo.recurrenceEndAt)
+        : null;
 
-    // google-calendar-sync: 완료 표시는 **색으로만** 한다 (8 = Graphite 회색).
-    // 제목에 "✓" 를 붙이는 방식은 되가져올 때 제목을 파싱해 떼어내야 해서
-    // 사용자가 직접 "✓" 로 시작하는 제목을 쓰면 깨진다. 미완료면 null 로 되돌려
-    // 캘린더 기본색을 복구한다.
-    event.colorId = todo.isDone ? '8' : null;
-
-    // google-calendar-sync: 앱 서명. 되가져오기(pull) 가 이 값들을 읽는다.
-    //  - haruRev   — echo 차단. 수신한 이벤트의 rev 가 로컬 updatedAt 과 같으면
-    //                "우리가 쓴 것" 이므로 무시한다. 이 비교가 어긋나면 push↔pull
-    //                무한 루프가 돈다 → UTC ISO8601 로 고정.
-    //  - haruDateMode / haruAnchor — 왕복 안정성. startTime 모드는 "시각+1시간"
-    //                블록으로 나가므로, 형태만 보고 되읽으면 range 로 변질된다.
-    //  - haruTodoId — 링크 복구·중복 이벤트 정리용 역추적 키.
-    event.extendedProperties = gcal.EventExtendedProperties(
-      private: {
+    return event.copyWith(
+      recurrence: recurrence,
+      // google-calendar-sync: 완료 표시는 **색으로만** 한다 (구글 = Graphite 회색).
+      // 제목에 "✓" 를 붙이는 방식은 되가져올 때 제목을 파싱해 떼어내야 해서
+      // 사용자가 직접 "✓" 로 시작하는 제목을 쓰면 깨진다.
+      markDone: todo.isDone,
+      // google-calendar-sync: 앱 서명. 되가져오기(pull) 가 이 값들을 읽는다.
+      //  - haruRev   — echo 차단. 수신한 이벤트의 rev 가 로컬 updatedAt 과 같으면
+      //                "우리가 쓴 것" 이므로 무시한다. 이 비교가 어긋나면 push↔pull
+      //                무한 루프가 돈다 → UTC ISO8601 로 고정.
+      //  - haruDateMode / haruAnchor — 왕복 안정성. startTime 모드는 "시각+1시간"
+      //                블록으로 나가므로, 형태만 보고 되읽으면 range 로 변질된다.
+      //  - haruTodoId — 링크 복구·중복 이벤트 정리용 역추적 키.
+      //
+      // 서비스가 서명을 되돌려주지 못해도(그래프의 확장 속성은 증분 응답에 실리지
+      // 않을 수 있다) 동기화는 성립한다 — 병합 쪽에 "내용이 같으면 echo" 규칙과
+      // "연결된 할 일의 날짜 모드를 힌트로 쓴다" 규칙이 함께 있다.
+      appProperties: {
         'haruTodoId': todo.id,
         'haruRev': todo.updatedAt.toUtc().toIso8601String(),
         'haruDateMode': todo.dateMode.name,
         'haruAnchor': todo.timeAnchor,
       },
     );
-    return event;
   }
 }
 

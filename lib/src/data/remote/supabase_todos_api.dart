@@ -75,6 +75,8 @@ class SupabaseTodosApi implements RemoteTodosApi {
     // 반드시 원격에 함께 전파돼야 macOS/Android 양쪽이 같은 판단을 한다.
     'calendar_id': t.calendarId,
     'calendar_origin': t.calendarOrigin,
+    // v11 — 어느 캘린더 서비스(구글 / Microsoft)의 이벤트인지. null = 구글(하위호환).
+    'calendar_provider': t.calendarProvider,
     // v1.1 — 트리 / 메모 모델
     'parent_id': t.parentId,
     'type': t.type.name,
@@ -117,6 +119,10 @@ class SupabaseTodosApi implements RemoteTodosApi {
     calendarOrigin: row['calendar_origin'] is String
         ? row['calendar_origin'] as String
         : 'app',
+    // v11 — 컬럼이 없는 옛 row 는 null → 코드가 구글로 읽는다.
+    calendarProvider: row['calendar_provider'] is String
+        ? row['calendar_provider'] as String
+        : null,
     // v1.1 — 옛 v1.0 row (컬럼 없음) 도 안전하게 기본값으로 복원.
     parentId: row['parent_id'] as String?,
     type: _parseType(row['type']),

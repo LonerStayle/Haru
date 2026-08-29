@@ -165,7 +165,7 @@ void main() {
       expect(await queueLength(), 1);
 
       await cycle();
-      expect(gateway.eventById(cal, saved.calendarEventId!)!.summary, '제목 변경');
+      expect(gateway.eventById(cal, saved.calendarEventId!)!.title, '제목 변경');
 
       await cycle();
       expect(await queueLength(), 0, reason: '반영 후 추가 작업이 생기면 루프다');
@@ -178,7 +178,9 @@ void main() {
 
       // 사람이 구글 캘린더에서 제목을 고쳤다.
       clock = clock.add(const Duration(minutes: 30));
-      final edited = gateway.eventById(cal, eventId)!..summary = '캘린더에서 고침';
+      final edited = gateway
+          .eventById(cal, eventId)!
+          .copyWith(title: '캘린더에서 고침');
       gateway.seedEvent(cal, edited);
 
       await cycle();
@@ -198,7 +200,7 @@ void main() {
       await uiRepo.upsert(saved!.copyWith(doneAt: clock, updatedAt: clock));
 
       await cycle();
-      expect(gateway.eventById(cal, saved.calendarEventId!)!.colorId, '8');
+      expect(gateway.eventById(cal, saved.calendarEventId!)!.markDone, isTrue);
 
       await cycle();
       expect(await queueLength(), 0);

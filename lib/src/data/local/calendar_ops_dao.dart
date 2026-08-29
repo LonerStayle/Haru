@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 
+import '../../features/calendar/calendar_event.dart';
 import 'app_database.dart';
 
 part 'calendar_ops_dao.g.dart';
@@ -24,6 +25,7 @@ class CalendarOpsDao extends DatabaseAccessor<AppDatabase>
         todoId: Value(row.todoId),
         eventId: Value(row.eventId),
         calendarId: Value(row.calendarId),
+        provider: Value(row.provider),
         payload: Value(row.payload),
         attempts: Value(row.attempts),
         lastError: Value(row.lastError),
@@ -35,7 +37,14 @@ class CalendarOpsDao extends DatabaseAccessor<AppDatabase>
 
   /// 재시도 가능한 항목만 `createdAt asc` (FIFO) 로 반환.
   /// `nextAttemptAt` 이 null 이거나 [now] 이하인 항목만 포함 — 지수 백오프 필터.
-  Future<List<CalendarOpRow>> dueOps(DateTime now) {
+  ///
+  /// [provider] 를 주면 그 서비스 것만 골라낸다. 구글과 Microsoft 를 동시에 켤 수
+  /// 있으므로, 한쪽 동기화가 다른 쪽 작업을 집어가면 엉뚱한 API 로 날아간다.
+  /// **provider 가 null 인 옛 row 는 구글로 본다** (컬럼이 생기기 전 큐 항목).
+  Future<List<CalendarOpRow>> dueOps(
+    DateTime now, {
+    CalendarProvider? provider,
+  }) {
     final q = select(calendarOps)
       ..where(
         (t) =>
@@ -45,7 +54,12 @@ class CalendarOpsDao extends DatabaseAccessor<AppDatabase>
       ..orderBy([
         (t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.asc),
       ]);
-    return q.get();
+    if (provider == null) return q.get();
+    return q.get().then(
+      (rows) => rows
+          .where((r) => CalendarProvider.fromWire(r.provider) == provider)
+          .toList(),
+    );
   }
 
   /// 실패 후 재시도 상태 갱신 — 시도 횟수 / 오류 사유 / 다음 시도 시각(백오프).
@@ -68,8 +82,18 @@ class CalendarOpsDao extends DatabaseAccessor<AppDatabase>
   Future<int> removeById(String id) =>
       (delete(calendarOps)..where((t) => t.id.equals(id))).go();
 
-  /// 큐 전체 비우기 — signOut / 구글 연결 해제 시 사용.
+  /// 큐 전체 비우기 — signOut / 연결 해제 시 사용.
   Future<void> clear() => delete(calendarOps).go();
+
+  /// 한 서비스의 큐만 비우기 — 한쪽만 연결 해제할 때 다른 쪽 대기열을 날리지 않는다.
+  /// (provider 가 null 인 옛 row 는 구글 것으로 본다.)
+  Future<void> clearProvider(CalendarProvider provider) async {
+    final rows = await select(calendarOps).get();
+    for (final row in rows) {
+      if (CalendarProvider.fromWire(row.provider) != provider) continue;
+      await removeById(row.id);
+    }
+  }
 
   /// 큐 길이 변동 stream — 설정 화면 "동기화 대기" indicator 갱신용.
   Stream<int> watchCount() {

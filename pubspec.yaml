@@ -53,6 +53,12 @@ dependencies:
   http: ^1.6.0
   # 사용자 설정(정렬 모드 등) 영속 — macOS / Android 공통.
   shared_preferences: ^2.5.3
+  # Microsoft 365 연동의 OAuth2 PKCE — code_challenge 계산(SHA-256)에 필요.
+  # dart.dev 공식 유지보수 패키지이며 이미 transitive 로 들어와 있던 것을 직접 의존으로 승격.
+  crypto: ^3.0.6
+  # Microsoft 동의 화면을 Android 기본 브라우저로 여는 데 필요 (macOS 는 `open` 사용).
+  # flutter.dev 공식 유지보수 패키지. 역시 transitive 였던 것을 직접 의존으로 승격.
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:

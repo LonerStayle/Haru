@@ -1,7 +1,6 @@
-import 'package:googleapis/calendar/v3.dart' as gcal;
-
 import '../../domain/recurrence.dart';
 import '../../domain/todo.dart';
+import 'calendar_event.dart';
 
 /// 이벤트에 심어둔 앱 서명 (`CalendarService.buildEvent` 가 넣는다).
 ///
@@ -26,10 +25,11 @@ class HaruSignature {
   bool get isFromApp => todoId != null;
 }
 
-/// 이벤트에서 앱 서명을 읽는다. 서명이 없으면 빈 값 (사람이 캘린더에서 만든 것).
-HaruSignature readHaruSignature(gcal.Event event) {
-  final p = event.extendedProperties?.private;
-  if (p == null) return const HaruSignature();
+/// 이벤트에서 앱 서명을 읽는다. 서명이 없으면 빈 값 (사람이 캘린더에서 만든 것,
+/// 또는 서비스가 확장 속성을 되돌려주지 않은 것).
+HaruSignature readHaruSignature(CalEvent event) {
+  final p = event.appProperties;
+  if (p.isEmpty) return const HaruSignature();
   final modeName = p['haruDateMode'];
   return HaruSignature(
     todoId: p['haruTodoId'],
@@ -83,22 +83,34 @@ class EventDatePatch {
   final bool unsupportedRecurrence;
 }
 
-/// 제목 없는 구글 이벤트의 표시 이름. 빈 제목으로 할 일을 만들면 목록에서 사라진 것처럼 보인다.
+/// 제목 없는 이벤트의 표시 이름. 빈 제목으로 할 일을 만들면 목록에서 사라진 것처럼 보인다.
 const _untitledLabel = '(제목 없음)';
 
-/// Google Calendar 이벤트를 할 일의 날짜·제목 값으로 되돌린다.
+/// 캘린더 이벤트를 할 일의 날짜·제목 값으로 되돌린다.
 ///
 /// 시작 시각이 없으면 null — 할 일로 만들 근거가 없다.
 ///
 /// 앱이 만든 이벤트라면 서명의 `haruDateMode` 로 **원래 모드를 그대로 복원**한다.
-/// 서명이 없으면(사람이 캘린더에서 만든 것) 이벤트 형태로 추론한다:
+/// 서명이 없으면 [shapeHint] 를 쓰고(연결된 할 일의 현재 모드 — 아래 참조), 그것도
+/// 없으면 이벤트 형태로 추론한다:
 ///
 /// | 형태 | 결과 |
 /// |---|---|
 /// | 종일 하루 | `allDay` |
 /// | 종일 이틀 이상 | `range` + isAllDay (end.date 의 exclusive 를 −1일로 되돌림) |
 /// | 시간 이벤트 | `range` |
-EventDatePatch? eventToTodoPatch(gcal.Event event) {
+///
+/// **[shapeHint] 가 왜 필요한가** — Microsoft Graph 의 증분 응답에는 우리가 심은
+/// 확장 속성이 실려 오지 않을 수 있다. 서명이 없으면 "시작시간" 모드로 올린 1시간
+/// 블록이 되읽을 때 `range` 로 변질되고, 그 변질이 다시 저장되어 할 일의 날짜 모드가
+/// 조용히 바뀐다. 이미 연결된 할 일이 있다면 그 할 일의 현재 모드가 가장 정확한
+/// 힌트다. 단 **형태와 어긋나는 힌트는 무시**한다 — 사람이 종일 일정을 시간 일정으로
+/// 바꿨는데 힌트를 따르면 그 변경을 영영 못 받는다.
+EventDatePatch? eventToTodoPatch(
+  CalEvent event, {
+  TodoDateMode? shapeHint,
+  String? anchorHint,
+}) {
   final start = event.start;
   final startDate = start?.date;
   final startTime = start?.dateTime;
@@ -119,49 +131,55 @@ EventDatePatch? eventToTodoPatch(gcal.Event event) {
       endInclusive != null &&
       endInclusive.difference(dueAt).inDays >= 1;
 
-  // 서명이 있으면 그 모드를 따르고, 없으면 형태로 추론한다.
-  final mode =
-      sig.dateMode ??
-      (isAllDayEvent
-          ? (spansMultipleDays ? TodoDateMode.range : TodoDateMode.allDay)
-          : TodoDateMode.range);
+  // 서명 → 힌트 → 형태 추론 순으로 모드를 정한다. 앞의 둘은 형태와 맞을 때만 쓴다.
+  final candidate = sig.dateMode ?? shapeHint;
+  final mode = _compatible(candidate, isAllDayEvent)
+      ? candidate!
+      : (isAllDayEvent
+            ? (spansMultipleDays ? TodoDateMode.range : TodoDateMode.allDay)
+            : TodoDateMode.range);
+  final anchor = sig.anchor ?? anchorHint;
 
-  final (DateTime? resolvedEnd, bool allDay, String anchor) = switch (mode) {
+  final (
+    DateTime? resolvedEnd,
+    bool allDay,
+    String resolvedAnchor,
+  ) = switch (mode) {
     // none 은 dueAt 이 없다는 뜻인데 이벤트에는 시작이 있다 — 종일로 안전 폴백.
-    TodoDateMode.none ||
-    TodoDateMode.allDay => (null, true, sig.anchor ?? 'start'),
+    TodoDateMode.none || TodoDateMode.allDay => (null, true, anchor ?? 'start'),
     TodoDateMode.startTime => (null, false, 'start'),
     TodoDateMode.endTime => (null, false, 'end'),
-    TodoDateMode.range => (endInclusive, isAllDayEvent, sig.anchor ?? 'start'),
+    TodoDateMode.range => (endInclusive, isAllDayEvent, anchor ?? 'start'),
   };
 
   // 반복 — 표현 가능한 규칙만 살리고, 나머지는 단일로 폴백하되 그 사실을 알린다.
-  RecurrenceRule? rule;
-  DateTime? until;
-  var unsupported = false;
-  final rrules = event.recurrence?.where(
-    (r) => r.toUpperCase().startsWith('RRULE'),
-  );
-  if (rrules != null && rrules.isNotEmpty) {
-    final parsed = RecurrenceRule.tryFromRRule(rrules.first);
-    if (parsed == null) {
-      unsupported = true;
-    } else {
-      rule = parsed.rule;
-      until = parsed.until;
-    }
-  }
+  final recurrence = event.recurrence;
 
-  final title = (event.summary ?? '').trim();
+  final title = (event.title ?? '').trim();
   return EventDatePatch(
     title: title.isEmpty ? _untitledLabel : title,
     dueAt: dueAt,
     endAt: resolvedEnd,
     isAllDay: allDay,
-    timeAnchor: anchor,
+    timeAnchor: resolvedAnchor,
     dateMode: mode == TodoDateMode.none ? TodoDateMode.allDay : mode,
-    recurrence: rule,
-    recurrenceEndAt: until,
-    unsupportedRecurrence: unsupported,
+    recurrence: recurrence?.rule,
+    recurrenceEndAt: recurrence?.until,
+    unsupportedRecurrence: recurrence != null && !recurrence.isSupported,
   );
+}
+
+/// 후보 모드가 이벤트의 실제 형태(종일/시간)와 어울리는가.
+///
+/// 종일 이벤트에 `startTime` 을, 시간 이벤트에 `allDay` 를 씌우면 시각이 통째로
+/// 사라지거나 없던 시각이 생긴다. 어긋나면 힌트를 버리고 형태로 추론한다.
+bool _compatible(TodoDateMode? mode, bool isAllDayEvent) {
+  if (mode == null) return false;
+  return switch (mode) {
+    TodoDateMode.none => false,
+    TodoDateMode.allDay => isAllDayEvent,
+    TodoDateMode.startTime || TodoDateMode.endTime => !isAllDayEvent,
+    // 기간은 양쪽 형태 모두 가능하다 (종일 기간 / 시간 기간).
+    TodoDateMode.range => true,
+  };
 }

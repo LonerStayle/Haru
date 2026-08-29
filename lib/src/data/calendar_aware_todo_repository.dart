@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 
 import '../domain/category.dart';
 import '../domain/todo.dart';
+import '../features/calendar/calendar_event.dart';
 import '../features/calendar/calendar_op_decider.dart';
 import '../features/calendar/calendar_settings.dart';
 import 'local/app_database.dart';
@@ -18,7 +19,7 @@ const _uuid = Uuid();
 /// 세면 더 많다. 각 호출부에 캘린더 호출을 흩뿌리면 반드시 누락이 생긴다 (실제로 이
 /// 앱의 기존 결함이 그것이었다 — 수정·삭제가 캘린더에 반영되지 않았다). 반면
 /// `SyncingTodoRepository` 안에 넣으면 Supabase 미인증 시 `LocalTodoRepository` 로
-/// 빠져 캘린더 동기화가 통째로 사라진다. 구글 연동은 Supabase 로그인과 독립이어야 한다.
+/// 빠져 캘린더 동기화가 통째로 사라진다. 캘린더 연동은 Supabase 로그인과 독립이어야 한다.
 ///
 /// 그래서 **바깥에 한 겹 씌운다.** 연동이 꺼져 있으면 조립 단계에서 아예 끼우지 않으므로
 /// 앱은 이전과 완전히 동일하게 동작한다.
@@ -91,14 +92,19 @@ class CalendarAwareTodoRepository implements TodoRepository {
     // **저장이 먼저다.** 캘린더 쪽에서 무슨 일이 나든 로컬 저장을 막아선 안 된다.
     await inner.upsert(todo);
 
-    if (!current.connected) return;
+    if (!current.anyConnected) return;
+    // 새로 만들 대상은 "기본 서비스, 없으면 연결된 다른 쪽" — 그 판단은 설정이 한다.
+    final target = current.creationTarget();
     final decision = decideCalendarOp(
       prev: prev,
       next: todo,
       addToCalendar: addToCalendar,
-      writeCalendarId: current.writeCalendarId,
+      writeCalendarId: target?.calendarId ?? current.writeCalendarId,
+      createProvider: target?.provider ?? current.defaultProvider,
     );
     if (decision.kind == CalendarOpKind.none) return;
+    // 연결이 끊긴 서비스로 보낼 작업은 쌓아봐야 실패만 반복한다.
+    if (!current.viewFor(decision.provider).connected) return;
     await _enqueue(decision, todo: todo);
   }
 
@@ -108,14 +114,18 @@ class CalendarAwareTodoRepository implements TodoRepository {
     await inner.deleteById(id);
 
     final current = settings();
-    if (!current.connected) return;
+    if (!current.anyConnected) return;
     final eventId = prev?.calendarEventId;
     if (eventId == null) return;
+    final provider = CalendarProvider.fromWire(prev!.calendarProvider);
+    if (!current.viewFor(provider).connected) return;
     await _enqueue(
       CalendarOpDecision(
         CalendarOpKind.delete,
         eventId: eventId,
-        calendarId: prev!.calendarId ?? current.writeCalendarId,
+        calendarId:
+            prev.calendarId ?? current.viewFor(provider).writeCalendarId,
+        provider: provider,
       ),
       todo: prev,
     );
@@ -130,6 +140,7 @@ class CalendarAwareTodoRepository implements TodoRepository {
         todoId: todo.id,
         eventId: decision.eventId,
         calendarId: decision.calendarId ?? settings().writeCalendarId,
+        provider: decision.provider.wire,
         // 삭제는 이벤트 id 만 있으면 되고, 나머지는 스냅샷으로 보낸다. 큐에 쌓인 뒤
         // 할 일이 또 바뀌어도 flush 시점에 최신 상태를 다시 읽으므로 스냅샷은
         // 참고용이다 (오프라인 진단·복구에 쓰인다).

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../domain/category.dart';
+import 'calendar_event.dart';
 import 'calendar_settings.dart';
 import 'calendar_sync_service.dart';
 
@@ -31,6 +32,10 @@ class SyncOutcome {
 ///
 /// **push 를 먼저 한다.** 앱에서 방금 고친 내용을 캘린더에 올린 뒤에 받아와야,
 /// 아직 안 올라간 로컬 변경이 "캘린더가 더 최신" 으로 오판돼 되덮이는 일이 없다.
+///
+/// **서비스 하나당 인스턴스 하나**다 ([service] 가 담당하는 provider 를 그대로
+/// 따른다). 구글과 Microsoft 를 한 코디네이터에 몰아넣지 않는 이유는 실패 격리다 —
+/// 한쪽 재인증이 필요해도 다른 쪽 동기화는 계속 돌아야 한다.
 class CalendarSyncCoordinator {
   CalendarSyncCoordinator({
     required this.service,
@@ -52,11 +57,16 @@ class CalendarSyncCoordinator {
   /// 유입 항목의 카테고리 후보 (보관된 것 제외).
   final List<Category> Function() activeCategories;
 
+  /// 이 코디네이터가 담당하는 서비스.
+  CalendarProvider get provider => service.provider;
+
   bool _running = false;
 
   Future<SyncOutcome> syncNow() async {
     final settings = readSettings();
-    if (!settings.connected || _running) return const SyncOutcome.skipped();
+    if (!settings.viewFor(provider).connected || _running) {
+      return const SyncOutcome.skipped();
+    }
     _running = true;
     try {
       final push = await service.flushPending();
@@ -81,25 +91,29 @@ class CalendarSyncCoordinator {
   }
 
   /// 수신 결과를 설정에 반영한다 — 새 토큰과 마지막 동기화 시각.
+  /// 자기 provider 의 칸만 건드린다 — 다른 서비스의 토큰을 날리면 그쪽이 다음
+  /// 회차에 전체 재수집으로 떨어진다.
   Future<void> _persist(PullResult pull) async {
     final current = readSettings();
-    final tokens = Map<String, String>.of(current.syncTokens);
+    final view = current.viewFor(provider);
+    final tokens = Map<String, String>.of(view.syncTokens);
     for (final entry in pull.newSyncTokens.entries) {
       tokens[entry.key] = entry.value;
-      await preference.setSyncToken(entry.key, entry.value);
+      await preference.setSyncToken(provider, entry.key, entry.value);
     }
     // 만료됐는데 새 토큰도 못 받은 캘린더는 다음 회차가 전체 재수집으로 가야 한다.
     for (final calendarId in pull.expiredCalendars) {
       if (pull.newSyncTokens.containsKey(calendarId)) continue;
       tokens.remove(calendarId);
-      await preference.clearSyncToken(calendarId);
+      await preference.clearSyncToken(provider, calendarId);
     }
 
-    final updated = current.copyWith(
-      syncTokens: tokens,
-      lastSyncedAt: DateTime.now(),
+    writeSettings(
+      current.withConnection(
+        provider,
+        view.copyWith(syncTokens: tokens, lastSyncedAt: DateTime.now()),
+      ),
     );
-    writeSettings(updated);
   }
 
   /// 유입 항목이 들어갈 카테고리.
@@ -120,7 +134,7 @@ class CalendarSyncCoordinator {
       return null;
     }
 
-    return pick(settings.categoryMap[calendarId]) ??
+    return pick(settings.viewFor(provider).categoryMap[calendarId]) ??
         pick(settings.defaultCategoryId) ??
         actives.first;
   }

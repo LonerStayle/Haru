@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/local/local_todo_repository.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings.dart';
 import 'package:solo_todo/src/features/calendar/calendar_sync_coordinator.dart';
@@ -26,13 +26,20 @@ class _MemoryPreference implements CalendarSettingsPreference {
   Future<void> save(CalendarSettings settings) async => _settings = settings;
 
   @override
-  Future<void> setSyncToken(String calendarId, String token) async {
-    saved[calendarId] = token;
+  Future<void> setSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+    String token,
+  ) async {
+    saved['${provider.wire}/$calendarId'] = token;
   }
 
   @override
-  Future<void> clearSyncToken(String calendarId) async {
-    cleared.add(calendarId);
+  Future<void> clearSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+  ) async {
+    cleared.add('${provider.wire}/$calendarId');
   }
 }
 
@@ -73,11 +80,11 @@ void main() {
 
   tearDown(() => db.close());
 
-  gcal.Event remote({String id = 'ev-1'}) => gcal.Event(
+  CalEvent remote({String id = 'ev-1'}) => CalEvent(
     id: id,
-    summary: '구글 일정',
-    start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 10)),
-    end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 11)),
+    title: '구글 일정',
+    start: CalEventTime.at(DateTime.utc(2026, 8, 20, 10)),
+    end: CalEventTime.at(DateTime.utc(2026, 8, 20, 11)),
   );
 
   group('실행 조건', () {
@@ -100,8 +107,8 @@ void main() {
     test('새 토큰이 저장되고 설정에도 반영된다', () async {
       gateway.seedEvent(cal, remote());
       await coordinator.syncNow();
-      expect(pref.saved[cal], isNotNull);
-      expect(settings.syncTokens[cal], pref.saved[cal]);
+      expect(pref.saved['google/$cal'], isNotNull);
+      expect(settings.syncTokens[cal], pref.saved['google/$cal']);
     });
 
     test('마지막 동기화 시각이 갱신된다', () async {

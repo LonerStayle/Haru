@@ -4,7 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import 'calendar_sync_coordinator.dart';
 
-/// 자동 동기화 트리거.
+/// 자동 동기화 트리거. **연결된 모든 서비스**를 한 tick 에 돈다.
 ///
 /// 이 앱에는 [WidgetsBindingObserver] 를 쓰는 곳이 한 군데도 없었다 — 캘린더
 /// 연동이 처음으로 "앱이 다시 앞으로 나왔을 때" 를 알아야 하는 기능이다.
@@ -18,12 +18,16 @@ import 'calendar_sync_coordinator.dart';
 /// 실시간 동기화와 달리 캘린더는 사람이 다른 앱에서 고치는 빈도가 훨씬 낮다.
 class CalendarSyncScheduler with WidgetsBindingObserver {
   CalendarSyncScheduler({
-    required this.coordinator,
+    required this.coordinators,
     required this.autoSyncEnabled,
     this.interval = const Duration(minutes: 5),
   });
 
-  final CalendarSyncCoordinator coordinator;
+  /// 서비스별 코디네이터 (구글 / Microsoft). 연결 안 된 쪽은 스스로 skip 한다.
+  ///
+  /// **순차로 돈다.** 동시에 돌리면 두 수신 결과가 같은 할 일을 겹쳐 쓰는 경합이
+  /// 생기고, 그 경합은 재현이 어렵다. 5분 주기 작업이라 순차로도 충분하다.
+  final List<CalendarSyncCoordinator> coordinators;
 
   /// 호출 시점의 자동 동기화 설정 — 사용자가 끄면 다음 tick 부터 멈춘다.
   final bool Function() autoSyncEnabled;
@@ -51,7 +55,11 @@ class CalendarSyncScheduler with WidgetsBindingObserver {
   }
 
   /// 사용자가 "지금 동기화" 를 눌렀을 때 — 자동 동기화 설정과 무관하게 돈다.
-  Future<void> syncNow() => coordinator.syncNow();
+  Future<void> syncNow() async {
+    for (final coordinator in coordinators) {
+      await coordinator.syncNow();
+    }
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -77,6 +85,6 @@ class CalendarSyncScheduler with WidgetsBindingObserver {
 
   Future<void> _tick() async {
     if (!autoSyncEnabled()) return;
-    await coordinator.syncNow();
+    await syncNow();
   }
 }

@@ -8,13 +8,16 @@ import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../category/categories_controller.dart';
+import 'calendar_event.dart';
 import 'calendar_gateway.dart';
 import 'calendar_settings.dart';
 import 'google_auth_service.dart';
 import 'google_calendar_gateway.dart';
+import 'microsoft_auth_service.dart';
+import 'microsoft_graph_gateway.dart';
 
 // ---------------------------------------------------------------------------
-// Providers — 이 화면과 (다음 wave 의) 동기화 서비스가 함께 볼 진입점들.
+// Providers — 이 화면과 동기화 서비스가 함께 볼 진입점들.
 // ---------------------------------------------------------------------------
 
 /// Google Calendar API 게이트웨이. [calendarAuthProvider] 로부터 파생 —
@@ -24,17 +27,52 @@ final calendarGatewayProvider = Provider<CalendarGateway?>((ref) {
   return auth == null ? null : GoogleCalendarGateway(auth);
 });
 
-/// 사용자가 접근 가능한 캘린더 목록 — 네트워크 호출. "연결됨" 상태에서만 watch 된다.
-/// autoDispose — 화면을 벗어나면 캐시를 버려, 재진입 시 항상 최신 목록을 다시 받는다.
-final calendarListProvider = FutureProvider.autoDispose<List<CalendarInfo>>((
-  ref,
-) async {
-  final gateway = ref.watch(calendarGatewayProvider);
-  if (gateway == null) return const [];
-  return gateway.listCalendars();
+/// Microsoft Graph 게이트웨이. Azure 클라이언트 ID 가 없으면 null.
+final microsoftGatewayProvider = Provider<CalendarGateway?>((ref) {
+  final auth = ref.watch(microsoftAuthProvider);
+  return auth == null ? null : MicrosoftGraphGateway(auth);
 });
 
-/// Google Calendar 동기화 대기열 길이 — `CalendarOpsDao.watchCount` 위임.
+/// provider 로 게이트웨이 고르기 — 화면·동기화 조립이 공통으로 쓴다.
+final gatewayForProvider = Provider.family<CalendarGateway?, CalendarProvider>((
+  ref,
+  provider,
+) {
+  return provider == CalendarProvider.microsoft
+      ? ref.watch(microsoftGatewayProvider)
+      : ref.watch(calendarGatewayProvider);
+});
+
+/// provider 로 인증 고르기 (연결 / 연결 해제 버튼용).
+final authForProvider = Provider.family<CalendarAuth?, CalendarProvider>((
+  ref,
+  provider,
+) {
+  return provider == CalendarProvider.microsoft
+      ? ref.watch(microsoftAuthProvider)
+      : ref.watch(calendarAuthProvider);
+});
+
+/// 그 서비스의 연동을 사용자에게 노출할지 (OAuth 키가 빌드에 있는가).
+final calendarAvailableFor = Provider.family<bool, CalendarProvider>((
+  ref,
+  provider,
+) {
+  return provider == CalendarProvider.microsoft
+      ? ref.watch(microsoftCalendarAvailableProvider)
+      : ref.watch(googleCalendarAvailableProvider);
+});
+
+/// 사용자가 접근 가능한 캘린더 목록 — 네트워크 호출. "연결됨" 상태에서만 watch 된다.
+/// autoDispose — 화면을 벗어나면 캐시를 버려, 재진입 시 항상 최신 목록을 다시 받는다.
+final calendarListProvider = FutureProvider.autoDispose
+    .family<List<CalendarInfo>, CalendarProvider>((ref, provider) async {
+      final gateway = ref.watch(gatewayForProvider(provider));
+      if (gateway == null) return const [];
+      return gateway.listCalendars();
+    });
+
+/// 캘린더 동기화 대기열 길이 — `CalendarOpsDao.watchCount` 위임.
 /// 이 저장소 관례: 위젯 테스트는 Drift stream 을 직접 쓰지 않고 이 provider 를
 /// override 해서 값을 주입한다.
 final calendarPendingOpsCountProvider = StreamProvider.autoDispose<int>((ref) {
@@ -43,9 +81,8 @@ final calendarPendingOpsCountProvider = StreamProvider.autoDispose<int>((ref) {
 
 /// "지금 동기화" 버튼의 실행부.
 ///
-/// 동기화 서비스는 다음 wave 에서 만들어진다 — 지금은 항상 null 이라 버튼이
-/// 비활성화된 채로 자리만 잡는다. 다음 wave 가 이 provider 를 override 해서
-/// 실제 동기화 함수를 주입하면 버튼이 그대로 살아난다 (화면 쪽 변경 불필요).
+/// 동기화 서비스 쪽(`calendar_providers.dart`)이 이 provider 를 override 해서
+/// 실제 동기화 함수를 주입한다 — 화면 코드는 그대로 두고 버튼만 살아난다.
 final calendarSyncNowActionProvider = Provider<Future<void> Function()?>(
   (ref) => null,
 );
@@ -54,22 +91,35 @@ final calendarSyncNowActionProvider = Provider<Future<void> Function()?>(
 // 화면
 // ---------------------------------------------------------------------------
 
-/// Google Calendar 연동 설정 화면 (설정 > Google Calendar).
+/// 캘린더 연동 설정 화면 (설정 > Google Calendar / Microsoft 365).
+///
+/// **한 화면이 두 서비스를 모두 담당한다** — [provider] 만 다르다. 구글용과
+/// Microsoft 용 화면을 따로 두면 항목 하나 고칠 때마다 두 곳을 고쳐야 하고,
+/// 반드시 한쪽을 빠뜨린다.
 ///
 /// 3 상태:
-/// - **키 없음** ([googleCalendarAvailableProvider] == false) — 안내만, 어떤
-///   동작도 할 수 없다 (OAuth 클라이언트 키 자체가 없는 개발자 설정 문제).
-/// - **미연결** ([CalendarSettings.connected] == false) — [Google 계정 연결]
-///   버튼만 노출.
+/// - **키 없음** — 안내만. OAuth 클라이언트 키 자체가 없는 설정 문제다.
+/// - **미연결** — [계정 연결] 버튼만 노출.
 /// - **연결됨** — 쓰기 캘린더 선택 / 가져올 캘린더 + 카테고리 매핑 / 옵션 /
 ///   동기화 상태 전부 노출.
 class CalendarSettingsScreen extends ConsumerStatefulWidget {
-  const CalendarSettingsScreen({super.key});
+  const CalendarSettingsScreen({
+    super.key,
+    this.provider = CalendarProvider.google,
+  });
 
-  static Future<void> show(BuildContext context) {
-    return Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const CalendarSettingsScreen()));
+  /// 이 화면이 다루는 캘린더 서비스.
+  final CalendarProvider provider;
+
+  static Future<void> show(
+    BuildContext context, {
+    CalendarProvider provider = CalendarProvider.google,
+  }) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CalendarSettingsScreen(provider: provider),
+      ),
+    );
   }
 
   @override
@@ -85,22 +135,27 @@ class _CalendarSettingsScreenState
   /// "지금 동기화" 진행 중.
   bool _syncBusy = false;
 
+  CalendarProvider get _provider => widget.provider;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final available = ref.watch(googleCalendarAvailableProvider);
+    final available = ref.watch(calendarAvailableFor(_provider));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Google Calendar')),
-      body: !available ? _KeyMissing(theme: theme) : _buildGate(theme),
+      appBar: AppBar(title: Text(_provider.label)),
+      body: !available
+          ? _KeyMissing(theme: theme, provider: _provider)
+          : _buildGate(theme),
     );
   }
 
   Widget _buildGate(ThemeData theme) {
     final settings = ref.watch(calendarSettingsProvider);
-    if (!settings.connected) {
+    if (!settings.viewFor(_provider).connected) {
       return _NotConnected(
         theme: theme,
+        provider: _provider,
         busy: _connectBusy,
         onConnect: _connect,
       );
@@ -111,7 +166,7 @@ class _CalendarSettingsScreenState
   // --- 연결 / 연결 해제 --------------------------------------------------
 
   Future<void> _connect() async {
-    final auth = ref.read(calendarAuthProvider);
+    final auth = ref.read(authForProvider(_provider));
     if (auth == null || _connectBusy) return;
     setState(() => _connectBusy = true);
 
@@ -128,8 +183,8 @@ class _CalendarSettingsScreenState
     if (client == null) {
       setState(() => _connectBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Google 계정 연결이 취소됐거나 실패했어요.'),
+        SnackBar(
+          content: Text('${_provider.label} 계정 연결이 취소됐거나 실패했어요.'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -138,29 +193,77 @@ class _CalendarSettingsScreenState
 
     await ref
         .read(calendarSettingsProvider.notifier)
-        .update((s) => s.copyWith(connected: true));
+        .updateConnection(_provider, (c) => c.copyWith(connected: true));
+    await _seedDefaultCalendar();
     if (mounted) setState(() => _connectBusy = false);
   }
 
-  /// 연결 해제 — [CalendarAuth.signOut] 호출 후 연결 관련 상태만 정리한다.
-  /// 쓰기/읽기 캘린더 선택과 카테고리 매핑은 [CalendarSettings.copyWith] 에
-  /// 넘기지 않아 그대로 보존된다 (재연결 시 복원). 구글 이벤트와 todo 의
-  /// calendarEventId 링크는 이 화면이 건드리지 않는다.
+  /// 연결 직후 쓰기/읽기 캘린더가 비어 있으면 계정의 기본 캘린더로 채운다.
   ///
-  /// 대기 중인 push 큐는 **비운다**. 연결이 끊긴 상태로 남겨두면 재연결 시점에
-  /// (계정이 바뀌었을 수도 있는데) 오래된 작업이 되살아나 엉뚱한 캘린더에
-  /// 재생되거나 실패만 반복한다. 재연결 후에는 그 시점 상태로 다시 시작한다.
+  /// Microsoft 는 캘린더 id 가 계정마다 다른 긴 문자열이라 기본값에 미리 넣어둘 수
+  /// 없다. 비워둔 채로 두면 "연결은 했는데 아무것도 안 들어온다" 가 되므로, 목록을
+  /// 한 번 받아 기본 캘린더를 골라 준다. (구글은 기본값 `primary` 가 이미 유효해
+  /// 아무 일도 일어나지 않는다.)
+  Future<void> _seedDefaultCalendar() async {
+    final view = ref.read(calendarSettingsProvider).viewFor(_provider);
+    if (view.writeCalendarId.isNotEmpty && view.readCalendarIds.isNotEmpty) {
+      return;
+    }
+    final gateway = ref.read(gatewayForProvider(_provider));
+    if (gateway == null) return;
+
+    List<CalendarInfo> calendars;
+    try {
+      calendars = await gateway.listCalendars();
+    } catch (_) {
+      return; // 목록을 못 받아도 연결 자체는 성공이다 — 설정에서 직접 고르면 된다.
+    }
+    if (calendars.isEmpty) return;
+    final primary = calendars.firstWhere(
+      (c) => c.primary && c.canWrite,
+      orElse: () => calendars.firstWhere(
+        (c) => c.canWrite,
+        orElse: () => calendars.first,
+      ),
+    );
+
+    await ref
+        .read(calendarSettingsProvider.notifier)
+        .updateConnection(
+          _provider,
+          (c) => c.copyWith(
+            writeCalendarId: c.writeCalendarId.isEmpty
+                ? primary.id
+                : c.writeCalendarId,
+            readCalendarIds: c.readCalendarIds.isEmpty
+                ? [primary.id]
+                : c.readCalendarIds,
+          ),
+        );
+  }
+
+  /// 연결 해제 — [CalendarAuth.signOut] 호출 후 연결 관련 상태만 정리한다.
+  /// 쓰기/읽기 캘린더 선택과 카테고리 매핑은 그대로 보존된다 (재연결 시 복원).
+  /// 캘린더 이벤트와 todo 의 calendarEventId 링크는 이 화면이 건드리지 않는다.
+  ///
+  /// 대기 중인 push 큐는 **이 서비스 것만 비운다**. 연결이 끊긴 상태로 남겨두면
+  /// 재연결 시점에 (계정이 바뀌었을 수도 있는데) 오래된 작업이 되살아나 엉뚱한
+  /// 캘린더에 재생되거나 실패만 반복한다. 다른 서비스의 대기열은 건드리지 않는다.
   Future<void> _disconnect() async {
     if (_connectBusy) return;
     setState(() => _connectBusy = true);
     try {
-      await ref.read(calendarAuthProvider)?.signOut();
-      await ref.read(appDatabaseProvider).calendarOpsDao.clear();
+      await ref.read(authForProvider(_provider))?.signOut();
+      await ref
+          .read(appDatabaseProvider)
+          .calendarOpsDao
+          .clearProvider(_provider);
     } finally {
       await ref
           .read(calendarSettingsProvider.notifier)
-          .update(
-            (s) => s.copyWith(
+          .updateConnection(
+            _provider,
+            (c) => c.copyWith(
               connected: false,
               syncTokens: const {},
               clearLastSyncedAt: true,
@@ -174,7 +277,7 @@ class _CalendarSettingsScreenState
   /// "다시 연결" 을 눌렀을 때 — 동의를 다시 받고 목록을 새로 받는다.
   Future<void> _reconnect() async {
     await _connect();
-    ref.invalidate(calendarListProvider);
+    ref.invalidate(calendarListProvider(_provider));
   }
 
   Future<void> _syncNow() async {
@@ -184,7 +287,7 @@ class _CalendarSettingsScreenState
     try {
       await action();
     } catch (_) {
-      // 오류 처리는 동기화 서비스(다음 wave) 책임 — 여기선 버튼 잠금만 푼다.
+      // 오류 처리는 동기화 서비스 책임 — 여기선 버튼 잠금만 푼다.
     } finally {
       if (mounted) setState(() => _syncBusy = false);
     }
@@ -194,7 +297,7 @@ class _CalendarSettingsScreenState
 
   Widget _connectedBody(ThemeData theme, CalendarSettings settings) {
     final scheme = theme.colorScheme;
-    final calendarsAsync = ref.watch(calendarListProvider);
+    final calendarsAsync = ref.watch(calendarListProvider(_provider));
     final categories =
         ref.watch(activeCategoriesProvider).asData?.value ?? const <Category>[];
     final pendingCount =
@@ -224,7 +327,7 @@ class _CalendarSettingsScreenState
                 err is CalendarGatewayException &&
                 err.kind == CalendarErrorKind.authRequired,
             busy: _connectBusy,
-            onRetry: () => ref.invalidate(calendarListProvider),
+            onRetry: () => ref.invalidate(calendarListProvider(_provider)),
             onReconnect: _reconnect,
           ),
         ),
@@ -243,9 +346,7 @@ class _CalendarSettingsScreenState
   /// 연결 상태 표시 줄 — 초록 점 + "연결됨" + [연결 해제] 버튼.
   ///
   /// 계정 이메일은 표시하지 않는다: [CalendarAuth] 인터페이스가 로그인 계정의
-  /// 이메일을 노출하는 메서드를 갖고 있지 않다 (authedClient/signOut 뿐). 새
-  /// 메서드를 material 파일에 추가하지 말라는 지시에 따라 이번 task 에선 상태만
-  /// 보여준다 — 이메일 노출은 별도 task 로 보고한다.
+  /// 이메일을 노출하는 메서드를 갖고 있지 않다 (authedClient/signOut 뿐).
   Widget _connectionHeader(ThemeData theme, ColorScheme scheme) {
     return Row(
       children: [
@@ -289,10 +390,11 @@ class _CalendarSettingsScreenState
     List<CalendarInfo> calendars,
     List<Category> categories,
   ) {
+    final view = settings.viewFor(_provider);
     // 읽기 전용 캘린더(공휴일 등)는 쓰기 대상에서 제외.
     final writable = calendars.where((c) => c.canWrite).toList();
-    final writeValue = writable.any((c) => c.id == settings.writeCalendarId)
-        ? settings.writeCalendarId
+    final writeValue = writable.any((c) => c.id == view.writeCalendarId)
+        ? view.writeCalendarId
         : null;
 
     return Column(
@@ -326,7 +428,10 @@ class _CalendarSettingsScreenState
               if (id == null) return;
               ref
                   .read(calendarSettingsProvider.notifier)
-                  .update((s) => s.copyWith(writeCalendarId: id));
+                  .updateConnection(
+                    _provider,
+                    (c) => c.copyWith(writeCalendarId: id),
+                  );
             },
           ),
         const SizedBox(height: AppTokens.space20),
@@ -350,7 +455,53 @@ class _CalendarSettingsScreenState
         else
           for (final c in calendars)
             _readCalendarRow(theme, scheme, settings, c, categories),
+        _defaultProviderRow(theme, scheme, settings),
       ],
+    );
+  }
+
+  /// 새 할 일을 어느 서비스에 올릴지. 두 서비스를 동시에 연결했을 때만 의미가 있어
+  /// 그때만 노출한다 — 한쪽만 켠 대표님에게 고민거리를 만들지 않는다.
+  Widget _defaultProviderRow(
+    ThemeData theme,
+    ColorScheme scheme,
+    CalendarSettings settings,
+  ) {
+    final connected = CalendarProvider.values
+        .where((p) => settings.viewFor(p).connected)
+        .toList();
+    // 항목이 없을 때는 여백까지 통째로 사라져야 한다 — 안 그러면 아래 내용이
+    // 이유 없이 밀려 내려간다.
+    if (connected.length < 2) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppTokens.space20),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '새 할 일을 올릴 캘린더',
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          DropdownButton<CalendarProvider>(
+            key: const ValueKey('default-provider-dropdown'),
+            value: settings.defaultProvider,
+            items: [
+              for (final p in connected)
+                DropdownMenuItem(value: p, child: Text(p.label)),
+            ],
+            onChanged: (p) {
+              if (p == null) return;
+              ref
+                  .read(calendarSettingsProvider.notifier)
+                  .update((s) => s.copyWith(defaultProvider: p));
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -361,8 +512,9 @@ class _CalendarSettingsScreenState
     CalendarInfo calendar,
     List<Category> categories,
   ) {
-    final checked = settings.readCalendarIds.contains(calendar.id);
-    final mapped = settings.categoryMap[calendar.id];
+    final view = settings.viewFor(_provider);
+    final checked = view.readCalendarIds.contains(calendar.id);
+    final mapped = view.categoryMap[calendar.id];
     final fallback = settings.defaultCategoryId.isNotEmpty
         ? settings.defaultCategoryId
         : (categories.isNotEmpty ? categories.first.id : null);
@@ -384,7 +536,7 @@ class _CalendarSettingsScreenState
                 ? VisualDensity.compact
                 : VisualDensity.standard,
             onChanged: (v) {
-              final set = Set<String>.of(settings.readCalendarIds);
+              final set = Set<String>.of(view.readCalendarIds);
               if (v ?? false) {
                 set.add(calendar.id);
               } else {
@@ -392,7 +544,10 @@ class _CalendarSettingsScreenState
               }
               ref
                   .read(calendarSettingsProvider.notifier)
-                  .update((s) => s.copyWith(readCalendarIds: set.toList()));
+                  .updateConnection(
+                    _provider,
+                    (c) => c.copyWith(readCalendarIds: set.toList()),
+                  );
             },
           ),
           Expanded(
@@ -420,11 +575,14 @@ class _CalendarSettingsScreenState
               ],
               onChanged: (catId) {
                 if (catId == null) return;
-                final map = Map<String, String>.of(settings.categoryMap)
+                final map = Map<String, String>.of(view.categoryMap)
                   ..[calendar.id] = catId;
                 ref
                     .read(calendarSettingsProvider.notifier)
-                    .update((s) => s.copyWith(categoryMap: map));
+                    .updateConnection(
+                      _provider,
+                      (c) => c.copyWith(categoryMap: map),
+                    );
               },
             ),
         ],
@@ -472,7 +630,7 @@ class _CalendarSettingsScreenState
     CalendarSettings settings,
     int pendingCount,
   ) {
-    final lastSyncedAt = settings.lastSyncedAt;
+    final lastSyncedAt = settings.viewFor(_provider).lastSyncedAt;
     final lastSyncedLabel = lastSyncedAt == null
         ? '동기화 기록 없음'
         : '마지막 동기화 ${KoDate.time(lastSyncedAt.toLocal())}';
@@ -506,8 +664,9 @@ class _CalendarSettingsScreenState
 }
 
 class _KeyMissing extends StatelessWidget {
-  const _KeyMissing({required this.theme});
+  const _KeyMissing({required this.theme, required this.provider});
   final ThemeData theme;
+  final CalendarProvider provider;
 
   @override
   Widget build(BuildContext context) {
@@ -525,7 +684,7 @@ class _KeyMissing extends StatelessWidget {
             ),
             const SizedBox(height: AppTokens.space16),
             Text(
-              'Google Calendar 연동이 아직 설정되지 않았어요',
+              '${provider.label} 연동이 아직 설정되지 않았어요',
               textAlign: TextAlign.center,
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.onSurface.withValues(alpha: 0.7),
@@ -549,17 +708,22 @@ class _KeyMissing extends StatelessWidget {
 class _NotConnected extends StatelessWidget {
   const _NotConnected({
     required this.theme,
+    required this.provider,
     required this.busy,
     required this.onConnect,
   });
 
   final ThemeData theme;
+  final CalendarProvider provider;
   final bool busy;
   final VoidCallback onConnect;
 
   @override
   Widget build(BuildContext context) {
     final scheme = theme.colorScheme;
+    final account = provider == CalendarProvider.microsoft
+        ? 'Microsoft 회사 계정'
+        : 'Google 계정';
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppTokens.space24),
@@ -573,7 +737,7 @@ class _NotConnected extends StatelessWidget {
             ),
             const SizedBox(height: AppTokens.space16),
             Text(
-              'Google 계정을 연결하면\n할 일을 캘린더에 자동으로 등록할 수 있어요',
+              '$account을 연결하면\n할 일을 캘린더에 자동으로 등록할 수 있어요',
               textAlign: TextAlign.center,
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.onSurface.withValues(alpha: 0.75),
@@ -593,7 +757,7 @@ class _NotConnected extends StatelessWidget {
                       ),
                     )
                   : const Icon(Icons.login),
-              label: const Text('Google 계정 연결'),
+              label: Text('$account 연결'),
             ),
           ],
         ),

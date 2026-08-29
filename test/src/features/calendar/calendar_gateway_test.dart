@@ -1,19 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:googleapis/calendar/v3.dart' as gcal;
 
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
 import 'package:solo_todo/src/features/calendar/google_calendar_gateway.dart';
 
 import 'fake_calendar_gateway.dart';
 
 void main() {
-  gcal.Event timed(String summary, DateTime start) => gcal.Event(
-    summary: summary,
-    start: gcal.EventDateTime(dateTime: start.toUtc(), timeZone: 'UTC'),
-    end: gcal.EventDateTime(
-      dateTime: start.toUtc().add(const Duration(hours: 1)),
-      timeZone: 'UTC',
-    ),
+  CalEvent timed(String title, DateTime start) => CalEvent(
+    title: title,
+    start: CalEventTime.at(start.toUtc()),
+    end: CalEventTime.at(start.toUtc().add(const Duration(hours: 1))),
   );
 
   group('FakeCalendarGateway — CRUD 왕복', () {
@@ -30,7 +28,7 @@ void main() {
       // list — 방금 넣은 이벤트가 보인다
       final first = await gw.listChanges('primary');
       expect(first.events.map((e) => e.id), [id]);
-      expect(first.events.single.summary, '회의');
+      expect(first.events.single.title, '회의');
       expect(first.nextSyncToken, isNotNull);
 
       // update — 내용이 반영된다
@@ -40,7 +38,7 @@ void main() {
         timed('회의(장소 변경)', DateTime.utc(2026, 8, 20, 11)),
       );
       final afterUpdate = await gw.listChanges('primary');
-      expect(afterUpdate.events.single.summary, '회의(장소 변경)');
+      expect(afterUpdate.events.single.title, '회의(장소 변경)');
       expect(
         afterUpdate.events.single.start!.dateTime!.toUtc(),
         DateTime.utc(2026, 8, 20, 11),
@@ -51,22 +49,26 @@ void main() {
       expect(gw.liveEvents('primary'), isEmpty);
       final afterDelete = await gw.listChanges('primary');
       expect(afterDelete.events.single.id, id);
-      expect(afterDelete.events.single.status, 'cancelled');
+      expect(afterDelete.events.single.cancelled, isTrue);
     });
 
     test('insert 는 이벤트가 id 를 이미 갖고 있으면 그 id 를 보존한다', () async {
       final gw = FakeCalendarGateway();
-      final e = timed('고정 id', DateTime.utc(2026, 8, 20, 10))..id = 'fixed-1';
+      final e = timed(
+        '고정 id',
+        DateTime.utc(2026, 8, 20, 10),
+      ).copyWith(id: 'fixed-1');
       expect(await gw.insertEvent('primary', e), 'fixed-1');
       expect(gw.eventById('primary', 'fixed-1'), isNotNull);
     });
 
-    test('저장은 복사본이다 — 호출자가 나중에 이벤트를 바꿔도 저장분은 안 변한다', () async {
+    test('저장분은 호출자 쪽 변경에 영향받지 않는다 (CalEvent 불변)', () async {
       final gw = FakeCalendarGateway();
       final e = timed('원본', DateTime.utc(2026, 8, 20, 10));
       final id = await gw.insertEvent('primary', e);
-      e.summary = '호출자가 나중에 바꿈';
-      expect(gw.eventById('primary', id!)!.summary, '원본');
+      // copyWith 는 새 인스턴스를 낸다 — 저장분은 그대로다.
+      e.copyWith(title: '호출자가 나중에 바꿈');
+      expect(gw.eventById('primary', id!)!.title, '원본');
     });
 
     test('캘린더별로 저장이 분리된다', () async {
@@ -120,7 +122,7 @@ void main() {
         gw.updateEvent('primary', id, timed('부활?', DateTime.utc(2026, 8, 20))),
         completes,
       );
-      expect(gw.eventById('primary', id)!.status, 'cancelled');
+      expect(gw.eventById('primary', id)!.cancelled, isTrue);
       expect(gw.liveEvents('primary'), isEmpty);
     });
   });
@@ -166,7 +168,7 @@ void main() {
         syncToken: page1.nextSyncToken,
       );
       expect(page2.events.single.id, id);
-      expect(page2.events.single.status, 'cancelled');
+      expect(page2.events.single.cancelled, isTrue);
     });
 
     test('만료된 토큰은 syncTokenExpired 로 알려준다 (전체 재동기화 신호)', () async {
@@ -212,7 +214,7 @@ void main() {
         'primary',
         timeMin: DateTime.utc(2026, 8, 1),
       );
-      expect(page.events.map((e) => e.summary), ['최근']);
+      expect(page.events.map((e) => e.title), ['최근']);
     });
   });
 
@@ -300,12 +302,12 @@ void main() {
       final gw = FakeCalendarGateway();
       gw.seedEvent(
         'primary',
-        gcal.Event(
+        CalEvent(
           id: 'remote-1',
-          summary: '구글에서 만든 일정',
+          title: '구글에서 만든 일정',
           updated: DateTime.utc(2026, 8, 19, 8),
-          start: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 9)),
-          end: gcal.EventDateTime(dateTime: DateTime.utc(2026, 8, 20, 10)),
+          start: CalEventTime.at(DateTime.utc(2026, 8, 20, 9)),
+          end: CalEventTime.at(DateTime.utc(2026, 8, 20, 10)),
         ),
       );
       expect(gw.callCount(CalendarOp.insertEvent), 0);
@@ -315,9 +317,9 @@ void main() {
       expect(page.events.single.updated, DateTime.utc(2026, 8, 19, 8));
     });
 
-    test('cancelRemotely 는 구글 쪽 삭제를 흉내낸다', () async {
+    test('cancelRemotely 는 캘린더 쪽 삭제를 흉내낸다', () async {
       final gw = FakeCalendarGateway();
-      gw.seedEvent('primary', gcal.Event(id: 'remote-1', summary: '일정'));
+      gw.seedEvent('primary', const CalEvent(id: 'remote-1', title: '일정'));
       final page1 = await gw.listChanges('primary');
 
       gw.cancelRemotely('primary', 'remote-1');
@@ -325,7 +327,7 @@ void main() {
         'primary',
         syncToken: page1.nextSyncToken,
       );
-      expect(page2.events.single.status, 'cancelled');
+      expect(page2.events.single.cancelled, isTrue);
       expect(gw.liveEvents('primary'), isEmpty);
     });
 

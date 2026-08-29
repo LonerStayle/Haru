@@ -7,6 +7,7 @@ import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings_screen.dart';
@@ -35,17 +36,25 @@ class _FakePreference implements CalendarSettingsPreference {
   }
 
   @override
-  Future<void> setSyncToken(String calendarId, String token) async {
-    final tokens = Map<String, String>.of(stored.syncTokens)
+  Future<void> setSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+    String token,
+  ) async {
+    final view = stored.viewFor(provider);
+    final tokens = Map<String, String>.of(view.syncTokens)
       ..[calendarId] = token;
-    stored = stored.copyWith(syncTokens: tokens);
+    stored = stored.withConnection(provider, view.copyWith(syncTokens: tokens));
   }
 
   @override
-  Future<void> clearSyncToken(String calendarId) async {
-    final tokens = Map<String, String>.of(stored.syncTokens)
-      ..remove(calendarId);
-    stored = stored.copyWith(syncTokens: tokens);
+  Future<void> clearSyncToken(
+    CalendarProvider provider,
+    String calendarId,
+  ) async {
+    final view = stored.viewFor(provider);
+    final tokens = Map<String, String>.of(view.syncTokens)..remove(calendarId);
+    stored = stored.withConnection(provider, view.copyWith(syncTokens: tokens));
   }
 }
 

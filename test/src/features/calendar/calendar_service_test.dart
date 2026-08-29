@@ -95,8 +95,8 @@ void main() {
     });
   });
 
-  group('google-calendar-sync — 완료 표시(colorId)', () {
-    test('완료된 할 일 → 회색(colorId=8)', () {
+  group('google-calendar-sync — 완료 표시(markDone)', () {
+    test('완료된 할 일 → 완료 표식', () {
       // ignore: invalid_use_of_visible_for_testing_member
       final e = CalendarService.buildEvent(
         make(
@@ -104,15 +104,15 @@ void main() {
           doneAt: DateTime.utc(2026, 5, 27, 15),
         ),
       );
-      expect(e.colorId, '8');
+      expect(e.markDone, isTrue);
     });
 
-    test('미완료 → colorId 없음 (캘린더 기본색 복구)', () {
+    test('미완료 → 완료 표식 없음 (캘린더 기본색 복구)', () {
       // ignore: invalid_use_of_visible_for_testing_member
       final e = CalendarService.buildEvent(
         make(dueAt: DateTime.utc(2026, 5, 27, 14)),
       );
-      expect(e.colorId, isNull);
+      expect(e.markDone, isFalse);
     });
 
     test('완료해도 제목은 그대로 — 역방향 파싱 오염 방지', () {
@@ -123,15 +123,14 @@ void main() {
           doneAt: DateTime.utc(2026, 5, 27, 15),
         ),
       );
-      expect(e.summary, '제목');
+      expect(e.title, '제목');
     });
   });
 
-  group('google-calendar-sync — 앱 서명(extendedProperties)', () {
+  group('google-calendar-sync — 앱 서명(appProperties)', () {
     Map<String, String> signatureOf(Todo t) {
       // ignore: invalid_use_of_visible_for_testing_member
-      final e = CalendarService.buildEvent(t);
-      return e.extendedProperties!.private!;
+      return CalendarService.buildEvent(t).appProperties;
     }
 
     test('haruTodoId — 링크 복구용 할 일 id', () {
