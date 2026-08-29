@@ -269,7 +269,7 @@ void main() {
     });
   });
 
-  group('setDueAt — 캘린더 드래그 전용 (v1.6)', () {
+  group('updatePreservingOrder — sortOrder 보존 저장 경로 (v1.6 캘린더 드래그 외)', () {
     Todo dated({
       String id = 'a',
       DateTime? dueAt,
@@ -297,7 +297,7 @@ void main() {
       final later = DateTime.utc(2026, 8, 20, 10);
       controller = TodoActionsController(repo, () => later);
 
-      final moved = await controller.setDueAt(
+      final moved = await controller.updatePreservingOrder(
         original.copyWith(dueAt: DateTime(2026, 8, 20, 14, 30)),
       );
 
@@ -326,7 +326,7 @@ void main() {
       final later = DateTime.utc(2026, 8, 20, 10);
       controller = TodoActionsController(repo, () => later);
 
-      final same = await controller.setDueAt(original);
+      final same = await controller.updatePreservingOrder(original);
       expect(same.updatedAt, created);
       expect((await repo.getById('a'))!.updatedAt, created);
     });
@@ -336,7 +336,7 @@ void main() {
       // 화면이 들고 있던 옛 스냅샷(sortOrder 99)으로 날짜만 옮긴다.
       final stale = dated(sortOrder: 99, dueAt: DateTime(2026, 8, 22, 14, 30));
 
-      final moved = await controller.setDueAt(stale);
+      final moved = await controller.updatePreservingOrder(stale);
 
       expect(moved.sortOrder, 3);
       expect((await repo.getById('a'))!.sortOrder, 3);
@@ -350,7 +350,7 @@ void main() {
       );
       await repo.upsert(original);
 
-      await controller.setDueAt(
+      await controller.updatePreservingOrder(
         original.copyWith(
           dueAt: DateTime(2026, 8, 20),
           endAt: DateTime(2026, 8, 23),
@@ -365,7 +365,7 @@ void main() {
 
     test('DB 에 없던 항목(방금 실체화된 반복 회차)도 그대로 저장된다', () async {
       final fresh = dated(id: 'series#20260820', sortOrder: 5);
-      final saved = await controller.setDueAt(fresh);
+      final saved = await controller.updatePreservingOrder(fresh);
       expect(saved.sortOrder, 5);
       expect(await repo.getById('series#20260820'), isNotNull);
     });

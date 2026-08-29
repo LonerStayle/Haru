@@ -15,7 +15,9 @@ import 'package:solo_todo/src/ui/widgets/undone_square.dart';
 ///
 /// 고정하는 경계:
 ///  - 편집 모드에서만 보이고, 현재 상태 칸만 채워진다.
-///  - 칩 탭 = 즉시 저장 (시트를 닫지 않아도 onUpdate 가 불린다).
+///  - 칩 탭 = 즉시 저장. 단 일반 편집(onUpdate)이 아니라 **순서 보존 콜백**
+///    (onStatusChanged) 으로 나간다 — 상태 변경은 목록 타일의 체크·세모 토글과 같은
+///    행위라 자리(sortOrder)가 튀면 안 된다.
 ///  - note 는 상태 개념이 없어 섹션이 사라진다 (시트 안 종류 토글에도 반응).
 ///  - 즉시 저장한 상태가 닫힘 자동 저장의 옛 스냅샷에 덮이지 않는다.
 void main() {
@@ -23,14 +25,16 @@ void main() {
   const progressKey = ValueKey('status-inProgress');
   const doneKey = ValueKey('status-done');
 
-  Future<List<Todo>> mountSheet(
+  Future<({List<Todo> updates, List<Todo> statusSaves})> mountSheet(
     WidgetTester tester, {
     Todo? initialTodo,
+    bool wireStatusCallback = true,
   }) async {
     await tester.binding.setSurfaceSize(const Size(700, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final updates = <Todo>[];
+    final statusSaves = <Todo>[];
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -51,6 +55,9 @@ void main() {
                     initialTodo: initialTodo,
                     onSubmit: (_) {},
                     onUpdate: updates.add,
+                    onStatusChanged: wireStatusCallback
+                        ? statusSaves.add
+                        : null,
                   ),
                   child: const Text('열기'),
                 ),
@@ -62,7 +69,7 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('open-sheet')));
     await tester.pumpAndSettle();
-    return updates;
+    return (updates: updates, statusSaves: statusSaves);
   }
 
   Todo makeTodo({
@@ -150,34 +157,64 @@ void main() {
   });
 
   testWidgets('△ 탭 → 진행중으로 즉시 저장 (시트는 열린 채)', (tester) async {
-    final updates = await mountSheet(tester, initialTodo: makeTodo());
+    final r = await mountSheet(tester, initialTodo: makeTodo());
 
     await tapStatus(tester, progressKey);
 
     expect(find.byType(AddTodoSheet), findsOneWidget, reason: '시트는 닫히지 않는다');
-    expect(updates, hasLength(1));
-    expect(updates.single.startedAt, isNotNull);
-    expect(updates.single.doneAt, isNull);
-    expect(updates.single.sortOrder, 7, reason: '상태 변경이 순서를 건드리면 안 된다');
+    expect(r.statusSaves, hasLength(1));
+    expect(r.updates, isEmpty, reason: '순서를 bump 하는 일반 편집 경로로 새면 안 된다');
+    expect(r.statusSaves.single.startedAt, isNotNull);
+    expect(r.statusSaves.single.doneAt, isNull);
+    expect(r.statusSaves.single.sortOrder, 7, reason: '상태 변경이 순서를 건드리면 안 된다');
     expect(filled(tester, progressKey), isTrue);
   });
 
+  testWidgets('상태 저장 payload 는 입력 중인 제목을 싣지 않는다 (내용 편집은 닫힘 저장 몫)', (
+    tester,
+  ) async {
+    final r = await mountSheet(tester, initialTodo: makeTodo());
+
+    await tester.enterText(
+      find.byKey(const ValueKey('add-todo-title')),
+      '고치는 중',
+    );
+    await tester.pump();
+    await tapStatus(tester, progressKey);
+
+    expect(r.statusSaves.single.title, '상태 바꿀 항목', reason: '저장된 스냅샷 + 상태만');
+  });
+
+  testWidgets('onStatusChanged 미연결 시 onUpdate 로 폴백한다 (안전망)', (tester) async {
+    final r = await mountSheet(
+      tester,
+      initialTodo: makeTodo(),
+      wireStatusCallback: false,
+    );
+
+    await tapStatus(tester, progressKey);
+
+    expect(r.statusSaves, isEmpty);
+    expect(r.updates, hasLength(1));
+    expect(r.updates.single.startedAt, isNotNull);
+  });
+
   testWidgets('◯ 탭 → 완료로 즉시 저장 (진행중 표식 제거)', (tester) async {
-    final updates = await mountSheet(
+    final r = await mountSheet(
       tester,
       initialTodo: makeTodo(startedAt: DateTime.utc(2026, 8, 25)),
     );
 
     await tapStatus(tester, doneKey);
 
-    expect(updates, hasLength(1));
-    expect(updates.single.doneAt, isNotNull);
-    expect(updates.single.startedAt, isNull, reason: '완료 = 진행중 아님');
+    expect(r.statusSaves, hasLength(1));
+    expect(r.statusSaves.single.doneAt, isNotNull);
+    expect(r.statusSaves.single.startedAt, isNull, reason: '완료 = 진행중 아님');
     expect(filled(tester, doneKey), isTrue);
   });
 
   testWidgets('□ 탭 → 미완료로 즉시 저장 (둘 다 비움)', (tester) async {
-    final updates = await mountSheet(
+    final r = await mountSheet(
       tester,
       initialTodo: makeTodo(doneAt: DateTime.utc(2026, 8, 26)),
     );
@@ -186,18 +223,19 @@ void main() {
 
     await tapStatus(tester, undoneKey);
 
-    expect(updates, hasLength(1));
-    expect(updates.single.doneAt, isNull);
-    expect(updates.single.startedAt, isNull);
+    expect(r.statusSaves, hasLength(1));
+    expect(r.statusSaves.single.doneAt, isNull);
+    expect(r.statusSaves.single.startedAt, isNull);
     expect(filled(tester, undoneKey), isTrue);
   });
 
   testWidgets('같은 칸을 다시 눌러도 저장하지 않는다 (헛저장 방지)', (tester) async {
-    final updates = await mountSheet(tester, initialTodo: makeTodo());
+    final r = await mountSheet(tester, initialTodo: makeTodo());
 
     await tapStatus(tester, undoneKey);
 
-    expect(updates, isEmpty);
+    expect(r.statusSaves, isEmpty);
+    expect(r.updates, isEmpty);
   });
 
   testWidgets('note 타입 — 상태 섹션이 없다', (tester) async {
@@ -231,28 +269,31 @@ void main() {
   });
 
   testWidgets('상태를 바꾸고 시트를 닫아도 옛 스냅샷으로 되돌아가지 않는다', (tester) async {
-    final updates = await mountSheet(tester, initialTodo: makeTodo());
+    final r = await mountSheet(tester, initialTodo: makeTodo());
 
     await tapStatus(tester, progressKey);
     await tapBarrier(tester);
 
     expect(find.byType(AddTodoSheet), findsNothing);
-    expect(updates, hasLength(2), reason: '즉시 저장 + 닫힘 자동 저장');
-    final last = updates.last;
-    expect(last.startedAt, isNotNull, reason: '닫힘 저장이 진행중을 되돌리면 안 된다');
-    expect(last.doneAt, isNull);
-    // 타임스탬프까지 같아야 컨트롤러의 무변경 판정이 서고 순서 bump 가 안 생긴다.
-    expect(last.startedAt, updates.first.startedAt);
+    expect(r.statusSaves, hasLength(1), reason: '즉시 저장 (순서 보존 경로)');
+    expect(r.updates, hasLength(1), reason: '닫힘 자동 저장 (일반 편집 경로)');
+    final closed = r.updates.single;
+    expect(closed.startedAt, isNotNull, reason: '닫힘 저장이 진행중을 되돌리면 안 된다');
+    expect(closed.doneAt, isNull);
+    // 타임스탬프까지 같아야 컨트롤러의 무변경 판정이 서고, 보존된 순서가 다시
+    // bump 되지 않는다.
+    expect(closed.startedAt, r.statusSaves.single.startedAt);
+    expect(closed.sortOrder, 7);
   });
 
   testWidgets('완료로 바꾸고 닫아도 완료가 유지된다', (tester) async {
-    final updates = await mountSheet(tester, initialTodo: makeTodo());
+    final r = await mountSheet(tester, initialTodo: makeTodo());
 
     await tapStatus(tester, doneKey);
     await tapBarrier(tester);
 
-    expect(updates.last.doneAt, isNotNull);
-    expect(updates.last.doneAt, updates.first.doneAt);
-    expect(updates.last.startedAt, isNull);
+    expect(r.updates.single.doneAt, isNotNull);
+    expect(r.updates.single.doneAt, r.statusSaves.single.doneAt);
+    expect(r.updates.single.startedAt, isNull);
   });
 }

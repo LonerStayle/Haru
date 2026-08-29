@@ -127,6 +127,9 @@ class HomeScreen extends ConsumerWidget {
               onUpdate: (updated) {
                 ref.read(todoActionsProvider).update(updated);
               },
+              onStatusChanged: (updated) {
+                ref.read(todoActionsProvider).updatePreservingOrder(updated);
+              },
               onRequestMove: (item) =>
                   showMoveTodoSheet(context, ref, item: item),
             );

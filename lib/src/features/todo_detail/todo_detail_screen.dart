@@ -120,6 +120,8 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
               initialTodo: live,
               onSubmit: (_) {},
               onUpdate: (updated) => actions.update(updated),
+              onStatusChanged: (updated) =>
+                  actions.updatePreservingOrder(updated),
               onRequestMove: (item) =>
                   showMoveTodoSheet(context, ref, item: item),
             ),
@@ -200,6 +202,8 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
                     initialTodo: leaf,
                     onSubmit: (_) {},
                     onUpdate: (updated) => actions.update(updated),
+                    onStatusChanged: (updated) =>
+                        actions.updatePreservingOrder(updated),
                     onRequestMove: (item) =>
                         showMoveTodoSheet(context, ref, item: item),
                   ),

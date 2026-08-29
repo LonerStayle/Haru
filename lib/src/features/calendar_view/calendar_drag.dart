@@ -15,7 +15,7 @@ import 'calendar_layout.dart';
 ///   찍지 않는 전 앱 규칙은 `isAllDay == true` 로만 보장된다.)
 ///
 /// [Todo.sortOrder] 는 건드리지 않는다 — 날짜 이동은 순서 조작이 아니다.
-/// 순서 보존은 저장 경로(`TodoActionsController.setDueAt`)가 함께 책임진다.
+/// 순서 보존은 저장 경로(`TodoActionsController.updatePreservingOrder`)가 함께 책임진다.
 Todo applyDateDrop(Todo todo, DateTime targetDate) {
   final target = dateOnly(targetDate);
   final due = todo.dueAt;

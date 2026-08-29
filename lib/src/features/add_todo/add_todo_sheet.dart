@@ -30,6 +30,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     this.initialCategory = Category.daily,
     required this.onSubmit,
     this.onUpdate,
+    this.onStatusChanged,
     this.initialTodo,
     this.prefillFrom,
     this.now,
@@ -66,6 +67,18 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   /// 호출. 호출자는 todoActionsProvider.update 또는 동등 mutation 수행.
   final void Function(Todo updated)? onUpdate;
 
+  /// 3-상태(□/△/◯) 칩 탭 전용 저장 콜백 — **[onUpdate] 와 반드시 구분**한다.
+  ///
+  /// 상태 변경은 의미상 목록 타일의 체크·세모 토글과 같은 행위라 **자리(sortOrder)가
+  /// 튀면 안 된다**. 반면 [onUpdate] 가 태우는 `TodoActionsController.update` 는
+  /// "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 bump 한다. 그래서 호출자는 이
+  /// 콜백을 `TodoActionsController.updatePreservingOrder` 로 연결해야 한다.
+  ///
+  /// ⚠️ RISK(side-effect): null 이면 [onUpdate] 로 폴백하므로 **조용히 bump 되는**
+  /// 회귀가 된다 (그 화면에서만 상태를 바꾸면 항목이 맨 위로 튀어오른다). 시트를 여는
+  /// 곳은 전부 이 콜백을 연결해 둘 것 — 폴백은 안전망일 뿐 기본 경로가 아니다.
+  final void Function(Todo updated)? onStatusChanged;
+
   /// v1.2 — null 이면 add 모드 (기존), non-null 이면 edit 모드. _titleCtrl /
   /// _descriptionCtrl / _category / _dueAt / _type 가 모두 prefill 된다.
   final Todo? initialTodo;
@@ -100,6 +113,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     Category initialCategory = Category.daily,
     required void Function(AddTodoSubmission) onSubmit,
     void Function(Todo updated)? onUpdate,
+    void Function(Todo updated)? onStatusChanged,
     Todo? initialTodo,
     Todo? prefillFrom,
     String? parentId,
@@ -119,6 +133,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
           initialCategory: initialCategory,
           onSubmit: onSubmit,
           onUpdate: onUpdate,
+          onStatusChanged: onStatusChanged,
           initialTodo: initialTodo,
           prefillFrom: prefillFrom,
           parentId: parentId,
@@ -547,10 +562,14 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
 
   /// 상태 칩(□ 미완료 / △ 진행중 / ◯ 완료) 탭 — **즉시 저장**.
   ///
-  /// 시트를 닫지 않아도 목록에 바로 반영되도록 그 자리에서 [_applyEdit] 를 태운다.
-  /// 전이 규칙(불변식: startedAt/doneAt 동시 세팅 금지)은 도메인 헬퍼
-  /// [Todo.withStatus] 하나에만 두고, 계산 결과를 시트 state 로 받아 둔다 — 그래야
-  /// 나중의 닫힘 저장이 같은 값을 그대로 써서 헛저장 없이 no-op 으로 걸러진다.
+  /// 시트를 닫지 않아도 목록에 바로 반영된다. 전이 규칙(불변식: startedAt/doneAt
+  /// 동시 세팅 금지)은 도메인 헬퍼 [Todo.withStatus] 하나에만 두고, 계산 결과를 시트
+  /// state 로 받아 둔다 — 그래야 나중의 닫힘 저장이 같은 값을 그대로 써서 헛저장 없이
+  /// no-op 으로 걸러지고, 보존된 sortOrder 가 그 no-op 덕에 다시 bump 되지 않는다.
+  ///
+  /// 넘기는 값은 **저장된 스냅샷에서 상태만 바꾼 것**이다 — 시트에 입력 중인 제목·
+  /// 카테고리 등은 싣지 않는다. 그건 내용 편집이라 "맨 위로" 규칙이 적용되는 [_applyEdit]
+  /// (닫힘 저장 / 저장 버튼) 의 몫이고, 여기 섞으면 상태 탭이 그 규칙까지 끌고 온다.
   void _setStatus(TodoStatus next) {
     final initial = widget.initialTodo;
     if (initial == null || _type == TodoType.note || _status == next) return;
@@ -561,10 +580,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       _doneAt = applied.doneAt;
       _startedAt = applied.startedAt;
     });
-    // 저장 버튼·닫힘 훅과 같은 유효성 조건. 제목이 비었거나 기간이 뒤집혔으면 지금은
-    // 저장하지 않고, 입력을 고쳐 닫을 때 이 상태까지 함께 반영된다.
-    if (_titleCtrl.text.trim().isEmpty || _rangeInvalid) return;
-    _applyEdit();
+    // 순서 보존 경로로 저장한다. onStatusChanged 미연결 시의 onUpdate 폴백은 안전망일
+    // 뿐 — 그 경로로 가면 sortOrder 가 bump 되어 항목이 맨 위로 튄다.
+    (widget.onStatusChanged ?? widget.onUpdate)?.call(applied);
   }
 
   /// task ↔ note 토글. note 로 바꿀 때는 일정 관련 state 를 안전하게 reset.

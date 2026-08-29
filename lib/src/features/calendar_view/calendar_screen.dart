@@ -148,7 +148,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     final moved = applyDateDrop(todo, date);
     // 같은 날에 떨어뜨렸으면 applyDateDrop 이 원본을 그대로 돌려준다 → 저장 생략.
     if (!identical(moved, todo)) {
-      await ref.read(todoActionsProvider).setDueAt(moved);
+      await ref.read(todoActionsProvider).updatePreservingOrder(moved);
     }
     if (!mounted) return;
     // 옮긴 결과를 바로 보여준다 — 어디로 갔는지 눈으로 확인시키는 게 핵심.
