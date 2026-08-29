@@ -51,6 +51,25 @@ enum TodoDateMode {
   range,
 }
 
+/// 할 일의 3-상태 — 미완료 / 진행중 / 완료.
+///
+/// [Todo.startedAt] 와 [Todo.doneAt] 조합에 이름을 붙인 것이다. 두 필드는 동시에
+/// 세팅되지 않는다는 불변식 덕분에 조합은 정확히 이 셋뿐이다.
+/// ([TodoType.note] 는 체크·진행 개념이 없어 항상 [TodoStatus.undone].)
+///
+/// 뷰 필터인 `TodoStatusFilter` 와 라벨은 같지만 층이 다르다 — 이쪽은 도메인 상태,
+/// 저쪽은 목록을 좁히는 렌더 조건.
+enum TodoStatus {
+  /// 둘 다 null — 아직 손대지 않음. (□)
+  undone,
+
+  /// startedAt 만 있음 — 시작했으나 미완. (△)
+  inProgress,
+
+  /// doneAt 있음 — 완료. (◯)
+  done,
+}
+
 @freezed
 abstract class Todo with _$Todo {
   const Todo._();
@@ -189,6 +208,42 @@ abstract class Todo with _$Todo {
     return isInProgress
         ? copyWith(startedAt: null, updatedAt: n)
         : copyWith(startedAt: n, doneAt: null, updatedAt: n);
+  }
+
+  /// 현재 3-상태. note 는 상태 개념이 없어 항상 [TodoStatus.undone].
+  TodoStatus get status {
+    if (isDone) return TodoStatus.done;
+    if (isInProgress) return TodoStatus.inProgress;
+    return TodoStatus.undone;
+  }
+
+  /// 상태를 [next] 로 **직접 지정**한다. 현재 상태에서 다음으로 넘어가는 toggle 과
+  /// 달리, 어디에 있든 목표 상태로 간다 (편집 시트의 □ / △ / ◯ 탭).
+  ///
+  /// 불변식 유지 — 완료면 [startedAt] 를 비우고, 진행중이면 [doneAt] 를 비우며,
+  /// 미완료면 둘 다 비운다. [toggleDone] / [toggleInProgress] 가 만드는 결과와 정확히
+  /// 같은 조합이라 의미가 어긋나지 않는다.
+  ///
+  /// 이미 그 상태면 **원본을 그대로** 돌려준다 — [updatedAt] 도 건드리지 않아 헛저장·
+  /// 헛동기화가 생기지 않는다. [sortOrder] 는 어떤 경로로도 바뀌지 않는다 (체크·세모
+  /// 토글과 같은 규칙 — 상태를 바꿔도 자리는 그대로).
+  /// note 타입은 무시.
+  Todo withStatus(TodoStatus next, {DateTime Function()? now}) {
+    if (type == TodoType.note || status == next) return this;
+    final n = (now ?? DateTime.now)();
+    return switch (next) {
+      TodoStatus.undone => copyWith(
+        doneAt: null,
+        startedAt: null,
+        updatedAt: n,
+      ),
+      TodoStatus.inProgress => copyWith(
+        doneAt: null,
+        startedAt: n,
+        updatedAt: n,
+      ),
+      TodoStatus.done => copyWith(doneAt: n, startedAt: null, updatedAt: n),
+    };
   }
 
   /// 캘린더 이벤트 id 갱신.
