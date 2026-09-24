@@ -17,6 +17,7 @@ import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
 
 /// 기능 M — 하위 체크리스트 드릴다운 상세 화면.
 ///
@@ -211,7 +212,7 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
                     onRequestMove: (item) =>
                         showMoveTodoSheet(context, ref, item: item),
                   ),
-                  onToggle: actions.toggle,
+                  onToggle: (t) => toggleWithUndo(context, actions, t),
                   onToggleInProgress: actions.toggleInProgress,
                   onAddChild: (p) => showAddChildSheet(context, ref, parent: p),
                   onMove: (t) => showMoveTodoSheet(context, ref, item: t),

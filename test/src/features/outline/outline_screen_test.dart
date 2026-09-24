@@ -210,27 +210,21 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
       await tester.pump();
 
-      BoxDecoration circleDeco(String id) {
-        final container = tester.widget<AnimatedContainer>(
-          find.descendant(
-            of: find.byKey(ValueKey('outline-check-$id')),
-            matching: find.byType(AnimatedContainer),
-          ),
-        );
-        return container.decoration! as BoxDecoration;
-      }
-
-      // 미완료 — 투명 채움 + 카테고리색 0.55 ring.
-      final u = circleDeco('u');
-      expect(u.color, Colors.transparent);
-      expect(
-        (u.border! as Border).top.color,
-        Category.work.color.withValues(alpha: 0.55),
+      Icon checkIcon(String id) => tester.widget<Icon>(
+        find.descendant(
+          of: find.byKey(ValueKey('outline-check-$id')),
+          matching: find.byType(Icon),
+        ),
       );
-      // 완료 — 카테고리색 채움 + 동일 색 ring.
-      final d = circleDeco('d');
+
+      // 미완료 — 카테고리색 0.55 ring (TodoStatusCheck ○).
+      final u = checkIcon('u');
+      expect(u.icon, Icons.radio_button_unchecked);
+      expect(u.color, Category.work.color.withValues(alpha: 0.55));
+      // 완료 — 카테고리색 채움 (●).
+      final d = checkIcon('d');
+      expect(d.icon, Icons.check_circle_rounded);
       expect(d.color, Category.work.color);
-      expect((d.border! as Border).top.color, Category.work.color);
     });
 
     testWidgets('펼침 → 접힘 토글 — 카테고리 row tap 시 자식 root 들 사라짐', (tester) async {

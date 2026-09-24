@@ -8,12 +8,13 @@ import '../../domain/category.dart';
 import '../../domain/group.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
-import '../../ui/widgets/in_progress_triangle.dart';
+import '../../ui/widgets/todo_status_check.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'tree_providers.dart';
 
@@ -694,7 +695,6 @@ class _OutlineNode extends ConsumerWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDone = node.isDone;
-    final isInProgress = node.isInProgress;
     // §14 — note 헤딩은 체크 개념이 없어 체크박스 대신 카테고리색 메모 글리프로 표시.
     final isNote = node.type == TodoType.note;
     // 날짜가 지정된 체크리스트 항목은 제목 아래에 날짜 라벨을 노출 (TodoTile 과 동일 출처).
@@ -738,29 +738,18 @@ class _OutlineNode extends ConsumerWidget {
                   color: NoteVisual.accent(node.category),
                 ),
               )
-            else ...[
-              // 진행중(세모) 버튼 — 완료 체크 원 왼쪽. task 만.
-              InkWell(
-                key: ValueKey('outline-progress-${node.id}'),
-                onTap: () =>
-                    ref.read(todoActionsProvider).toggleInProgress(node),
-                customBorder: const CircleBorder(),
-                child: Padding(
-                  padding: const EdgeInsets.all(AppTokens.space4),
-                  child: InProgressTriangle(
-                    active: isInProgress,
-                    color: node.category.color,
-                    size: 20,
-                  ),
-                ),
-              ),
+            else
+              // 체크 하나(○/◐/●) — 탭 = 완료 토글. 진행중 전환은 편집 시트의 상태 칩.
               _CheckCircle(
                 checkKey: ValueKey('outline-check-${node.id}'),
-                done: isDone,
+                status: node.status,
                 color: node.category.color,
-                onTap: () => ref.read(todoActionsProvider).toggle(node),
+                onTap: () => toggleWithUndo(
+                  context,
+                  ref.read(todoActionsProvider),
+                  node,
+                ),
               ),
-            ],
             const SizedBox(width: AppTokens.space12),
             Expanded(
               child: Column(
@@ -838,18 +827,18 @@ class _OutlineNode extends ConsumerWidget {
   }
 }
 
-/// 큰 원형 체크박스 — 미완료는 외곽선, 완료는 카테고리 색 채움 + 흰 체크.
+/// 원형 체크 — [TodoStatusCheck] 를 탭 영역으로 감싼다 (다른 목록과 같은 모양).
 /// [checkKey] 는 InkWell 에 부여되어 테스트/탭 타깃 식별에 쓰인다.
 class _CheckCircle extends StatelessWidget {
   const _CheckCircle({
     required this.checkKey,
-    required this.done,
+    required this.status,
     required this.color,
     required this.onTap,
   });
 
   final Key checkKey;
-  final bool done;
+  final TodoStatus status;
   final Color color;
   final VoidCallback onTap;
 
@@ -861,24 +850,7 @@ class _CheckCircle extends StatelessWidget {
       customBorder: const CircleBorder(),
       child: Padding(
         padding: const EdgeInsets.all(AppTokens.space4),
-        child: AnimatedContainer(
-          duration: AppTokens.motionFast,
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: done ? color : Colors.transparent,
-            // §13 — 미완료 ring 도 카테고리색(0.55) 으로 — TodoTile task 와 일관
-            // ("체크 가능" 카테고리색 힌트). 완료는 카테고리색 채움 + 흰 체크.
-            border: Border.all(
-              color: done ? color : color.withValues(alpha: 0.55),
-              width: 2,
-            ),
-          ),
-          child: done
-              ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
-              : null,
-        ),
+        child: TodoStatusCheck(status: status, color: color, size: 24),
       ),
     );
   }

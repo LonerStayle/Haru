@@ -7,6 +7,8 @@ import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
+import '../../ui/widgets/todo_status_check.dart';
 import 'calendar_actions.dart';
 import 'calendar_entry.dart';
 
@@ -312,23 +314,19 @@ class _CheckDot extends ConsumerWidget {
         customBorder: const CircleBorder(),
         onTap: () async {
           final todo = await resolveEntryTodo(ref, entry);
-          if (todo == null) return;
-          await ref.read(todoActionsProvider).toggle(todo);
+          if (todo == null || !context.mounted) return;
+          await toggleWithUndo(context, ref.read(todoActionsProvider), todo);
         },
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: entry.isDone ? entry.color : null,
-            border: Border.all(
-              color: entry.color.withValues(alpha: entry.isGhost ? 0.5 : 0.8),
-              width: 1.5,
-            ),
+        // 다른 목록과 같은 체크(○/◐/●). 반복 미리보기(ghost)는 옅게.
+        child: Opacity(
+          opacity: entry.isGhost ? 0.6 : 1,
+          child: TodoStatusCheck(
+            status: e is TodoEntry
+                ? e.todo.status
+                : (entry.isDone ? TodoStatus.done : TodoStatus.undone),
+            color: entry.color,
+            size: 22,
           ),
-          child: entry.isDone
-              ? const Icon(Icons.check, size: 13, color: Colors.white)
-              : null,
         ),
       ),
     );

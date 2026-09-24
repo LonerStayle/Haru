@@ -1,4 +1,4 @@
-// ignore_for_file: invalid_use_of_visible_for_testing_member
+// ignore_for_file: invalid_use_of_visible_for_testing_member, use_build_context_synchronously
 // UX 리뷰용 화면 캡처 스크립트 — test/_ux_snapshot_test.dart 로 복사해 실행 후 삭제 (커밋 금지).
 // 사용법: docs/ux-review/tools/README.md
 import 'dart:io';

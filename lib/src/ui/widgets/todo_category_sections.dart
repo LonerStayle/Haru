@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../../domain/policies/carryover_policy.dart';
 import '../../domain/todo.dart';
 import 'dismissible_todo_tile.dart';
 
@@ -49,6 +50,9 @@ List<Widget> todayCategorySectionSlivers({
   onMoveToCategory,
   Map<String, int> hiddenCountBySeries = const {},
   void Function(Todo)? onStopRecurrence,
+
+  /// 이월 표시 기준 시각. null 이면 이월 표시 없음.
+  DateTime? now,
 }) {
   // parentId → 직속 자식 수 (드릴 배지 / 편집 분기 판정용).
   final childCounts = <String, int>{};
@@ -202,6 +206,9 @@ List<Widget> todayCategorySectionSlivers({
               onStopRecurrence: onStopRecurrence == null
                   ? null
                   : () => onStopRecurrence(todo),
+              isCarriedOver:
+                  now != null &&
+                  CarryoverPolicy.shouldCarryOverToday(todo, now),
             ),
           ),
         );

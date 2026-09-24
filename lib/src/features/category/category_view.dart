@@ -17,6 +17,7 @@ import '../add_todo/add_todo_sheet.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'category_providers.dart';
 
@@ -46,7 +47,8 @@ class CategoryView extends ConsumerWidget {
         onToggleSort: () => ref.read(sortModeProvider.notifier).toggle(),
         onAddTodo: () =>
             showNewTodoSheet(context, ref, initialCategory: category),
-        onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
+        onToggle: (t) =>
+            toggleWithUndo(context, ref.read(todoActionsProvider), t),
         onToggleInProgress: (t) =>
             ref.read(todoActionsProvider).toggleInProgress(t),
         onDelete: (t) async {

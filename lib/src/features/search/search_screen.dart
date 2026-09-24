@@ -14,6 +14,7 @@ import '../category/categories_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
 import 'todo_search.dart';
 
 /// 할 일·메모 전역 검색 화면.
@@ -162,7 +163,8 @@ class _Results extends ConsumerWidget {
             todo: todo,
             breadcrumb: hit.breadcrumb,
             snippet: hit.snippet,
-            onToggle: () => ref.read(todoActionsProvider).toggle(todo),
+            onToggle: () =>
+                toggleWithUndo(context, ref.read(todoActionsProvider), todo),
             // 메모는 체크 개념이 없어 진행중 토글도 두지 않는다.
             onToggleInProgress: todo.type == TodoType.note
                 ? null

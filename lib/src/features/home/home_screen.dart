@@ -25,6 +25,7 @@ import '../outline/tree_providers.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../recurrence/recurrence_manage_screen.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/toggle_with_undo.dart';
 import '../todo_detail/todo_detail_screen.dart';
 import 'today_providers.dart';
 
@@ -110,7 +111,8 @@ class HomeScreen extends ConsumerWidget {
           carryoverCount: carryoverCount,
           showHeader: showHeader,
           now: now,
-          onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
+          onToggle: (t) =>
+              toggleWithUndo(context, ref.read(todoActionsProvider), t),
           onToggleInProgress: (t) =>
               ref.read(todoActionsProvider).toggleInProgress(t),
           onDelete: (t) async {
@@ -383,6 +385,7 @@ class _LoadedState extends State<_Loaded> {
             onMoveToCategory: widget.onMoveToCategory,
             hiddenCountBySeries: widget.hiddenCountBySeries,
             onStopRecurrence: widget.onStopRecurrence,
+            now: widget.now,
           ),
           const SliverToBoxAdapter(child: SizedBox(height: AppTokens.space48)),
         ],
