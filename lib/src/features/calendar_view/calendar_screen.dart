@@ -6,7 +6,6 @@ import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
-import '../calendar/google_auth_service.dart';
 import '../home/today_providers.dart';
 import '../search/search_screen.dart';
 import '../settings/settings_sheet.dart';
@@ -797,7 +796,8 @@ class _GoogleEventsToggle extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!ref.watch(googleCalendarAvailableProvider)) {
+    // 연결된 경우에만 토글을 보인다 — 연결 전엔 켤 수 있는 일정이 없다.
+    if (!ref.watch(googleCalendarConnectedProvider)) {
       return const SizedBox.shrink();
     }
     final on = ref.watch(showGoogleEventsProvider);

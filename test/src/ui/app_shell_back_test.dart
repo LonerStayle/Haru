@@ -133,6 +133,10 @@ void main() {
     // Drawer 열고 그룹 진입.
     await tester.tap(find.byKey(const ValueKey('manage-drawer-button')));
     await tester.pumpAndSettle();
+    // Drawer 하단에 카테고리/그룹 추가 버튼이 고정되면서 작은 테스트 화면에선 그룹 행이
+    // 스크롤 아래로 밀릴 수 있다 — 보이게 스크롤한 뒤 탭한다.
+    await tester.ensureVisible(find.text('테스트그룹'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('테스트그룹'));
     await tester.pumpAndSettle();
     expect(find.byType(GroupScreen), findsOneWidget, reason: '그룹 화면 진입');

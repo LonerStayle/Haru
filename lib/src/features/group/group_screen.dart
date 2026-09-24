@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/group.dart';
 import '../home/home_screen.dart';
@@ -26,29 +27,31 @@ class GroupScreen extends StatelessWidget {
       initialIndex: 1, // 디폴트 = '전체보기' 탭
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppTokens.space24,
-              AppTokens.space32,
-              AppTokens.space24,
-              AppTokens.space12,
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.circle, size: 16, color: group.color),
-                const SizedBox(width: AppTokens.space12),
-                Expanded(
-                  child: Text(
-                    group.label,
-                    style: theme.textTheme.displaySmall?.copyWith(
-                      fontWeight: FontWeight.w800,
+          // 모바일은 앱바가 그룹 이름을 보여 주므로 본문 제목 줄은 데스크탑만.
+          if (!AppPlatform.isMobile)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTokens.space24,
+                AppTokens.space32,
+                AppTokens.space24,
+                AppTokens.space12,
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.circle, size: 16, color: group.color),
+                  const SizedBox(width: AppTokens.space12),
+                  Expanded(
+                    child: Text(
+                      group.label,
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: AppTokens.space16),
             child: TabBar(

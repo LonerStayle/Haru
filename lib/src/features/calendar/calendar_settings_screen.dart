@@ -354,7 +354,7 @@ class _CalendarSettingsScreenState
           width: 10,
           height: 10,
           decoration: const BoxDecoration(
-            color: Color(0xFF10B981),
+            color: AppPalette.success,
             shape: BoxShape.circle,
           ),
         ),

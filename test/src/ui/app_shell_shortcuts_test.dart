@@ -86,6 +86,6 @@ void main() {
     await pump(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
     await tester.pump();
-    expect(find.text('체크리스트는 트리로, 메모는 메모별로'), findsOneWidget);
+    expect(find.text('카테고리별 할 일과 메모를 한눈에'), findsOneWidget);
   });
 }

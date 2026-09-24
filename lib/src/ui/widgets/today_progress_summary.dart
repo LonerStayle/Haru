@@ -36,7 +36,7 @@ class TodayProgressSummary extends StatelessWidget {
         : (inProgress.clamp(0, total - done)) / total;
 
     // 완료 시 성공 그린(= daily 카테고리 hue), 진행 중엔 accent 블루.
-    const successColor = Color(0xFF10B981);
+    const successColor = AppPalette.success;
     final ringColor = isComplete ? successColor : scheme.primary;
 
     return Container(

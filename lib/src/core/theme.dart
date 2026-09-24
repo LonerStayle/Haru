@@ -66,6 +66,9 @@ class AppPalette {
   // Brand accent — 액션 / 포커스 / 선택 강조 단일 출처.
   // Category.work 와 동일 hue 지만 의미는 분리 — accent 는 "동작", category 는 "분류".
   static const Color accent = Color(0xFF2A66FF);
+
+  /// 성공/완료 강조 (진척 100%, 연결됨 상태 점). 여러 파일에 흩어져 있던 hex 를 모았다.
+  static const Color success = Color(0xFF10B981);
 }
 
 /// 메모(note) 타일 전용 시각 토큰 — task(체크 행) 와 pre-attentive 대비를 만드는
@@ -278,6 +281,9 @@ class AppTheme {
       bodySmall: style(13, FontWeight.w400, color: muted),
       labelLarge: style(14, FontWeight.w500),
       labelMedium: style(12, FontWeight.w500, color: muted),
+      // labelSmall 을 명시하지 않으면 M3 기본 11sp 가 pill·breadcrumb·그룹 라벨에 쓰여
+      // 가독성이 떨어진다 (UX 개선 Phase 0). 12sp 가 이 앱의 최소 글자 크기.
+      labelSmall: style(12, FontWeight.w500, color: muted, height: 1.3),
     );
   }
 

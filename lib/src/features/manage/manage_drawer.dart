@@ -5,7 +5,9 @@ import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../../ui/widgets/add_entity_buttons.dart';
 import '../../ui/widgets/undo_snackbar.dart';
+import '../category/add_category_dialog.dart';
 import '../category/add_group_dialog.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
@@ -17,8 +19,8 @@ import '../category/groups_controller.dart';
 /// **길게 눌러 다른 그룹 헤더(또는 '미분류') 위로 드롭**하면 그 그룹으로 이동한다
 /// (E). 각 카테고리 행은 소속 그룹명/색 chip 을 보여 준다 (F).
 ///
-/// 카테고리/그룹 **추가**는 더 이상 여기서 하지 않는다 — FAB(+) 의 "추가" 시트
-/// (`app_shell._AddActionSheet`)로 일원화됐다 (대표님 요청).
+/// 카테고리/그룹 **추가**는 Drawer 하단의 [AddEntityButtons] 로 한다 (UX 개선 Phase 0 —
+/// FAB/Cmd+N 은 곧바로 새 할 일을 연다).
 ///
 /// 자가완결 — 삭제/이동 confirm 다이얼로그를 직접 들고 있어 app_shell 의 핸들러를
 /// 재주입받을 필요가 없다. 컨트롤러(`categoriesControllerProvider` /
@@ -169,21 +171,30 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
         .read(categoriesRepositoryProvider)
         .countTodosOfCategory(category.id);
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('삭제할 수 없어요'),
-        content: Text(
-          '이 카테고리에 할 일이 $count건 있어요. 먼저 다른 카테고리로 옮기거나 todos 부터 삭제해 주세요.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('확인'),
+    // 막다른 길 방지 — 삭제 대신 '보관'(할 일과 함께 숨김, 되돌리기 가능)을 바로 제안한다.
+    final archiveInstead =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('삭제할 수 없어요'),
+            content: Text(
+              '이 카테고리에 할 일이 $count개 있어요.\n'
+              '할 일을 다른 카테고리로 옮긴 뒤 삭제하거나, 대신 보관할 수 있어요.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('닫기'),
+              ),
+              FilledButton.tonal(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('대신 보관'),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        ) ??
+        false;
+    if (archiveInstead && mounted) await _archiveCategory(category);
   }
 
   /// 그룹 삭제 — confirm → controller. 차단 없음 (속한 카테고리는 미분류로 이동).
@@ -330,7 +341,7 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
     );
   }
 
-  /// 카테고리 long-press 메뉴 — 그룹 이동 / 삭제.
+  /// 카테고리 ⋮ / 우클릭 메뉴 — 수정 / 그룹 이동 / 보관 / 삭제.
   Future<void> _showCategoryMenu(Category category, List<Group> groups) async {
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -338,6 +349,11 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
         child: ListView(
           shrinkWrap: true,
           children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('이름·색·아이콘 수정'),
+              onTap: () => Navigator.of(ctx).pop('edit'),
+            ),
             ListTile(
               leading: const Icon(Icons.drive_file_move_outlined),
               title: const Text('그룹 이동'),
@@ -362,7 +378,9 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
       ),
     );
     if (!mounted) return;
-    if (action == 'move') {
+    if (action == 'edit') {
+      await AddCategoryDialog.showEdit(context, category);
+    } else if (action == 'move') {
       await _moveCategory(category, groups);
     } else if (action == 'archive') {
       await _archiveCategory(category);
@@ -484,6 +502,10 @@ class _ManageDrawerState extends ConsumerState<ManageDrawer> {
                 children: children,
               ),
             ),
+            // 카테고리/그룹 추가 — 관리 화면 하단 고정 (FAB 는 새 할 일 전용, Phase 0).
+            const Divider(height: AppTokens.hairline),
+            const AddEntityButtons(),
+            const SizedBox(height: AppTokens.space4),
           ],
         ),
       ),
@@ -1018,7 +1040,6 @@ class _EmptyHint extends StatelessWidget {
         text,
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-          fontStyle: FontStyle.italic,
         ),
       ),
     );

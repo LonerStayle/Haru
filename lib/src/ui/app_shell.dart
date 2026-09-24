@@ -11,7 +11,6 @@ import '../domain/category.dart';
 import '../domain/group.dart';
 import '../features/add_todo/add_todo_controller.dart';
 import '../features/add_todo/add_todo_default_category.dart';
-import '../features/add_todo/add_todo_sheet.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/category/add_category_dialog.dart';
 import '../features/category/add_group_dialog.dart';
@@ -29,6 +28,7 @@ import '../features/search/search_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
 import 'destination.dart';
+import 'widgets/add_entity_buttons.dart';
 import 'widgets/undo_snackbar.dart';
 
 /// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + 1~5 카테고리 단축키.
@@ -157,7 +157,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       await hotKeyManager.register(
         hotkey,
         keyDownHandler: (_) {
-          if (mounted) _openAddMenu();
+          if (mounted) _openAddTodo();
         },
       );
       _cmdN = hotkey;
@@ -240,7 +240,8 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// N+1 (N<9 일 때) outline. 매칭 못 하면 no-op.
   void _selectByDigit(int digit) {
     final idx = _destinations.indexWhere((d) => d.shortcutDigit == digit);
-    if (idx >= 0 && idx != _index) _select(idx);
+    // 그룹 화면에 있으면 같은 destination 숫자라도 그룹 화면을 빠져나가야 한다.
+    if (idx >= 0 && (idx != _index || _selectedGroupId != null)) _select(idx);
   }
 
   /// 카테고리 삭제 — confirm dialog 후 controller 호출. blocked 면 안내 dialog.
@@ -297,21 +298,30 @@ class _AppShellState extends ConsumerState<AppShell> {
         .read(categoriesRepositoryProvider)
         .countTodosOfCategory(category.id);
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('삭제할 수 없어요'),
-        content: Text(
-          '이 카테고리에 할 일이 $count건 있어요. 먼저 다른 카테고리로 옮기거나 todos 부터 삭제해 주세요.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('확인'),
+    // 막다른 길 방지 — 삭제 대신 '보관'(할 일과 함께 숨김, 되돌리기 가능)을 바로 제안한다.
+    final archiveInstead =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('삭제할 수 없어요'),
+            content: Text(
+              '이 카테고리에 할 일이 $count개 있어요.\n'
+              '할 일을 다른 카테고리로 옮긴 뒤 삭제하거나, 대신 보관할 수 있어요.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('닫기'),
+              ),
+              FilledButton.tonal(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('대신 보관'),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        ) ??
+        false;
+    if (archiveInstead && mounted) await _archiveCategory(dest);
   }
 
   /// 그룹 삭제 — confirm dialog 후 controller 호출. 차단 없음: 속한 카테고리는
@@ -451,31 +461,17 @@ class _AppShellState extends ConsumerState<AppShell> {
         .moveCategoryInto(dragged, targetGroupId, orderedSiblings, insertIndex);
   }
 
-  /// FAB / Cmd+N 진입점 — 바로 새 할일을 띄우지 않고 **추가 선택 시트**를 먼저 연다.
-  /// 새 할일 / 카테고리 / 그룹 중 하나를 고르는 단일 추가 동선 (대표님 요청).
   /// 전역 검색 화면 열기 — 사이드바/앱바 버튼과 Cmd+F 가 공유하는 단일 진입점.
   void _openSearch() {
     if (!mounted) return;
     SearchScreen.show(context);
   }
 
-  Future<void> _openAddMenu() async {
-    final choice = await showModalBottomSheet<_AddAction>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _AddActionSheet(),
-    );
-    if (choice == null || !mounted) return;
-    switch (choice) {
-      case _AddAction.todo:
-        await _openAddTodo();
-      case _AddAction.category:
-        await AddCategoryDialog.show(context);
-      case _AddAction.group:
-        await AddGroupDialog.show(context);
-    }
-  }
-
+  /// FAB / Cmd+N / 트레이 공통 진입점 — **곧바로 새 할 일 시트**를 연다.
+  ///
+  /// UX 개선 Phase 0: 예전엔 "무엇을 추가할까요?"(할 일/카테고리/그룹) 선택 시트를 먼저
+  /// 띄웠는데, 가장 잦은 동작(할 일 추가)에 탭이 한 번 더 들었다. 카테고리·그룹 추가는
+  /// 사이드바 하단 / 관리 Drawer 하단의 추가 버튼으로 옮겼다 (`AddEntityButtons`).
   Future<void> _openAddTodo() async {
     // 기본 카테고리 = "지금 보고 있는 화면" 과 동일한 규칙으로 결정 (build 표시 로직과 일치).
     //
@@ -497,23 +493,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       selectedGroupId: _selectedGroupId,
     );
 
-    // sheet 가 닫힌 후 controller 를 호출해 결과(Calendar 경고 등)를 처리한다.
-    AddTodoSubmission? submitted;
-    await AddTodoSheet.show(
-      context,
-      initialCategory: initialCategory,
-      onSubmit: (s) => submitted = s,
-    );
-    if (submitted == null || !mounted) return;
-
-    final result = await ref.read(addTodoControllerProvider).add(submitted!);
-    if (!mounted) return;
-    final warning = result.calendarWarning;
-    if (warning != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(warning), behavior: SnackBarBehavior.floating),
-      );
-    }
+    await showNewTodoSheet(context, ref, initialCategory: initialCategory);
   }
 
   /// Drawer 에서 카테고리 탭 → 그 카테고리 destination 으로 이동 + Drawer 닫기.
@@ -656,15 +636,15 @@ class _AppShellState extends ConsumerState<AppShell> {
     final fab = AppPlatform.isDesktop
         ? FloatingActionButton.extended(
             key: const ValueKey('add-todo-fab'),
-            onPressed: _openAddMenu,
+            onPressed: _openAddTodo,
             icon: const Icon(Icons.add),
-            label: const Text('추가'),
-            tooltip: '추가 (Cmd+N)',
+            label: const Text('새 할 일'),
+            tooltip: '새 할 일 (Cmd+N)',
           )
         : FloatingActionButton(
             key: const ValueKey('add-todo-fab'),
-            onPressed: _openAddMenu,
-            tooltip: '추가',
+            onPressed: _openAddTodo,
+            tooltip: '새 할 일',
             child: const Icon(Icons.add),
           );
 
@@ -1052,7 +1032,7 @@ class _SidebarState extends State<_Sidebar> {
     );
   }
 
-  /// 카테고리 long-press / 우클릭 메뉴 — 삭제 / 그룹 이동.
+  /// 카테고리 long-press / 우클릭 메뉴 — 수정 / 그룹 이동 / 보관 / 삭제.
   Future<void> _showCategoryMenu(AppDestination dest) async {
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -1060,6 +1040,11 @@ class _SidebarState extends State<_Sidebar> {
         child: ListView(
           shrinkWrap: true,
           children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('이름·색·아이콘 수정'),
+              onTap: () => Navigator.of(ctx).pop('edit'),
+            ),
             ListTile(
               leading: const Icon(Icons.drive_file_move_outlined),
               title: const Text('그룹 이동'),
@@ -1084,7 +1069,10 @@ class _SidebarState extends State<_Sidebar> {
       ),
     );
     if (!mounted) return;
-    if (action == 'move') {
+    if (action == 'edit') {
+      final category = dest.category;
+      if (category != null) await AddCategoryDialog.showEdit(context, category);
+    } else if (action == 'move') {
       widget.onMoveCategory(dest);
     } else if (action == 'archive') {
       widget.onArchiveCategory(dest);
@@ -1179,8 +1167,7 @@ class _SidebarState extends State<_Sidebar> {
                   child: Text(
                     '여기로 드래그하면 그룹에서 빼요',
                     style: textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.4),
-                      fontStyle: FontStyle.italic,
+                      color: scheme.onSurface.withValues(alpha: 0.55),
                     ),
                   ),
                 ),
@@ -1286,7 +1273,9 @@ class _SidebarState extends State<_Sidebar> {
               _buildGroupSection(i, widget.groups[i], byGroup),
           ],
         ),
-      // v1.5 — 카테고리/그룹 추가는 FAB(+) 의 "추가" 시트로 일원화됨 (대표님 요청).
+      // 카테고리/그룹 추가 — 목록 바로 아래 (FAB/Cmd+N 은 새 할 일 전용, Phase 0).
+      const SizedBox(height: AppTokens.space8),
+      const AddEntityButtons(),
       const SizedBox(height: AppTokens.space12),
     ];
 
@@ -1754,166 +1743,5 @@ class _MainArea extends StatelessWidget {
     // v1.6 — 캘린더. 흡수된 타임라인 목록은 이 화면의 `[목록]` 세그먼트에 있다.
     if (destination.isCalendar) return const CalendarScreen();
     return CategoryView(category: destination.category!);
-  }
-}
-
-/// FAB / Cmd+N 추가 선택 시트의 결과.
-enum _AddAction { todo, category, group }
-
-/// FAB / Cmd+N 진입 시 먼저 뜨는 "무엇을 추가할까요?" 하단 시트 (대표님 요청).
-/// 새 할일 / 카테고리 / 그룹 3 동선을 한곳에 모은다 — Drawer 의 추가 버튼들은 제거됨.
-class _AddActionSheet extends StatelessWidget {
-  const _AddActionSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppTokens.space12,
-          AppTokens.space8,
-          AppTokens.space12,
-          AppTokens.space16,
-        ),
-        child: Material(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(AppTokens.radiusL),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 드래그 핸들
-              Container(
-                margin: const EdgeInsets.only(top: AppTokens.space8),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.onSurface.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space8,
-                ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '무엇을 추가할까요?',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-todo',
-                icon: Icons.check_circle_outline,
-                color: scheme.primary,
-                title: '새 할 일',
-                subtitle: '할 일을 추가합니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.todo),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-category',
-                icon: Icons.label_outline,
-                color: const Color(0xFFF97316),
-                title: '카테고리 추가',
-                subtitle: '새 분류를 만듭니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.category),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-group',
-                icon: Icons.create_new_folder_outlined,
-                color: const Color(0xFF8B5CF6),
-                title: '그룹 추가',
-                subtitle: '카테고리를 묶는 그룹을 만듭니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.group),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AddActionTile extends StatelessWidget {
-  const _AddActionTile({
-    required this.valueKey,
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final String valueKey;
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return InkWell(
-      key: ValueKey(valueKey),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppTokens.space16,
-          vertical: AppTokens.space12,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(AppTokens.radiusM),
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(width: AppTokens.space16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: AppTokens.space2),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right,
-              color: scheme.onSurface.withValues(alpha: 0.3),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

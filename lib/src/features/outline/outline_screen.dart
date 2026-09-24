@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/date_format.dart';
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
@@ -57,7 +58,8 @@ class OutlineScreen extends ConsumerWidget {
       length: 2,
       child: Column(
         children: [
-          if (showHeader)
+          // 모바일은 앱바가 "전체보기" 를 보여 주므로 본문 큰 제목은 데스크탑만 (제목 중복 제거).
+          if (showHeader && !AppPlatform.isMobile)
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppTokens.space24,
@@ -256,7 +258,8 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppTokens.space4),
-        Text('체크리스트는 트리로, 메모는 메모별로', style: theme.textTheme.bodyMedium),
+        // 예전 문구 "체크리스트는 트리로" 는 드릴다운으로 바뀐 뒤 틀린 설명이 됐다.
+        Text('카테고리별 할 일과 메모를 한눈에', style: theme.textTheme.bodyMedium),
       ],
     );
   }

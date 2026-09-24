@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/data/local/local_todo_repository.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/recurrence.dart';
 import 'package:solo_todo/src/features/add_todo/add_todo_controller.dart';
 import 'package:solo_todo/src/features/add_todo/add_todo_sheet.dart';
 
@@ -150,6 +151,24 @@ void main() {
       final list = await repo.watchByCategory(Category.work).first;
       // min=-1, n=3 → 첫=-4, 둘=-3, 셋=-2, 기존=-1. sortOrder asc → 첫,둘,셋,기존.
       expect(list.map((t) => t.title).toList(), ['첫', '둘', '셋', '기존']);
+    });
+
+    test('addAll — 반복 규칙이 있으면 건마다 반복 마스터로 저장 + 입력 순서 보존', () async {
+      // UX 감사 B10 — 일괄 붙여넣기에서 반복 설정이 조용히 빠지던 문제.
+      AddTodoSubmission rec(String title) => AddTodoSubmission(
+        title: title,
+        category: Category.work,
+        dueAt: DateTime(2026, 5, 27),
+        addToCalendar: false,
+        recurrence: const RecurrenceRule(freq: RecurrenceFreq.daily),
+      );
+      await controller.addAll([rec('첫'), rec('둘')]);
+
+      final all = await repo.watchAll().first;
+      final masters = all.where((t) => t.isSeriesMaster).toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+      expect(masters.map((t) => t.title).toList(), ['첫', '둘']);
+      expect(masters.every((t) => t.recurrenceRule != null), isTrue);
     });
   });
 }

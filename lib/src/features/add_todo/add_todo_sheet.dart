@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,7 +67,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
 
   /// v1.2 — edit 모드 콜백. [initialTodo] 가 non-null 일 때 _submit 이 update 분기로
   /// 호출. 호출자는 todoActionsProvider.update 또는 동등 mutation 수행.
-  final void Function(Todo updated)? onUpdate;
+  final FutureOr<void> Function(Todo updated)? onUpdate;
 
   /// 3-상태(□/△/◯) 칩 탭 전용 저장 콜백 — **[onUpdate] 와 반드시 구분**한다.
   ///
@@ -112,7 +114,7 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     BuildContext context, {
     Category initialCategory = Category.daily,
     required void Function(AddTodoSubmission) onSubmit,
-    void Function(Todo updated)? onUpdate,
+    FutureOr<void> Function(Todo updated)? onUpdate,
     void Function(Todo updated)? onStatusChanged,
     Todo? initialTodo,
     Todo? prefillFrom,
@@ -151,6 +153,9 @@ class AddTodoSheet extends ConsumerStatefulWidget {
 
 class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   late final TextEditingController _titleCtrl;
+
+  /// 여러 줄 붙여넣기를 취소했을 때 되돌릴 "붙여넣기 직전" 제목.
+  String _titleBeforePaste = '';
   late final TextEditingController _descriptionCtrl;
   late Category _category;
 
@@ -235,6 +240,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     // 어느 쪽이든 입력값을 그대로 채운다. (단 _isEditMode 는 initialTodo 만으로 결정.)
     final source = widget.initialTodo ?? widget.prefillFrom;
     _titleCtrl = TextEditingController(text: source?.title ?? '');
+    _titleBeforePaste = _titleCtrl.text;
     _descriptionCtrl = TextEditingController(text: source?.description ?? '');
     _category = source?.category ?? widget.initialCategory;
     // prefill 카테고리(edit/복사 공통)는 이미 영속된 실제 값 → 신뢰. add 기본값은 미신뢰.
@@ -390,8 +396,17 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   /// 전달한다. pop 은 하지 않는다 — 저장 버튼 경로는 [_submit] 이, 배경 탭/드래그/Esc
   /// 등 닫힘 경로는 build 의 PopScope 훅이 각각 책임진다.
   void _applyEdit() {
+    final updated = _editedSnapshot();
+    if (updated == null) return;
+    // 이번 저장의 등록 의사를 데코레이터에 알린다 — 토글을 켜면 등록, 끄면 등록 안 함.
+    ref.read(calendarIntentProvider)(_addToCalendar);
+    widget.onUpdate?.call(updated);
+  }
+
+  /// 시트 입력값을 반영한 편집본. edit 모드가 아니면 null.
+  Todo? _editedSnapshot() {
     final initial = widget.initialTodo;
-    if (initial == null) return;
+    if (initial == null) return null;
     final isNote = _type == TodoType.note;
     final trimmedDesc = _descriptionCtrl.text.trim();
     final descOrNull = trimmedDesc.isEmpty ? null : trimmedDesc;
@@ -425,9 +440,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       // 링크 해제는 이벤트를 실제로 지운 뒤 동기화 서비스가 한다.
       calendarEventId: initial.calendarEventId,
     );
-    // 이번 저장의 등록 의사를 데코레이터에 알린다 — 토글을 켜면 등록, 끄면 등록 안 함.
-    ref.read(calendarIntentProvider)(_addToCalendar);
-    widget.onUpdate?.call(updated);
+    return updated;
   }
 
   void _submit() {
@@ -446,17 +459,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final descOrNull = trimmedDesc.isEmpty ? null : trimmedDesc;
     final date = _serializeDate();
 
-    // date-repeat — 반복 규칙(추가 모드 + task + 주기 선택 시). dueAt 없으면 무의미.
-    final recurrence =
-        (!isNote && _recurrenceFreq != null && date.dueAt != null)
-        ? RecurrenceRule(
-            freq: _recurrenceFreq!,
-            interval: _recurrenceInterval < 1 ? 1 : _recurrenceInterval,
-            byWeekday: _recurrenceFreq == RecurrenceFreq.weekly
-                ? {..._recurrenceWeekdays}
-                : const {},
-          )
-        : null;
+    final recurrence = _buildRecurrence(isNote: isNote, dueAt: date.dueAt);
 
     // add 모드 — note 는 일정/캘린더 모두 강제 null/false.
     widget.onSubmit(
@@ -478,6 +481,22 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     Navigator.of(context).maybePop();
   }
 
+  /// date-repeat — 반복 규칙(추가 모드 + task + 주기 선택 시). dueAt 없으면 무의미.
+  /// 단건 추가와 일괄 추가가 같은 규칙을 쓰도록 한 곳에 둔다.
+  RecurrenceRule? _buildRecurrence({
+    required bool isNote,
+    required DateTime? dueAt,
+  }) {
+    if (isNote || _recurrenceFreq == null || dueAt == null) return null;
+    return RecurrenceRule(
+      freq: _recurrenceFreq!,
+      interval: _recurrenceInterval < 1 ? 1 : _recurrenceInterval,
+      byWeekday: _recurrenceFreq == RecurrenceFreq.weekly
+          ? {..._recurrenceWeekdays}
+          : const {},
+    );
+  }
+
   /// 같은 카테고리 / parent / dueAt / type 으로 N건 일괄 추가. _submitted race 가드.
   /// v1.1 첫 cut — 평탄 (들여쓰기 인식 X). 들여쓰기 자동 트리화는 v1.2.
   void _submitBulk(List<String> titles) {
@@ -487,6 +506,8 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final trimmedDesc = _descriptionCtrl.text.trim();
     final descOrNull = trimmedDesc.isEmpty ? null : trimmedDesc;
     final date = _serializeDate();
+    // 일괄 추가도 반복 설정을 유지한다 (예전엔 조용히 빠졌다 — UX 감사 B10).
+    final recurrence = _buildRecurrence(isNote: isNote, dueAt: date.dueAt);
     for (final t in titles) {
       widget.onSubmit(
         AddTodoSubmission(
@@ -500,6 +521,8 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
           type: _type,
           description: descOrNull,
           parentId: widget.parentId,
+          recurrence: recurrence,
+          recurrenceEndAt: recurrence == null ? null : _recurrenceEndAt,
         ),
       );
     }
@@ -510,6 +533,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   /// 단일 라인 입력은 일반 setState 만 (추가 버튼 활성화 토글).
   Future<void> _onTitleChanged(String value) async {
     if (!value.contains('\n')) {
+      _titleBeforePaste = value;
       setState(() {});
       return;
     }
@@ -527,8 +551,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final ok = await _confirmBulkAdd(lines.length);
     if (!mounted) return;
     if (ok != true) {
-      // 취소 — \n 제거하여 단일 row 로 복구 (paste 전 상태 회복은 어렵지만 cursor 정상화).
-      _titleCtrl.text = lines.join(' ');
+      // 취소 = 붙여넣기 취소 — 붙여넣기 직전 입력으로 되돌린다. (예전엔 줄들을 공백으로
+      // 이어 붙인 긴 제목 하나가 남아 사용자가 다시 지워야 했다 — UX 감사 B10.)
+      _titleCtrl.text = _titleBeforePaste;
       _titleCtrl.selection = TextSelection.collapsed(
         offset: _titleCtrl.text.length,
       );
@@ -544,7 +569,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       builder: (ctx) => AlertDialog(
         key: const ValueKey('bulk-paste-dialog'),
         title: const Text('일괄 추가'),
-        content: Text('$n개의 항목을 같은 카테고리 / 일정으로 한 번에 추가하시겠습니까?'),
+        content: Text('$n개의 항목을 같은 카테고리·일정·반복으로 한 번에 추가할까요?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -817,22 +842,32 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     return DateTime(now.year, now.month, now.day);
   }
 
-  /// "위치" 섹션의 이동 버튼 — 이 시트를 닫고 호출자가 이동 시트를 열게 한다.
-  /// 편집 중이던 입력값은 저장하지 않는다 (이동은 위치만 바꾸는 별개 동작).
-  void _requestMove() {
+  /// "위치" 섹션의 이동 버튼 — 편집 내용을 **먼저 저장 완료**한 뒤 시트를 닫고
+  /// 호출자가 이동 시트를 열게 한다.
+  ///
+  /// 예전엔 편집 내용을 버렸다 (UX 감사: "이동 누르면 방금 고친 제목이 사라진다").
+  /// 버린 이유는 한 row 를 두 writer(닫힘 저장 / 이동)가 동시에 쓰는 경쟁이었다 —
+  /// 이동 전 위치를 든 저장이 이동보다 늦게 도착하면 이동을 되돌렸다.
+  /// 이제는 두 쓰기를 **순차**로 만든다: 편집 저장을 await 로 끝낸 뒤에야 이동 시트를
+  /// 연다. 이동 시트는 사용자가 목적지를 고른 시점의 최신 row(편집 반영본)로 옮기므로
+  /// (`showMoveTodoSheet` 의 live 조회) 같은 row 에 겹치는 쓰기가 없다.
+  Future<void> _requestMove() async {
     final initial = widget.initialTodo;
     final callback = widget.onRequestMove;
-    if (initial == null || callback == null) return;
-    // 닫힘 자동 저장을 끈다 — 이 시트가 들고 있는 스냅샷은 **이동 전 위치**(옛
-    // parentId/category)라, 그 저장이 이동보다 늦게 도착하면 방금 옮긴 위치를
-    // 통째로 되돌린다. 두 저장이 같은 row 를 두고 경쟁하는 구조 자체를 없앤다.
-    // (실사용 증상: "⋮ 이동은 되는데 편집 시트의 이동 버튼으로는 제자리로 돌아온다")
-    //
-    // 저장을 끄는 것이 이 버튼의 원래 계약과도 맞는다 — 위 doc 처럼 이동은 입력값
-    // 저장과 무관한 동작이다.
+    if (initial == null || callback == null || _submitted) return;
+    // 닫힘 자동 저장은 끈다 — 아래에서 직접 한 번만 저장한다 (중복 writer 방지).
     _submitted = true;
+    final edited = _editedSnapshot();
+    final canSave =
+        edited != null && _titleCtrl.text.trim().isNotEmpty && !_rangeInvalid;
+    if (canSave) {
+      ref.read(calendarIntentProvider)(_addToCalendar);
+      // 무변경이면 update 의 _isUnchanged 가드가 no-op 으로 거른다 (자리 튐 없음).
+      await widget.onUpdate?.call(edited);
+    }
+    if (!mounted) return;
     Navigator.of(context).maybePop();
-    callback(initial);
+    callback(canSave ? edited : initial);
   }
 
   @override
@@ -1122,6 +1157,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                       canSubmit: _canSubmit,
                       onSubmit: _submit,
                       submitLabel: _isEditMode ? '저장' : '추가',
+                      // 편집은 "닫힘 = 저장" 모델이라 이 버튼도 저장 후 닫는다. 라벨이
+                      // "취소" 면 정반대로 읽혀서 "닫기" 로 둔다 (UX 감사 B2).
+                      dismissLabel: _isEditMode ? '닫기' : '취소',
                     ),
                   ],
                 ),
@@ -1987,11 +2025,15 @@ class _Actions extends StatelessWidget {
     required this.canSubmit,
     required this.onSubmit,
     this.submitLabel = '추가',
+    this.dismissLabel = '취소',
   });
 
   final bool canSubmit;
   final VoidCallback onSubmit;
   final String submitLabel;
+
+  /// 왼쪽 버튼 라벨 — 추가 모드 "취소"(닫힘 = 폐기), 편집 모드 "닫기"(닫힘 = 저장).
+  final String dismissLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -2006,7 +2048,7 @@ class _Actions extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppTokens.radiusM),
               ),
             ),
-            child: const Text('취소'),
+            child: Text(dismissLabel),
           ),
         ),
         const SizedBox(width: AppTokens.space12),

@@ -10,21 +10,42 @@ import 'groups_controller.dart';
 
 const _uuid = Uuid();
 
-/// 새 카테고리 추가 다이얼로그.
+/// 카테고리 추가/수정 다이얼로그.
 ///
 /// label TextField + 16 색 palette + Material Icons picker (builtin 5종 + 일상 모음).
-/// 확인 시 [CategoriesController.add] 호출. id 는 `cat-<uuid>` 로 부여 (builtin 의
-/// 'work' / 'personal_dev' 등과 충돌 회피).
+/// 확인 시 [CategoriesController.add] 호출 (upsert). 신규 id 는 `cat-<uuid>` 로 부여
+/// (builtin 의 'work' / 'personal_dev' 등과 충돌 회피).
+///
+/// [existing] 이 있으면 **수정 모드** — 같은 id 로 이름·색·아이콘·그룹만 갱신하고
+/// sortOrder / isBuiltin / archived 는 보존한다. todos 는 카테고리를 id 로만 참조하므로
+/// (todos_dao 의 categories join) 수정 내용이 모든 할 일에 즉시 반영된다.
 class AddCategoryDialog extends ConsumerStatefulWidget {
-  const AddCategoryDialog({super.key});
+  const AddCategoryDialog({super.key, this.existing, this.initialGroupId});
 
-  /// 다이얼로그 표시 + 결과 반환 (true = 추가됨, false/null = 취소).
-  static Future<bool?> show(BuildContext context) {
+  /// non-null 이면 수정 모드.
+  final Category? existing;
+
+  /// 신규 추가 시 미리 선택할 그룹 (예: 그룹 화면에서 추가). 수정 모드에선 무시.
+  final String? initialGroupId;
+
+  /// 추가 다이얼로그 표시 + 결과 반환 (true = 추가됨, false/null = 취소).
+  static Future<bool?> show(BuildContext context, {String? initialGroupId}) {
     return showDialog<bool>(
       context: context,
-      builder: (_) => const AddCategoryDialog(),
+      builder: (_) => AddCategoryDialog(initialGroupId: initialGroupId),
     );
   }
+
+  /// 수정 다이얼로그 표시 — [category] 값 프리필 (true = 저장됨).
+  static Future<bool?> showEdit(BuildContext context, Category category) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AddCategoryDialog(existing: category),
+    );
+  }
+
+  /// 신규 카테고리의 기본 아이콘 — builtin '회사 할일' 과 겹치지 않게 checklist.
+  static const int defaultIcon = 0xe15b;
 
   /// 사용자가 고를 16 색 palette. 일관성을 위해 builtin 5종 색은 포함하지 않음.
   @visibleForTesting
@@ -105,12 +126,24 @@ class AddCategoryDialog extends ConsumerStatefulWidget {
 }
 
 class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
-  final _labelCtrl = TextEditingController();
-  int _selectedColor = AddCategoryDialog.colorPalette.first;
-  int _selectedIcon = AddCategoryDialog.iconPalette.first;
-  // null = '미분류'. 사용자가 그룹 dropdown 에서 선택하면 해당 Group.id.
+  late final TextEditingController _labelCtrl;
+  late int _selectedColor;
+  late int _selectedIcon;
+  // null = '미분류'. 사용자가 그룹 picker 에서 선택하면 해당 Group.id.
   String? _selectedGroupId;
   bool _submitted = false;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _labelCtrl = TextEditingController(text: e?.label ?? '');
+    _selectedColor = e?.colorValue ?? AddCategoryDialog.colorPalette.first;
+    _selectedIcon = e?.iconCodePoint ?? AddCategoryDialog.defaultIcon;
+    _selectedGroupId = e != null ? e.groupId : widget.initialGroupId;
+  }
 
   @override
   void dispose() {
@@ -125,17 +158,25 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
     setState(() => _submitted = true);
     final controller = ref.read(categoriesControllerProvider);
 
-    // 사용자 카테고리는 sortOrder 100 + 임의 (= 항상 builtin 뒤). 정렬 미세조정은 v1.3.
-    final newCategory = Category(
-      id: 'cat-${_uuid.v4()}',
-      label: _labelCtrl.text.trim(),
-      iconCodePoint: _selectedIcon,
-      colorValue: _selectedColor,
-      sortOrder: 100,
-      isBuiltin: false,
-      groupId: _selectedGroupId,
-    );
-    await controller.add(newCategory);
+    // 수정 모드: 같은 id 로 표시 속성만 갱신 (sortOrder/isBuiltin/archived 보존).
+    // 신규: sortOrder 100 (= 항상 builtin 뒤).
+    final category =
+        widget.existing?.copyWith(
+          label: _labelCtrl.text.trim(),
+          iconCodePoint: _selectedIcon,
+          colorValue: _selectedColor,
+          groupId: _selectedGroupId,
+        ) ??
+        Category(
+          id: 'cat-${_uuid.v4()}',
+          label: _labelCtrl.text.trim(),
+          iconCodePoint: _selectedIcon,
+          colorValue: _selectedColor,
+          sortOrder: 100,
+          isBuiltin: false,
+          groupId: _selectedGroupId,
+        );
+    await controller.add(category);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -144,7 +185,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('새 카테고리'),
+      title: Text(_isEdit ? '카테고리 수정' : '새 카테고리'),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -161,6 +202,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                   hintText: '예: 독서, 운동',
                 ),
                 onChanged: (_) => setState(() {}),
+                // 데스크탑 키보드 흐름 — Enter 로 바로 저장.
+                onSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: AppTokens.space16),
               Text('색', style: theme.textTheme.titleSmall),
@@ -206,7 +249,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
         ),
         FilledButton(
           onPressed: _canSubmit ? _submit : null,
-          child: const Text('추가'),
+          child: Text(_isEdit ? '저장' : '추가'),
         ),
       ],
     );
@@ -234,8 +277,8 @@ class _ColorPalette extends StatelessWidget {
           GestureDetector(
             onTap: () => onSelect(c),
             child: Container(
-              width: 32,
-              height: 32,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: Color(c),
                 shape: BoxShape.circle,
@@ -246,6 +289,10 @@ class _ColorPalette extends StatelessWidget {
                   width: 2.5,
                 ),
               ),
+              // 선택 표시를 테두리 색에만 기대지 않도록 체크 글리프 병행 (색각 이상 대응).
+              child: c == selected
+                  ? const Icon(Icons.check, size: 18, color: Colors.white)
+                  : null,
             ),
           ),
       ],

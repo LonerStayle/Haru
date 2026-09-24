@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/date_format.dart';
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
 import '../../domain/policies/carryover_policy.dart';
+import '../../domain/policies/move_policy.dart';
 import '../../domain/policies/recurrence_dedup_policy.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
@@ -68,7 +70,11 @@ class HomeScreen extends ConsumerWidget {
 
     return asyncTodos.when(
       loading: () => const TodoListSkeleton(),
-      error: (e, _) => _Error(message: '$e'),
+      error: (e, _) => ErrorState(
+        title: '오늘 화면을 불러오지 못했어요',
+        error: e,
+        onRetry: () => ref.invalidate(visibleTodayTodosProvider),
+      ),
       data: (allTodayRaw) {
         // date-repeat (FR-4) — 같은 반복 미체크 누적은 leader 1건으로 접고 나머지는
         // 묶음 배지로. 데이터는 보존(표시 레이어 변환).
@@ -124,9 +130,8 @@ class HomeScreen extends ConsumerWidget {
               initialCategory: t.category,
               initialTodo: t,
               onSubmit: (_) {}, // edit 모드에선 호출 안 됨.
-              onUpdate: (updated) {
-                ref.read(todoActionsProvider).update(updated);
-              },
+              onUpdate: (updated) =>
+                  ref.read(todoActionsProvider).update(updated),
               onStatusChanged: (updated) {
                 ref.read(todoActionsProvider).updatePreservingOrder(updated);
               },
@@ -150,21 +155,52 @@ class HomeScreen extends ConsumerWidget {
               .read(todoActionsProvider)
               .reorderSiblings(siblings, oldIndex, newIndex),
           // 섹션 간 드래그 — 다른 카테고리 섹션에 놓으면 그 카테고리로 이동까지.
-          onMoveToCategory: (item, target, targetItems, insertIndex) => ref
-              .read(todoActionsProvider)
-              .moveToCategoryAt(
-                item,
-                target: target,
-                targetSiblings: targetItems,
-                insertIndex: insertIndex,
-                all: allTodos,
-              ),
+          // 순서만 바꾸려다 옆 섹션에 떨어뜨리는 실수가 잦아 되돌리기를 붙인다 (UX 감사 B7).
+          onMoveToCategory: (item, target, targetItems, insertIndex) async {
+            final actions = ref.read(todoActionsProvider);
+            // 되돌리기 스냅샷 — 본인 + 자손(카테고리 동기화 대상) + 대상 섹션 형제(순서 재부여 대상).
+            final snapshot = <Todo>{
+              item,
+              ...MovePolicy.descendants(item.id, allTodos),
+              ...targetItems,
+            }.toList();
+            final moved = await actions.moveToCategoryAt(
+              item,
+              target: target,
+              targetSiblings: targetItems,
+              insertIndex: insertIndex,
+              all: allTodos,
+            );
+            if (!moved || !context.mounted) return;
+            showUndoSnackbar(
+              context,
+              message: '"${item.title}" → ${target.label}(으)로 이동',
+              onUndo: () => actions.restoreAll(snapshot),
+            );
+          },
           // date-repeat — ⋮ '반복 중지' → 시리즈 마스터 삭제(비파괴적).
           onStopRecurrence: (t) => confirmStopRecurrence(context, ref, t),
+          onAddTodo: () => showNewTodoSheet(
+            context,
+            ref,
+            initialCategory: _defaultCategoryFor(ref, group),
+          ),
         );
       },
     );
   }
+}
+
+/// 오늘 화면 빈 상태 "새 할 일" 버튼의 기본 카테고리 — 그룹 탭이면 그 그룹의 첫 카테고리,
+/// 아니면 활성 카테고리의 첫 번째. 로딩 중이면 builtin '일상'.
+Category _defaultCategoryFor(WidgetRef ref, Group? group) {
+  final categories =
+      ref.read(activeCategoriesProvider).asData?.value ?? const <Category>[];
+  final pool = group == null
+      ? categories
+      : categories.where((c) => c.groupId == group.id).toList();
+  if (pool.isNotEmpty) return pool.first;
+  return categories.isNotEmpty ? categories.first : Category.daily;
 }
 
 class _Loaded extends StatefulWidget {
@@ -191,6 +227,7 @@ class _Loaded extends StatefulWidget {
     required this.onReorderSiblings,
     required this.onMoveToCategory,
     required this.onStopRecurrence,
+    required this.onAddTodo,
   });
 
   /// 오늘 화면에서 root 로 보일 todo (visibility/carryover 정책 적용된 visible set).
@@ -239,6 +276,9 @@ class _Loaded extends StatefulWidget {
   /// date-repeat (FR-6) — ⋮ '반복 중지' 콜백.
   final void Function(Todo) onStopRecurrence;
 
+  /// 빈 화면의 "새 할 일" 버튼.
+  final VoidCallback onAddTodo;
+
   @override
   State<_Loaded> createState() => _LoadedState();
 }
@@ -261,12 +301,19 @@ class _LoadedState extends State<_Loaded> {
       slivers: [
         if (widget.showHeader)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(
-              AppTokens.space24,
-              AppTokens.space32,
-              AppTokens.space24,
-              AppTokens.space12,
-            ),
+            padding: AppPlatform.isMobile
+                ? const EdgeInsets.fromLTRB(
+                    AppTokens.space24,
+                    AppTokens.space12,
+                    AppTokens.space24,
+                    AppTokens.space8,
+                  )
+                : const EdgeInsets.fromLTRB(
+                    AppTokens.space24,
+                    AppTokens.space32,
+                    AppTokens.space24,
+                    AppTokens.space12,
+                  ),
             sliver: SliverToBoxAdapter(child: _Header(now: widget.now)),
           )
         else
@@ -301,12 +348,21 @@ class _LoadedState extends State<_Loaded> {
             ),
           ),
         if (widget.todos.isEmpty)
-          const SliverFillRemaining(
+          SliverFillRemaining(
             hasScrollBody: false,
             child: EmptyState(
               icon: Icons.check_circle_outline_rounded,
               title: '오늘 할 일이 없어요',
-              subtitle: 'Cmd+N 으로 빠르게 추가해보세요.',
+              // 단축키 안내는 데스크탑에서만 — 폰에는 Cmd 키가 없다.
+              subtitle: AppPlatform.isDesktop
+                  ? '⌘N 으로 어디서든 바로 추가할 수 있어요.'
+                  : '아래 버튼이나 + 로 추가해 보세요.',
+              action: FilledButton.tonalIcon(
+                key: const ValueKey('empty-add-todo'),
+                onPressed: widget.onAddTodo,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('새 할 일'),
+              ),
             ),
           )
         else ...[
@@ -346,18 +402,31 @@ class _Header extends ConsumerWidget {
     final pendingCount = ref.watch(outboxCountProvider).value ?? 0;
     // date-repeat — 반복 마스터가 있으면 "반복 관리" 진입 버튼 노출(FR-6).
     final hasRecurring = ref.watch(recurringMastersProvider).isNotEmpty;
+    // 모바일은 앱바가 이미 "오늘" 을 보여 주므로 큰 제목을 빼고 날짜만 한 줄로 둔다.
+    // 제목이 두 번 나오며 첫 화면 세로 공간을 ~100dp 잡아먹던 문제 (UX 감사).
+    final compact = AppPlatform.isMobile;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: compact
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.end,
           children: [
-            Text(
-              '오늘',
-              style: theme.textTheme.displayMedium?.copyWith(
-                fontWeight: FontWeight.w800,
+            if (compact)
+              Text(
+                KoDate.pretty(now),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              )
+            else
+              Text(
+                '오늘',
+                style: theme.textTheme.displayMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
             const Spacer(),
             if (pendingCount > 0)
               _SyncPendingChip(count: pendingCount, theme: theme),
@@ -376,8 +445,10 @@ class _Header extends ConsumerWidget {
               ),
           ],
         ),
-        const SizedBox(height: AppTokens.space4),
-        Text(KoDate.pretty(now), style: theme.textTheme.bodyMedium),
+        if (!compact) ...[
+          const SizedBox(height: AppTokens.space4),
+          Text(KoDate.pretty(now), style: theme.textTheme.bodyMedium),
+        ],
       ],
     );
   }
@@ -469,36 +540,6 @@ class _CarryoverBanner extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Error extends StatelessWidget {
-  const _Error({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.space24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: theme.colorScheme.error, size: 36),
-            const SizedBox(height: AppTokens.space12),
-            Text('오늘 화면을 불러오지 못했어요', style: theme.textTheme.titleMedium),
-            const SizedBox(height: AppTokens.space4),
-            Text(
-              message,
-              style: theme.textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }

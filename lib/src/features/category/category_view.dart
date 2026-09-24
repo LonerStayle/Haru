@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/policies/todo_sort_policy.dart';
@@ -33,12 +34,18 @@ class CategoryView extends ConsumerWidget {
 
     return asyncTodos.when(
       loading: () => const TodoListSkeleton(),
-      error: (e, _) => _Error(message: '$e'),
+      error: (e, _) => ErrorState(
+        title: '카테고리를 불러오지 못했어요',
+        error: e,
+        onRetry: () => ref.invalidate(watchTodosByCategoryProvider(category)),
+      ),
       data: (todos) => _Loaded(
         category: category,
         todos: todos,
         sortMode: sortMode,
         onToggleSort: () => ref.read(sortModeProvider.notifier).toggle(),
+        onAddTodo: () =>
+            showNewTodoSheet(context, ref, initialCategory: category),
         onToggle: (t) => ref.read(todoActionsProvider).toggle(t),
         onToggleInProgress: (t) =>
             ref.read(todoActionsProvider).toggleInProgress(t),
@@ -97,9 +104,13 @@ class _Loaded extends StatefulWidget {
     required this.onMove,
     required this.onCopy,
     required this.onReorderSiblings,
+    required this.onAddTodo,
   });
 
   final Category category;
+
+  /// 빈 화면의 "새 할 일" 버튼 — 이 카테고리로 추가 시트를 연다.
+  final VoidCallback onAddTodo;
 
   /// 이 카테고리에 속한 모든 todo (root + 자손). root 선별 + childCount 양쪽에 사용.
   final List<Todo> todos;
@@ -145,9 +156,9 @@ class _LoadedState extends State<_Loaded> {
     return CustomScrollView(
       slivers: [
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(
+          padding: EdgeInsets.fromLTRB(
             AppTokens.space24,
-            AppTokens.space32,
+            AppPlatform.isMobile ? AppTokens.space12 : AppTokens.space32,
             AppTokens.space24,
             AppTokens.space16,
           ),
@@ -171,7 +182,13 @@ class _LoadedState extends State<_Loaded> {
               icon: category.icon,
               tone: category.color,
               title: '${category.label}에 할 일이 없어요',
-              subtitle: '여기에 추가하면 ${category.label} 카테고리로 분류됩니다.',
+              subtitle: '여기서 추가하면 ${category.label} 카테고리로 들어가요.',
+              action: FilledButton.tonalIcon(
+                key: const ValueKey('empty-add-todo'),
+                onPressed: widget.onAddTodo,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('새 할 일'),
+              ),
             ),
           )
         else
@@ -227,6 +244,29 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final sortButton = SortModeButton(
+      mode: sortMode,
+      accent: category.color,
+      onPressed: onToggleSort,
+    );
+    final filterBar = TodoStatusFilterBar(
+      counts: counts,
+      selected: filter,
+      onSelected: onFilterChanged,
+      accent: category.color,
+    );
+    // 모바일은 앱바가 카테고리 이름을 이미 보여 준다 → 큰 아이콘·제목 줄을 빼고
+    // 필터 칩 + 정렬 버튼 한 줄만 둔다 (제목 중복 제거, UX 감사).
+    if (AppPlatform.isMobile) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: showFilters ? filterBar : const SizedBox.shrink()),
+          const SizedBox(width: AppTokens.space8),
+          sortButton,
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -253,55 +293,16 @@ class _Header extends StatelessWidget {
             ),
             const SizedBox(width: AppTokens.space8),
             // 정렬 토글 — 이 카테고리 목록과 그 하위 체크리스트를 일정순으로 본다.
-            SortModeButton(
-              mode: sortMode,
-              accent: category.color,
-              onPressed: onToggleSort,
-            ),
+            sortButton,
           ],
         ),
         // 상태별 보기 — 카운트 배지이자 필터 버튼. 누르면 그 상태만 목록에 남는다.
         // (기존 미완료/진행중/완료/메모 통계 칩을 그대로 클릭 가능하게 승격 + '전체'.)
         if (showFilters) ...[
           const SizedBox(height: AppTokens.space12),
-          TodoStatusFilterBar(
-            counts: counts,
-            selected: filter,
-            onSelected: onFilterChanged,
-            accent: category.color,
-          ),
+          filterBar,
         ],
       ],
-    );
-  }
-}
-
-class _Error extends StatelessWidget {
-  const _Error({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.space24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: theme.colorScheme.error, size: 36),
-            const SizedBox(height: AppTokens.space12),
-            Text('카테고리를 불러오지 못했어요', style: theme.textTheme.titleMedium),
-            const SizedBox(height: AppTokens.space4),
-            Text(
-              message,
-              style: theme.textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

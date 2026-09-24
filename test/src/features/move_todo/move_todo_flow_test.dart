@@ -136,7 +136,11 @@ void main() {
   ///
   /// 편집 시트는 **닫힘 = 자동 저장**이라, '이동' 을 누르면 닫히면서 저장이 한 번
   /// 돌고 그 다음 이동 시트가 열린다. 두 저장이 서로를 덮지 않는지가 관건.
-  Future<void> openViaEditSheet(WidgetTester tester, Todo item) async {
+  Future<void> openViaEditSheet(
+    WidgetTester tester,
+    Todo item, {
+    String? editTitle,
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -172,6 +176,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('편집'));
     await tester.pumpAndSettle();
+    if (editTitle != null) {
+      await tester.enterText(find.byType(TextField).first, editTitle);
+      await tester.pump();
+    }
     await tester.tap(find.byKey(const ValueKey('edit-move')));
     await tester.pumpAndSettle();
   }
@@ -196,15 +204,16 @@ void main() {
     await disposeTree(tester);
   });
 
-  testWidgets('편집 시트의 이동 버튼은 닫힘 자동 저장을 발화시키지 않는다', (tester) async {
-    // 편집 시트는 "닫힘 = 저장" 이라, 이동 버튼이 닫으면서 저장을 함께 돌리면
-    // **이동 전 위치를 담은 저장**과 이동이 같은 row 를 두고 경쟁한다. 저장이
-    // 늦게 도착하면 방금 옮긴 parentId 가 통째로 되돌아간다 (실사용 증상).
-    // 경쟁 자체가 없도록 이 경로에서는 저장을 돌리지 않는 것이 계약이다.
+  testWidgets('편집 시트의 이동 버튼은 편집 저장을 한 번만, 이동 시트를 열기 전에 끝낸다', (tester) async {
+    // 편집 시트는 "닫힘 = 저장" 이다. 이동 버튼이 저장과 이동을 **동시에** 돌리면
+    // 이동 전 위치를 담은 저장과 이동이 같은 row 를 두고 경쟁한다 (실사용 증상:
+    // 방금 옮긴 parentId 가 되돌아감). 그래서 계약은 "저장은 한 번, 이동 시트가 뜨기
+    // 전에 완료" — 두 쓰기를 순차로 만든다. 닫힘 자동 저장이 추가로 돌면 안 된다.
     await repo.upsert(node('a'));
     await repo.upsert(node('b'));
 
     var updates = 0;
+    var updatesWhenMoveSheetOpened = -1;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -225,8 +234,10 @@ void main() {
                     initialTodo: node('b'),
                     onSubmit: (_) {},
                     onUpdate: (_) => updates++,
-                    onRequestMove: (t) =>
-                        showMoveTodoSheet(context, ref, item: t),
+                    onRequestMove: (t) {
+                      updatesWhenMoveSheetOpened = updates;
+                      showMoveTodoSheet(context, ref, item: t);
+                    },
                   ),
                   child: const Text('편집'),
                 ),
@@ -242,8 +253,28 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('edit-move')));
     await tester.pumpAndSettle();
 
-    expect(updates, 0, reason: '이동 경로에서는 편집 저장이 돌면 안 된다');
+    expect(updatesWhenMoveSheetOpened, 1, reason: '저장은 이동 시트보다 먼저 끝나야 한다');
+    expect(updates, 1, reason: '닫힘 자동 저장이 한 번 더 돌면 안 된다');
     expect(find.byKey(const ValueKey('move-confirm')), findsOneWidget);
+
+    await disposeTree(tester);
+  });
+
+  testWidgets('편집 시트에서 제목을 고친 뒤 이동해도 고친 제목이 남는다', (tester) async {
+    // UX 감사 B3 — 예전엔 이동 버튼이 편집 내용을 버려서 "방금 고친 제목이 사라진다".
+    await repo.upsert(node('a'));
+    await repo.upsert(node('b'));
+
+    await openViaEditSheet(tester, node('b'), editTitle: '고친 제목');
+
+    await tester.tap(find.byKey(const ValueKey('move-target-a')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('move-confirm')));
+    await tester.pumpAndSettle();
+
+    final moved = (await repo.getById('b'))!;
+    expect(moved.title, '고친 제목');
+    expect(moved.parentId, 'a');
 
     await disposeTree(tester);
   });

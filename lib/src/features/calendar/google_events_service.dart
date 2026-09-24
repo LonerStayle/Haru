@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import '../calendar_view/calendar_entry.dart';
+import 'calendar_auth.dart';
 import 'google_auth_service.dart';
 
 /// 구글 캘린더 이벤트 **조회 전용** 서비스.
@@ -26,7 +27,12 @@ class GoogleEventsService {
   /// `singleEvents: true` 로 반복 이벤트를 서버가 인스턴스로 펼쳐 준다. 그래서
   /// 클라이언트에 구글용 반복 로직을 따로 두지 않는다.
   Future<List<GoogleEventEntry>> listRange(DateTime from, DateTime to) async {
-    final client = await _auth.authedClient();
+    // 보기 전용 조회 — 로그인/동의 창을 절대 띄우지 않는다 (UX 감사 B4: 캘린더 화면만
+    // 열어도 브라우저 동의 창이 튀어나왔다). 무프롬프트 경로가 없는 구현체만 기존 경로.
+    final auth = _auth;
+    final client = auth is SilentCalendarAuth
+        ? await (auth as SilentCalendarAuth).silentClient()
+        : await auth.authedClient();
     if (client == null) return const [];
     try {
       final api = gcal.CalendarApi(client);

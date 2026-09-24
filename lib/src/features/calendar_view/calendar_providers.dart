@@ -4,6 +4,7 @@ import '../../data/day_boundary_provider.dart';
 import '../../data/providers.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
+import '../calendar/calendar_settings.dart';
 import '../calendar/google_auth_service.dart';
 import '../calendar/google_events_service.dart';
 import '../category/categories_controller.dart';
@@ -184,13 +185,24 @@ final calendarEntriesProvider = Provider.family
       );
     });
 
+/// Google 계정이 **실제로 연결돼 있는지** — OAuth 키가 있고(available) 사용자가 연결까지
+/// 마쳤을 때만 true. 캘린더 화면의 Google 일정 오버레이는 이 값으로만 켜진다.
+///
+/// 예전엔 "키 있음"만 봤다 → 연결 전/해제 후에도 오버레이가 켜져 조회가 로그인 창을
+/// 띄웠다 (UX 감사 B4).
+final googleCalendarConnectedProvider = Provider<bool>(
+  (ref) =>
+      ref.watch(googleCalendarAvailableProvider) &&
+      ref.watch(calendarSettingsProvider.select((s) => s.connected)),
+);
+
 /// 구글 이벤트를 함께 그릴지 (세션 내 토글).
 ///
-/// 기본값은 연동이 구성돼 있으면 on. 영속 저장은 하지 않는다 — 표시 여부는
+/// 기본값은 Google 이 연결돼 있으면 on. 영속 저장은 하지 않는다 — 표시 여부는
 /// "지금 뭘 보고 싶은가" 라서 기기 설정으로 굳힐 성질이 아니다.
 class ShowGoogleEventsNotifier extends Notifier<bool> {
   @override
-  bool build() => ref.watch(googleCalendarAvailableProvider);
+  bool build() => ref.watch(googleCalendarConnectedProvider);
 
   void toggle() => state = !state;
 }
@@ -214,6 +226,7 @@ final googleEventsProvider =
       ref,
       range,
     ) async {
+      if (!ref.watch(googleCalendarConnectedProvider)) return const [];
       final service = ref.watch(googleEventsServiceProvider);
       if (service == null) return const [];
       // timeMax 는 exclusive — 마지막 날이 잘리지 않게 하루 더 준다.

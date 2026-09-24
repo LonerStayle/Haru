@@ -673,9 +673,14 @@ void main() {
       },
     );
 
-    testWidgets('취소 시 onSubmit 0회 + 단일 라인 복구', (tester) async {
+    testWidgets('취소 시 onSubmit 0회 + 붙여넣기 직전 입력으로 복구', (tester) async {
       final submissions = await mount(tester);
 
+      await tester.enterText(
+        find.byKey(const ValueKey('add-todo-title')),
+        'draft',
+      );
+      await tester.pump();
       await tester.enterText(
         find.byKey(const ValueKey('add-todo-title')),
         'first\nsecond',
@@ -688,11 +693,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(submissions, isEmpty);
-      // \n 제거되어 단일 라인 (join) 으로 복구되는지 — controller 의 값을 TextField 위젯에서 검증.
+      // 취소 = 붙여넣기 취소 — 줄을 이어 붙인 긴 제목 대신 붙여넣기 직전 입력으로 돌아간다.
       final field = tester.widget<TextField>(
         find.byKey(const ValueKey('add-todo-title')),
       );
-      expect(field.controller!.text, 'first second');
+      expect(field.controller!.text, 'draft');
     });
 
     testWidgets('빈 줄만 paste → dialog 안 뜨고 단일 흐름 유지', (tester) async {

@@ -137,7 +137,11 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
       ),
       body: asyncChildren.when(
         loading: () => const TodoListSkeleton(),
-        error: (e, _) => _DetailError(message: '$e'),
+        error: (e, _) => ErrorState(
+          title: '하위 항목을 불러오지 못했어요',
+          error: e,
+          onRetry: () => ref.invalidate(childrenOfProvider(widget.parent.id)),
+        ),
         data: (children) {
           if (children.isEmpty) {
             return EmptyState(
@@ -302,36 +306,6 @@ class _SubtreeProgressBar extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DetailError extends StatelessWidget {
-  const _DetailError({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.space24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: theme.colorScheme.error, size: 36),
-            const SizedBox(height: AppTokens.space12),
-            Text('하위 항목을 불러오지 못했어요', style: theme.textTheme.titleMedium),
-            const SizedBox(height: AppTokens.space4),
-            Text(
-              message,
-              style: theme.textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
