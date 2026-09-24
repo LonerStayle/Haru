@@ -11,6 +11,7 @@ import 'package:solo_todo/src/features/todo_actions/toggle_with_undo.dart';
 import 'package:solo_todo/src/ui/widgets/dismissible_todo_tile.dart';
 import 'package:solo_todo/src/ui/widgets/todo_category_sections.dart';
 import 'package:solo_todo/src/ui/widgets/todo_tile.dart';
+import 'package:solo_todo/src/ui/widgets/undo_snackbar.dart';
 
 /// UX Phase 1 — "체크 하나 + 나머지 숨김" (대표님 결정 2026-09-25).
 void main() {
@@ -321,7 +322,75 @@ void main() {
       expect(find.text('"보고서 쓰기" 완료'), findsOneWidget);
       await tester.tap(find.text('되돌리기'));
       await tester.pump();
-      expect(actions.preserved?.status, TodoStatus.inProgress);
+      // 체크 전 상태(진행중)를 원래 시작 시각 그대로 되돌린다.
+      expect(actions.restored?.status, TodoStatus.inProgress);
+      expect(actions.restored?.startedAt, DateTime.utc(2026, 5, 27, 10));
+    });
+
+    testWidgets('떠 있는 삭제 되돌리기는 완료 스낵바가 밀어내지 않는다', (tester) async {
+      final actions = _FakeActions();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Column(
+                children: [
+                  TextButton(
+                    onPressed: () => showUndoSnackbar(
+                      context,
+                      message: '"다른 일" 삭제됨',
+                      onUndo: () {},
+                    ),
+                    child: const Text('delete'),
+                  ),
+                  TextButton(
+                    onPressed: () => toggleWithUndo(context, actions, make()),
+                    child: const Text('check'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('delete'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('check'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('"다른 일" 삭제됨'), findsOneWidget);
+      expect(find.text('"보고서 쓰기" 완료'), findsNothing);
+    });
+
+    testWidgets('줄이 사라져도(완료로 목록에서 빠짐) 스낵바는 뜬다', (tester) async {
+      final actions = _FakeActions(delay: const Duration(milliseconds: 50));
+      final show = ValueNotifier(true);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: show,
+              builder: (_, visible, _) => visible
+                  ? Builder(
+                      builder: (rowContext) => TextButton(
+                        onPressed: () {
+                          toggleWithUndo(rowContext, actions, make());
+                          show.value = false; // 저장 도중 줄이 빠진다.
+                        },
+                        child: const Text('check'),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('check'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('"보고서 쓰기" 완료'), findsOneWidget);
     });
 
     testWidgets('완료 취소 쪽은 스낵바 없음', (tester) async {
@@ -348,14 +417,19 @@ void main() {
 }
 
 class _FakeActions implements TodoActionsController {
-  Todo? preserved;
+  _FakeActions({this.delay = Duration.zero});
+
+  final Duration delay;
+  Todo? restored;
 
   @override
-  Future<Todo> toggle(Todo todo) async =>
-      todo.toggleDone(now: () => DateTime.utc(2026, 5, 27, 11));
+  Future<Todo> toggle(Todo todo) async {
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    return todo.toggleDone(now: () => DateTime.utc(2026, 5, 27, 11));
+  }
 
   @override
-  Future<Todo> updatePreservingOrder(Todo updated) async => preserved = updated;
+  Future<void> restoreStatus(Todo before) async => restored = before;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

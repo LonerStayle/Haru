@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
@@ -706,6 +708,50 @@ void main() {
       // 순수 메모만 메모 탭에. 헤딩(task 자손 보유)은 제외.
       expect(find.byKey(const ValueKey('outline-note-m')), findsOneWidget);
       expect(find.byKey(const ValueKey('outline-note-h')), findsNothing);
+    });
+  });
+
+  group('UX Phase 1 — 행 메뉴 (진행중 전환 수단)', () {
+    tearDown(() => AppPlatform.debugFormFactorOverride = null);
+
+    testWidgets('폰: 길게 누르면 메뉴 시트 — 진행중으로 / 편집 / 삭제', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      final r = make(id: 'r', title: '보고서');
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [r],
+        },
+        allTodos: [r],
+      );
+      await tester.longPress(find.text('보고서'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('todo-tile-menu-sheet')),
+        findsOneWidget,
+      );
+      expect(find.text('진행중으로'), findsOneWidget);
+      expect(find.text('편집'), findsOneWidget);
+      expect(find.text('삭제'), findsOneWidget);
+    });
+
+    testWidgets('데스크탑: 우클릭 메뉴', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      final r = make(id: 'r', title: '보고서');
+      await mount(
+        tester,
+        rootsByCategory: {
+          Category.work: [r],
+        },
+        allTodos: [r],
+      );
+      await tester.tap(
+        find.text('보고서'),
+        buttons: kSecondaryMouseButton,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('진행중으로'), findsOneWidget);
     });
   });
 }

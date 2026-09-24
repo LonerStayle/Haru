@@ -115,8 +115,13 @@ class TimelineScreen extends ConsumerWidget {
                   horizontal: AppTokens.space24,
                 ),
                 sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((context, i) {
+                  // builder 의 context 는 쓰지 않는다 — 완료·삭제하면 그 줄이 목록에서
+                  // 빠져 죽는다. 스낵바·시트는 화면 context 로.
+                  delegate: SliverChildBuilderDelegate((_, i) {
                     final t = bucket.items[i];
+                    final groupLabel = t.category.groupId == null
+                        ? null
+                        : groupLabelOf[t.category.groupId];
                     return Padding(
                       key: ValueKey('timeline-tile-${t.id}'),
                       padding: const EdgeInsets.only(bottom: AppTokens.space8),
@@ -124,9 +129,9 @@ class TimelineScreen extends ConsumerWidget {
                       // 카테고리가 섞여 있으니 소속을 제목 위 한 줄로 보인다.
                       child: TodoTile(
                         todo: t,
-                        breadcrumb: t.category.groupId == null
+                        breadcrumb: groupLabel == null
                             ? t.category.label
-                            : '${groupLabelOf[t.category.groupId]} › ${t.category.label}',
+                            : '$groupLabel › ${t.category.label}',
                         isCarriedOver: bucket.kind == _BucketKind.overdue,
                         onToggle: () => toggleWithUndo(
                           context,

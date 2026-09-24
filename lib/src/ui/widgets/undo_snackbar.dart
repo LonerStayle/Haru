@@ -14,11 +14,34 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showUndoSnackbar(
   required VoidCallback onUndo,
   Duration duration = const Duration(seconds: 5),
   bool hideCurrentBeforeShow = true,
+}) => showUndoSnackbarOn(
+  ScaffoldMessenger.of(context),
+  message: message,
+  onUndo: onUndo,
+  duration: duration,
+  hideCurrentBeforeShow: hideCurrentBeforeShow,
+)!;
+
+/// 화면에 떠 있는 "양보하지 않는"(삭제·이동) 되돌리기 스낵바 수 — 창구별.
+final Expando<int> _firmVisible = Expando('undo-snackbar-firm');
+
+/// [showUndoSnackbar] 의 messenger 버전 — 호출 context 가 곧 사라질 수 있을 때
+/// (목록의 한 줄 등) 미리 잡아 둔 [messenger] 로 띄운다.
+///
+/// [yieldToOthers] 가 true 면 이미 떠 있는 삭제·이동 되돌리기를 밀어내지 않고
+/// 아예 띄우지 않는다(null 반환). 체크 완료처럼 다른 길로도 되돌릴 수 있는 동작용.
+ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showUndoSnackbarOn(
+  ScaffoldMessengerState messenger, {
+  required String message,
+  required VoidCallback onUndo,
+  Duration duration = const Duration(seconds: 5),
+  bool hideCurrentBeforeShow = true,
+  bool yieldToOthers = false,
 }) {
-  final messenger = ScaffoldMessenger.of(context);
+  if (yieldToOthers && (_firmVisible[messenger] ?? 0) > 0) return null;
   if (hideCurrentBeforeShow) messenger.hideCurrentSnackBar();
 
-  return messenger.showSnackBar(
+  final controller = messenger.showSnackBar(
     SnackBar(
       content: _UndoContent(message: message, duration: duration),
       behavior: SnackBarBehavior.floating,
@@ -29,6 +52,14 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showUndoSnackbar(
       action: SnackBarAction(label: '되돌리기', onPressed: onUndo),
     ),
   );
+  if (!yieldToOthers) {
+    _firmVisible[messenger] = (_firmVisible[messenger] ?? 0) + 1;
+    controller.closed.whenComplete(() {
+      final n = (_firmVisible[messenger] ?? 1) - 1;
+      _firmVisible[messenger] = n < 0 ? 0 : n;
+    });
+  }
+  return controller;
 }
 
 class _UndoContent extends StatelessWidget {

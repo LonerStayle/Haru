@@ -113,6 +113,17 @@ class TodoActionsController {
     return synced;
   }
 
+  /// 체크 되돌리기 — [before] 의 3-상태(doneAt / startedAt)만 **지금 저장된 행**에
+  /// 되돌려 쓴다. 되돌리기 전에 제목 등을 고쳤어도 그 편집은 살리고, 진행중이던
+  /// 항목은 원래 시작 시각 그대로 돌아간다. 순서는 [updatePreservingOrder] 가 보존.
+  Future<void> restoreStatus(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(doneAt: before.doneAt, startedAt: before.startedAt),
+    );
+  }
+
   /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.
   ///
   /// 순서·동기화 메타(sortOrder / updatedAt)는 비교에서 제외한다 — 판정의 목적이

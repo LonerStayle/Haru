@@ -9,6 +9,7 @@ import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import 'in_progress_triangle.dart';
+import 'todo_action_menu.dart';
 import 'todo_status_check.dart';
 
 /// 모바일 압축 모드의 버튼 터치 타겟.
@@ -117,8 +118,12 @@ class TodoTile extends StatefulWidget {
 }
 
 class _TodoTileState extends State<TodoTile> {
-  /// 데스크탑 — 마우스가 올라와 있거나 메뉴가 열린 동안 보조 버튼을 보인다.
+  /// 데스크탑 — 마우스가 올라와 있거나, 줄 안에 키보드 포커스가 있거나, 메뉴가
+  /// 열린 동안 보조 버튼(△ ↳ ⋮)을 보인다.
   bool _hovered = false;
+  bool _focusWithin = false;
+  bool _menuOpen = false;
+  bool get _showQuickActions => _hovered || _focusWithin || _menuOpen;
 
   // ── 폰: 길게 눌렀다 떼면 메뉴 ──────────────────────────────────────────
   // 제스처 경합(순서 이동 드래그 / 스크롤 / 스와이프 / 탭)에 끼어들지 않도록
@@ -167,176 +172,24 @@ class _TodoTileState extends State<TodoTile> {
     );
   }
 
-  // ── 메뉴 항목 (우클릭·길게 누르기·⋮ 가 같은 목록을 쓴다) ─────────────────
+  // ── 메뉴 (우클릭·길게 누르기·⋮ 가 같은 목록 — [TodoMenu]) ───────────────
 
-  static List<_TileMenuAction> _menuActions(
-    TodoTile w, {
-    required bool includeQuick,
-  }) {
-    final isNote = w.todo.type == TodoType.note;
-    return [
-      if (includeQuick && !isNote && w.onToggleInProgress != null)
-        _TileMenuAction.inProgress,
-      if (includeQuick && w.onAddChild != null) _TileMenuAction.addChild,
-      if (w.onEditItem != null) _TileMenuAction.edit,
-      if (w.onMove != null) _TileMenuAction.move,
-      if (w.onCopy != null) _TileMenuAction.copy,
-      if (w.onStopRecurrence != null && w.todo.isInRecurringSeries)
-        _TileMenuAction.stopRecurrence,
-      if (w.onDelete != null) _TileMenuAction.delete,
-    ];
-  }
+  static TodoMenu _menuOf(TodoTile w) => TodoMenu(
+    todo: w.todo,
+    onToggleInProgress: w.onToggleInProgress,
+    onAddChild: w.onAddChild,
+    onEdit: w.onEditItem,
+    onMove: w.onMove,
+    onCopy: w.onCopy,
+    onStopRecurrence: w.onStopRecurrence,
+    onDelete: w.onDelete,
+  );
 
-  static void _run(TodoTile w, _TileMenuAction action) {
-    switch (action) {
-      case _TileMenuAction.inProgress:
-        w.onToggleInProgress?.call();
-      case _TileMenuAction.addChild:
-        w.onAddChild?.call();
-      case _TileMenuAction.edit:
-        w.onEditItem?.call();
-      case _TileMenuAction.move:
-        w.onMove?.call();
-      case _TileMenuAction.copy:
-        w.onCopy?.call();
-      case _TileMenuAction.stopRecurrence:
-        w.onStopRecurrence?.call();
-      case _TileMenuAction.delete:
-        w.onDelete?.call();
-    }
-  }
-
-  static (IconData, String) _describe(TodoTile w, _TileMenuAction a) =>
-      switch (a) {
-        _TileMenuAction.inProgress => (
-          Icons.change_history_rounded,
-          w.todo.isInProgress ? '진행중 해제' : '진행중으로',
-        ),
-        _TileMenuAction.addChild => (
-          Icons.subdirectory_arrow_right_rounded,
-          '하위 추가',
-        ),
-        _TileMenuAction.edit => (Icons.edit_outlined, '편집'),
-        _TileMenuAction.move => (Icons.drive_file_move_outline, '이동'),
-        _TileMenuAction.copy => (Icons.copy_outlined, '복사'),
-        _TileMenuAction.stopRecurrence => (Icons.repeat_rounded, '반복 중지'),
-        _TileMenuAction.delete => (Icons.delete_outline_rounded, '삭제'),
-      };
-
-  static List<PopupMenuEntry<_TileMenuAction>> _popupItems(
-    BuildContext context,
-    TodoTile w,
-    List<_TileMenuAction> actions,
-  ) {
-    final error = Theme.of(context).colorScheme.error;
-    return [
-      for (final a in actions)
-        PopupMenuItem(
-          key: ValueKey('todo-tile-menu-item-${a.name}'),
-          value: a,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              _describe(w, a).$1,
-              size: 18,
-              color: a == _TileMenuAction.delete ? error : null,
-            ),
-            title: Text(
-              _describe(w, a).$2,
-              style: a == _TileMenuAction.delete
-                  ? TextStyle(color: error)
-                  : null,
-            ),
-          ),
-        ),
-    ];
-  }
-
-  /// 데스크탑 우클릭 — 커서 위치에 전체 메뉴.
+  /// 데스크탑 우클릭 — 커서 위치에 전체 메뉴. 열린 동안 hover 버튼을 유지한다.
   Future<void> _openContextMenu(Offset globalPosition) async {
-    final w = widget;
-    final actions = _menuActions(w, includeQuick: true);
-    if (actions.isEmpty) return;
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    setState(() => _hovered = true);
-    final picked = await showMenu<_TileMenuAction>(
-      context: context,
-      position: RelativeRect.fromRect(
-        globalPosition & const Size(1, 1),
-        Offset.zero & overlay.size,
-      ),
-      items: _popupItems(context, w, actions),
-    );
-    if (mounted) setState(() => _hovered = false);
-    if (picked != null) _run(w, picked);
-  }
-
-  /// 폰 길게 누르기 — 아래에서 올라오는 메뉴 시트. [navigator] 는 누를 때 잡아 둔
-  /// 것 (이 State 는 이미 트리에서 빠졌을 수 있다).
-  static Future<void> _openMenuSheet(
-    NavigatorState navigator,
-    TodoTile w,
-  ) async {
-    final actions = _menuActions(w, includeQuick: true);
-    if (actions.isEmpty || !navigator.mounted) return;
-    final picked = await showModalBottomSheet<_TileMenuAction>(
-      context: navigator.context,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        final theme = Theme.of(sheetContext);
-        final error = theme.colorScheme.error;
-        // 항목이 많거나 화면이 낮아도 넘치지 않게 스크롤.
-        return SafeArea(
-          child: SingleChildScrollView(
-            key: const ValueKey('todo-tile-menu-sheet'),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppTokens.space24,
-                    0,
-                    AppTokens.space24,
-                    AppTokens.space8,
-                  ),
-                  child: Text(
-                    w.todo.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                for (final a in actions)
-                  ListTile(
-                    key: ValueKey('todo-tile-sheet-${a.name}'),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: AppTokens.space24,
-                    ),
-                    leading: Icon(
-                      _describe(w, a).$1,
-                      color: a == _TileMenuAction.delete ? error : null,
-                    ),
-                    title: Text(
-                      _describe(w, a).$2,
-                      style: a == _TileMenuAction.delete
-                          ? TextStyle(color: error)
-                          : null,
-                    ),
-                    onTap: () => Navigator.of(sheetContext).pop(a),
-                  ),
-                const SizedBox(height: AppTokens.space8),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    if (picked != null) _run(w, picked);
+    setState(() => _menuOpen = true);
+    await _menuOf(widget).showContextMenu(context, globalPosition);
+    if (mounted) setState(() => _menuOpen = false);
   }
 
   void _onPointerDown(PointerDownEvent e) {
@@ -374,7 +227,7 @@ class _TodoTileState extends State<TodoTile> {
     _suppressNextTap = true;
     scheduleMicrotask(() => _suppressNextTap = false);
     if (pressed != null && navigator != null) {
-      _openMenuSheet(navigator, pressed);
+      _menuOf(pressed).showSheet(navigator);
     }
   }
 
@@ -631,7 +484,8 @@ class _TodoTileState extends State<TodoTile> {
           ),
           style: compact ? _kCompactIconButtonStyle : null,
           visualDensity: compact ? null : VisualDensity.compact,
-          tooltip: isDone ? '완료 취소' : '완료',
+          // 폰에선 툴팁이 길게 누르기를 먼저 가져가 순서 이동·메뉴를 막는다.
+          tooltip: isMobile ? null : (isDone ? '완료 취소' : '완료'),
         ),
       SizedBox(width: compact ? AppTokens.space4 : AppTokens.space8),
     ];
@@ -640,7 +494,8 @@ class _TodoTileState extends State<TodoTile> {
     // 자리는 항상 잡아 둔다 — 마우스를 올릴 때 제목이 다시 줄바꿈되며 흔들리지
     // 않게. 투명할 때도 눌리지만, 마우스는 누르기 전에 반드시 이 줄 위를 지나므로
     // 실제로는 보이는 상태에서만 눌린다.
-    final ellipsisActions = _menuActions(w, includeQuick: false);
+    final menu = _menuOf(w);
+    final ellipsisActions = menu.actions(includeQuick: false);
     final hoverActions = isMobile
         ? const <Widget>[]
         : <Widget>[
@@ -669,20 +524,21 @@ class _TodoTileState extends State<TodoTile> {
                 tooltip: '하위 추가',
               ),
             if (ellipsisActions.isNotEmpty)
-              PopupMenuButton<_TileMenuAction>(
+              PopupMenuButton<TodoMenuAction>(
                 key: ValueKey('todo-tile-menu-${todo.id}'),
                 icon: Icon(Icons.more_vert, size: 18, color: faint),
                 tooltip: '더보기',
                 padding: EdgeInsets.zero,
                 style: compact ? _kCompactIconButtonStyle : null,
-                onOpened: () => setState(() => _hovered = true),
-                onCanceled: () => setState(() => _hovered = false),
+                // 메뉴의 모달 장벽이 마우스를 가려 hover 가 풀려도 버튼은 유지.
+                onOpened: () => setState(() => _menuOpen = true),
+                onCanceled: () => setState(() => _menuOpen = false),
                 onSelected: (a) {
-                  setState(() => _hovered = false);
-                  _run(w, a);
+                  setState(() => _menuOpen = false);
+                  menu.run(a);
                 },
                 itemBuilder: (context) =>
-                    _popupItems(context, w, ellipsisActions),
+                    menu.popupItems(context, ellipsisActions),
               ),
           ];
 
@@ -699,11 +555,22 @@ class _TodoTileState extends State<TodoTile> {
             child: drillBadge,
           ),
         if (hoverActions.isNotEmpty)
-          AnimatedOpacity(
-            key: const ValueKey('todo-tile-hover-actions'),
-            opacity: _hovered ? 1 : 0,
-            duration: const Duration(milliseconds: 120),
-            child: Row(mainAxisSize: MainAxisSize.min, children: hoverActions),
+          // 키보드(Tab)로 들어와도 보이게 포커스를 따라가고, 화면낭독기에는
+          // 투명할 때도 버튼을 알린다.
+          Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onFocusChange: (f) => setState(() => _focusWithin = f),
+            child: AnimatedOpacity(
+              key: const ValueKey('todo-tile-hover-actions'),
+              opacity: _showQuickActions ? 1 : 0,
+              duration: const Duration(milliseconds: 120),
+              alwaysIncludeSemantics: true,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: hoverActions,
+              ),
+            ),
           ),
       ],
     );
@@ -736,7 +603,16 @@ class _TodoTileState extends State<TodoTile> {
         onPointerMove: _onPointerMove,
         onPointerUp: _onPointerUp,
         onPointerCancel: _resetPress,
-        child: tile,
+        // 화면낭독기(TalkBack)의 "길게 누르기" 동작으로도 메뉴가 열리게.
+        child: Semantics(
+          onLongPress: menu.actions(includeQuick: true).isEmpty
+              ? null
+              : () {
+                  final nav = Navigator.maybeOf(context);
+                  if (nav != null) menu.showSheet(nav);
+                },
+          child: tile,
+        ),
       );
     } else {
       tile = MouseRegion(
@@ -784,15 +660,4 @@ class _MetaChip extends StatelessWidget {
       ),
     );
   }
-}
-
-/// [TodoTile] 메뉴 액션. 우클릭·길게 누르기 메뉴는 전부, ⋮ 는 edit 이하만.
-enum _TileMenuAction {
-  inProgress,
-  addChild,
-  edit,
-  move,
-  copy,
-  stopRecurrence,
-  delete,
 }

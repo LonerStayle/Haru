@@ -313,9 +313,13 @@ class _CheckDot extends ConsumerWidget {
         key: ValueKey('calendar-panel-check-${entry.entryKey}'),
         customBorder: const CircleBorder(),
         onTap: () async {
+          // 반복 미리보기(ghost)는 먼저 실제 회차로 만들어진다 — 그 사이 목록이 다시
+          // 그려지며 이 칸이 바뀌어도 체크가 빠지지 않게, 필요한 것을 미리 잡아 둔다.
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          final actions = ref.read(todoActionsProvider);
           final todo = await resolveEntryTodo(ref, entry);
-          if (todo == null || !context.mounted) return;
-          await toggleWithUndo(context, ref.read(todoActionsProvider), todo);
+          if (todo == null) return;
+          await toggleWithUndoOn(messenger, actions, todo);
         },
         // 다른 목록과 같은 체크(○/◐/●). 반복 미리보기(ghost)는 옅게.
         child: Opacity(

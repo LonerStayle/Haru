@@ -370,4 +370,23 @@ void main() {
       expect(await repo.getById('series#20260820'), isNotNull);
     });
   });
+
+  test('restoreStatus: 체크 전 상태(진행중·시작 시각)만 되돌리고 그 사이 편집·순서는 보존', () async {
+    final started = DateTime.utc(2026, 5, 27, 8);
+    final before = seed().copyWith(startedAt: started, sortOrder: 4);
+    await repo.upsert(before);
+    await controller.toggle(before); // 완료
+    // 되돌리기 전에 제목을 고쳤다.
+    final done = (await repo.getById('a'))!;
+    await repo.upsert(done.copyWith(title: '회의 (수정)'));
+
+    await controller.restoreStatus(before);
+
+    final row = (await repo.getById('a'))!;
+    expect(row.status, TodoStatus.inProgress);
+    expect(row.startedAt, started, reason: '원래 시작 시각 그대로');
+    expect(row.doneAt, isNull);
+    expect(row.title, '회의 (수정)', reason: '되돌리기는 상태만 — 편집은 살린다');
+    expect(row.sortOrder, 4);
+  });
 }
