@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import 'todo_tile.dart';
@@ -77,6 +78,13 @@ class DismissibleTodoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final tile = _tile();
+
+    // 데스크탑은 "밀어서 삭제" 를 끈다. Flutter 는 마우스(맥 트랙패드 클릭 포함)의 드래그
+    // 판정 임계가 1px 이라, 클릭하는 동안 손이 살짝만 흔들려도 가로 드래그가 이겨 카드
+    // 탭과 ○ 체크 클릭이 사라졌다 (대표님 제보 2026-09-25 "클릭 자체가 잘 안 된다").
+    // 데스크탑 삭제는 ⋮ 메뉴 → 삭제(되돌리기 포함)로 한다. 모바일 스와이프는 그대로.
+    if (AppPlatform.isDesktop) return tile;
 
     return Dismissible(
       key: ValueKey('todo-${todo.id}'),
@@ -99,24 +107,26 @@ class DismissibleTodoTile extends StatelessWidget {
         ),
       ),
       onDismissed: (_) => onDelete?.call(),
-      child: TodoTile(
-        todo: todo,
-        onToggle: onToggle,
-        onToggleInProgress: onToggleInProgress,
-        onTap: onTap,
-        onAddChild: onAddChild,
-        onMove: onMove,
-        onCopy: onCopy,
-        onEditItem: onEditItem,
-        onDelete: onDelete,
-        isExpanded: isExpanded,
-        onToggleExpand: onToggleExpand,
-        childCount: childCount,
-        drillChildCount: drillChildCount,
-        hiddenSeriesCount: hiddenSeriesCount,
-        onStopRecurrence: onStopRecurrence,
-        breadcrumb: breadcrumb,
-      ),
+      child: tile,
     );
   }
+
+  TodoTile _tile() => TodoTile(
+    todo: todo,
+    onToggle: onToggle,
+    onToggleInProgress: onToggleInProgress,
+    onTap: onTap,
+    onAddChild: onAddChild,
+    onMove: onMove,
+    onCopy: onCopy,
+    onEditItem: onEditItem,
+    onDelete: onDelete,
+    isExpanded: isExpanded,
+    onToggleExpand: onToggleExpand,
+    childCount: childCount,
+    drillChildCount: drillChildCount,
+    hiddenSeriesCount: hiddenSeriesCount,
+    onStopRecurrence: onStopRecurrence,
+    breadcrumb: breadcrumb,
+  );
 }

@@ -6,6 +6,7 @@ import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../data/providers.dart';
+import '../../ui/widgets/click_tolerant_draggable.dart';
 import '../home/today_providers.dart';
 import '../search/search_screen.dart';
 import '../settings/settings_sheet.dart';
@@ -421,7 +422,9 @@ Widget _dragSource({
   final feedback = _DragFeedback(title: title, color: color);
   final placeholder = Opacity(opacity: 0.35, child: child);
   if (AppPlatform.isDesktop) {
-    return Draggable<CalendarDragData>(
+    // 기본 Draggable 은 마우스 1px 이동에도 드래그를 시작해 카드 탭·체크 클릭을 빼앗았다
+    // (대표님 제보 "클릭이 잘 안 된다"). 6px 이상 움직여야 드래그로 본다.
+    return ClickTolerantDraggable<CalendarDragData>(
       data: data,
       feedback: feedback,
       childWhenDragging: placeholder,
