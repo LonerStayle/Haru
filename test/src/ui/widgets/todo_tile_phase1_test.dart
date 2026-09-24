@@ -299,6 +299,81 @@ void main() {
     });
   });
 
+  group('오늘 섹션 — 완료 접기 행이 끼어도 순서 계산', () {
+    setUp(() => AppPlatform.debugFormFactorOverride = FormFactor.mobile);
+
+    testWidgets('진행 항목 둘 사이 이동 — 형제 목록은 진행→완료 순, 인덱스 정확', (tester) async {
+      Todo t(String id, String title, int order, {bool done = false}) => Todo(
+        id: id,
+        title: title,
+        category: Category.work,
+        dueAt: null,
+        doneAt: done ? DateTime.utc(2026, 5, 27, 9) : null,
+        createdAt: DateTime.utc(2026, 5, 27, 9),
+        updatedAt: DateTime.utc(2026, 5, 27, 9),
+        calendarEventId: null,
+        sortOrder: order,
+      );
+      // sortOrder 로는 완료 항목이 가운데 — 화면에선 접기 행 아래로 내려간다.
+      final roots = [
+        t('a', '첫째', 0),
+        t('d', '끝낸 일', 1, done: true),
+        t('c', '셋째', 2),
+      ];
+      List<String>? siblingIds;
+      int? from;
+      int? to;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.mobileLight(),
+          home: Scaffold(
+            body: CustomScrollView(
+              slivers: todayCategorySectionSlivers(
+                roots: roots,
+                allTodos: roots,
+                groups: const [],
+                showGroupLabel: false,
+                onDrillDown: (_) {},
+                onEdit: (_) {},
+                onToggle: (_) {},
+                onAddChild: (_) {},
+                onMove: (_) {},
+                onCopy: (_) {},
+                onDelete: (_) {},
+                onReorderSiblings: (sib, o, n) {
+                  siblingIds = [for (final x in sib) x.id];
+                  from = o;
+                  to = n;
+                },
+                onMoveToCategory: (_, _, _, _) {},
+                onToggleDone: (_) {},
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('끝낸 일'), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+
+      // '첫째' 를 '셋째' 아래로 (접기 행 위까지).
+      final start = tester.getCenter(find.text('첫째'));
+      final target = tester.getCenter(find.text('셋째'));
+      final g = await tester.startGesture(start);
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      final dy = target.dy - start.dy + 30;
+      for (var i = 1; i <= 10; i++) {
+        await g.moveTo(start + Offset(0, dy * i / 10));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await g.up();
+      await tester.pumpAndSettle();
+
+      expect(siblingIds, ['a', 'c', 'd'], reason: '형제 목록 = 진행 → 완료 순');
+      expect(from, 0);
+      expect(to, 2, reason: "'셋째' 뒤(완료 항목 앞) — 제거 전 인덱스 규약");
+    });
+  });
+
   group('체크 되돌리기', () {
     testWidgets('완료하면 스낵바, 되돌리면 체크 전 상태(진행중)로', (tester) async {
       final actions = _FakeActions();

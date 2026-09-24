@@ -52,6 +52,8 @@ class HomeScreen extends ConsumerWidget {
     // 떠 있는 동안 마스터의 누락 발생분이 채워진다.
     ref.watch(recurrenceMaterializerProvider);
     final globalCarryover = ref.watch(carryoverCountProvider);
+    ref.watch(carryoverBannerDismissedProvider);
+    final bannerNotifier = ref.read(carryoverBannerDismissedProvider.notifier);
     final allTodos = ref.watch(allTodosProvider).asData?.value ?? const [];
     final groups =
         ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
@@ -109,6 +111,8 @@ class HomeScreen extends ConsumerWidget {
           inProgressCount: inProgressCount,
           totalCount: totalCount,
           carryoverCount: carryoverCount,
+          carryoverBannerDismissed: bannerNotifier.isDismissedOn(now),
+          onDismissCarryoverBanner: () => bannerNotifier.dismiss(now),
           showHeader: showHeader,
           now: now,
           onToggle: (t) =>
@@ -216,6 +220,8 @@ class _Loaded extends StatefulWidget {
     required this.inProgressCount,
     required this.totalCount,
     required this.carryoverCount,
+    required this.carryoverBannerDismissed,
+    required this.onDismissCarryoverBanner,
     required this.showHeader,
     required this.now,
     required this.onToggle,
@@ -252,6 +258,10 @@ class _Loaded extends StatefulWidget {
   final int totalCount;
   final int carryoverCount;
 
+  /// 오늘 이월 배너를 닫았는지 / 닫기.
+  final bool carryoverBannerDismissed;
+  final VoidCallback onDismissCarryoverBanner;
+
   /// 큰 '오늘' 헤더 표시 여부 (그룹 탭 임베드 시 false).
   final bool showHeader;
   final DateTime now;
@@ -286,6 +296,12 @@ class _Loaded extends StatefulWidget {
 }
 
 class _LoadedState extends State<_Loaded> {
+  /// 섹션별 "완료 N개" 접기 행을 펼친 카테고리 — 기본 접힘, 세션 비영속.
+  final Set<String> _expandedDone = {};
+
+  /// 이월 배너의 "이월만 보기" — 켜면 어제 이전에서 넘어온 항목만 보인다.
+  bool _carryoverOnly = false;
+
   /// 오늘 화면 root 후보: visible todo 중 그 부모도 visible 인 항목은 자식으로만 보여야
   /// 중복되지 않는다. 부모가 today set 에 있으면 그 부모 아래 자식으로 자연 렌더되므로
   /// root 목록에서 제외. (부모가 today 가 아니면 이 visible 자식이 root 로 올라온다.)
@@ -298,7 +314,16 @@ class _LoadedState extends State<_Loaded> {
 
   @override
   Widget build(BuildContext context) {
-    final roots = _roots;
+    // 이월 항목이 다 정리되면 필터도 저절로 풀린다 (빈 화면에 갇히지 않게).
+    final carryoverOnly = _carryoverOnly && widget.carryoverCount > 0;
+    final roots = carryoverOnly
+        ? _roots
+              .where((t) => CarryoverPolicy.shouldCarryOverToday(t, widget.now))
+              .toList()
+        : _roots;
+    final showBanner =
+        widget.carryoverCount > 0 &&
+        (carryoverOnly || !widget.carryoverBannerDismissed);
     return CustomScrollView(
       slivers: [
         if (widget.showHeader)
@@ -337,7 +362,7 @@ class _LoadedState extends State<_Loaded> {
               ),
             ),
           ),
-        if (widget.carryoverCount > 0)
+        if (showBanner)
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(
               AppTokens.space24,
@@ -346,7 +371,16 @@ class _LoadedState extends State<_Loaded> {
               0,
             ),
             sliver: SliverToBoxAdapter(
-              child: _CarryoverBanner(count: widget.carryoverCount),
+              child: _CarryoverBanner(
+                count: widget.carryoverCount,
+                filtering: carryoverOnly,
+                onToggleFilter: () =>
+                    setState(() => _carryoverOnly = !carryoverOnly),
+                onDismiss: () {
+                  setState(() => _carryoverOnly = false);
+                  widget.onDismissCarryoverBanner();
+                },
+              ),
             ),
           ),
         if (widget.todos.isEmpty)
@@ -386,6 +420,10 @@ class _LoadedState extends State<_Loaded> {
             hiddenCountBySeries: widget.hiddenCountBySeries,
             onStopRecurrence: widget.onStopRecurrence,
             now: widget.now,
+            expandedDoneCategories: _expandedDone,
+            onToggleDone: (cid) => setState(() {
+              if (!_expandedDone.remove(cid)) _expandedDone.add(cid);
+            }),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: AppTokens.space48)),
         ],
@@ -498,10 +536,21 @@ class _SyncPendingChip extends StatelessWidget {
   }
 }
 
+/// 이월 배너 — 알림 + 행동 두 개 (UX Phase 1).
+///  - "이월만 보기": 어제 이전에서 넘어온 항목만 추려 본다 (다시 누르면 전체).
+///  - "닫기": 오늘은 더 띄우지 않는다.
 class _CarryoverBanner extends StatelessWidget {
-  const _CarryoverBanner({required this.count});
+  const _CarryoverBanner({
+    required this.count,
+    required this.filtering,
+    required this.onToggleFilter,
+    required this.onDismiss,
+  });
 
   final int count;
+  final bool filtering;
+  final VoidCallback onToggleFilter;
+  final VoidCallback onDismiss;
 
   @override
   Widget build(BuildContext context) {
@@ -513,9 +562,11 @@ class _CarryoverBanner extends StatelessWidget {
     final borderAlpha = isDark ? 0.40 : 0.20;
     return Container(
       key: const ValueKey('carryover-banner'),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space16,
-        vertical: AppTokens.space12,
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space16,
+        AppTokens.space4,
+        AppTokens.space4,
+        AppTokens.space4,
       ),
       decoration: BoxDecoration(
         color: scheme.primary.withValues(alpha: bgAlpha),
@@ -535,12 +586,25 @@ class _CarryoverBanner extends StatelessWidget {
           const SizedBox(width: AppTokens.space12),
           Expanded(
             child: Text(
-              '어제까지 못 끝낸 $count건이 오늘로 이월되었어요.',
+              filtering ? '이월된 $count건만 보는 중' : '어제까지 못 끝낸 $count건이 오늘로 넘어왔어요.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onSurface,
                 fontWeight: FontWeight.w500,
               ),
             ),
+          ),
+          TextButton(
+            key: const ValueKey('carryover-banner-filter'),
+            onPressed: onToggleFilter,
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            child: Text(filtering ? '전체 보기' : '이월만 보기'),
+          ),
+          IconButton(
+            key: const ValueKey('carryover-banner-dismiss'),
+            onPressed: onDismiss,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            tooltip: '오늘은 그만 보기',
+            visualDensity: VisualDensity.compact,
           ),
         ],
       ),
