@@ -111,8 +111,12 @@ class HomeScreen extends ConsumerWidget {
           inProgressCount: inProgressCount,
           totalCount: totalCount,
           carryoverCount: carryoverCount,
-          carryoverBannerDismissed: bannerNotifier.isDismissedOn(now),
-          onDismissCarryoverBanner: () => bannerNotifier.dismiss(now),
+          carryoverBannerDismissed: bannerNotifier.isDismissedOn(
+            group?.id ?? '',
+            now,
+          ),
+          onDismissCarryoverBanner: () =>
+              bannerNotifier.dismiss(group?.id ?? '', now),
           showHeader: showHeader,
           now: now,
           onToggle: (t) =>
@@ -313,14 +317,41 @@ class _LoadedState extends State<_Loaded> {
   }
 
   @override
+  void didUpdateWidget(covariant _Loaded oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 이월이 다 정리되면 필터를 실제로 끈다 — 계산으로만 숨기면, 되돌리기·동기화로
+    // 이월이 다시 생길 때 사용자가 누르지도 않았는데 필터가 되살아났다.
+    if (widget.carryoverCount == 0) _carryoverOnly = false;
+  }
+
+  /// '이월만 보기' 의 대상 root — root 자신이 이월됐거나, 그 아래 보이는 하위 중
+  /// 이월된 게 있는 root. (하위만 이월된 경우 root 를 빼면 화면이 통째로 비었다.)
+  List<Todo> _carryoverRoots(List<Todo> roots) {
+    final byId = {for (final t in widget.todos) t.id: t};
+    final marked = <String>{};
+    for (final t in widget.todos) {
+      if (!CarryoverPolicy.shouldCarryOverToday(t, widget.now)) continue;
+      var cur = t;
+      final seen = <String>{};
+      while (cur.parentId != null &&
+          byId.containsKey(cur.parentId) &&
+          seen.add(cur.id)) {
+        cur = byId[cur.parentId]!;
+      }
+      marked.add(cur.id);
+    }
+    return roots.where((t) => marked.contains(t.id)).toList();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // 이월 항목이 다 정리되면 필터도 저절로 풀린다 (빈 화면에 갇히지 않게).
-    final carryoverOnly = _carryoverOnly && widget.carryoverCount > 0;
-    final roots = carryoverOnly
-        ? _roots
-              .where((t) => CarryoverPolicy.shouldCarryOverToday(t, widget.now))
-              .toList()
-        : _roots;
+    final allRoots = _roots;
+    final carriedRoots = _carryoverOnly
+        ? _carryoverRoots(allRoots)
+        : const <Todo>[];
+    // 추릴 게 없으면(반복 묶음에 가려졌거나 이미 정리됨) 필터는 풀린 것으로 본다.
+    final carryoverOnly = _carryoverOnly && carriedRoots.isNotEmpty;
+    final roots = carryoverOnly ? carriedRoots : allRoots;
     final showBanner =
         widget.carryoverCount > 0 &&
         (carryoverOnly || !widget.carryoverBannerDismissed);
@@ -421,6 +452,8 @@ class _LoadedState extends State<_Loaded> {
             onStopRecurrence: widget.onStopRecurrence,
             now: widget.now,
             expandedDoneCategories: _expandedDone,
+            // 일부만 보이는 동안엔 순서 바꾸기를 끈다 (숨은 항목과 번호가 겹친다).
+            reorderEnabled: !carryoverOnly,
             onToggleDone: (cid) => setState(() {
               if (!_expandedDone.remove(cid)) _expandedDone.add(cid);
             }),

@@ -368,9 +368,11 @@ void main() {
       await g.up();
       await tester.pumpAndSettle();
 
-      expect(siblingIds, ['a', 'c', 'd'], reason: '형제 목록 = 진행 → 완료 순');
+      // 저장 순서는 원래 sortOrder 순 목록 기준 — 끌지 않은 완료 항목(d)의
+      // 상대 순서가 그대로 남도록.
+      expect(siblingIds, ['a', 'd', 'c'], reason: '원래 sortOrder 순');
       expect(from, 0);
-      expect(to, 2, reason: "'셋째' 뒤(완료 항목 앞) — 제거 전 인덱스 규약");
+      expect(to, 3, reason: "'셋째' 바로 뒤 — 제거 전 인덱스 규약");
     });
   });
 

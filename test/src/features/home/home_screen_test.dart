@@ -329,6 +329,55 @@ void main() {
       expect(find.text('오늘 일'), findsOneWidget);
     });
 
+    testWidgets('하위만 이월돼도 "이월만 보기" 에 그 부모가 남는다 (빈 화면 방지)', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      final parent = todo(id: 'p', title: '부모 일', dueAt: DateTime(2026, 5, 27));
+      final child = todo(
+        id: 'k',
+        title: '어제 하위',
+        dueAt: DateTime(2026, 5, 26),
+      ).copyWith(parentId: 'p');
+      controller.add([
+        parent,
+        child,
+        todo(id: 't', title: '오늘 일', dueAt: DateTime(2026, 5, 27)),
+      ]);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('부모 일'), findsOneWidget);
+      expect(find.text('오늘 일'), findsNothing);
+    });
+
+    testWidgets('이월이 정리되면 필터가 꺼지고, 다시 생겨도 저절로 켜지지 않는다', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      final carried = todo(
+        id: 'y',
+        title: '어제 일',
+        dueAt: DateTime(2026, 5, 26),
+      );
+      final today = todo(id: 't', title: '오늘 일', dueAt: DateTime(2026, 5, 27));
+      controller.add([carried, today]);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('오늘 일'), findsNothing);
+
+      // 이월 항목 완료 → 필터 해제.
+      controller.add([
+        carried.copyWith(doneAt: DateTime(2026, 5, 27, 9)),
+        today,
+      ]);
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+
+      // 되돌리기로 이월이 다시 생겨도 필터는 꺼진 채.
+      controller.add([carried, today]);
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+      expect(find.textContaining('만 보는 중'), findsNothing);
+    });
+
     testWidgets('이월 배너 닫기 → 오늘은 안 보인다, 항목은 그대로', (tester) async {
       final controller = await mountWith(tester, fixedNow: now);
       controller.add([

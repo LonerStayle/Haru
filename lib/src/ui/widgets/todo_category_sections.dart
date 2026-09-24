@@ -62,6 +62,10 @@ List<Widget> todayCategorySectionSlivers({
   /// 완료 접기 행을 펼친 카테고리 id. [onToggleDone] 이 null 이면 접지 않는다.
   Set<String> expandedDoneCategories = const {},
   void Function(String categoryId)? onToggleDone,
+
+  /// false 면 끌어서 순서 바꾸기를 끈다 (예: '이월만 보기' 처럼 일부만 보이는 동안 —
+  /// 숨은 항목과 순서 번호가 겹치지 않게).
+  bool reorderEnabled = true,
 }) {
   // parentId → 직속 자식 수 (드릴 배지 / 편집 분기 판정용).
   final childCounts = <String, int>{};
@@ -103,6 +107,11 @@ List<Widget> todayCategorySectionSlivers({
   // 섹션 안 순서 = 진행 항목 → 완료 항목 (각각 sortOrder 순 유지). 완료 접기를 쓰지
   // 않으면(onToggleDone == null) 원래 순서 그대로.
   final folding = onToggleDone != null;
+  // 순서 저장에 쓰는 원래 sortOrder 순 목록 — 화면 배치(진행→완료)를 그대로 넘기면
+  // 끌지도 않은 완료 항목의 순서까지 다시 매겨진다.
+  final origByCat = {
+    for (final e in byCat.entries) e.key: [...e.value],
+  };
   final doneCountOf = <String, int>{};
   if (folding) {
     for (final cid in orderedCatIds) {
@@ -144,39 +153,51 @@ List<Widget> todayCategorySectionSlivers({
     if (pos < 0) pos = 0;
     if (pos > rest.length) pos = rest.length;
 
-    // 삽입 지점을 지배하는 헤더 = 그 앞의 마지막 헤더. 그 뒤로 센 항목 수가
-    // 섹션 안에서의 자리다. 첫 헤더보다 위에 놓으면 첫 섹션의 맨 위로 본다.
+    // 놓은 자리 = "어느 섹션의, 어떤 진행 항목 바로 아래" 로 읽는다. 첫 헤더보다 위면
+    // 첫 섹션 맨 위. 완료 항목·접기 행은 기준이 되지 않는다 (진행 항목은 진행 구간에).
     var destCid = orderedCatIds.first;
-    var indexInDest = 0;
+    Todo? anchor;
     for (var i = 0; i < pos; i++) {
       final e = rest[i];
       if (e.isHeader) {
         destCid = e.categoryId;
-        indexInDest = 0;
-      } else if (e.todo != null) {
-        indexInDest++;
+        anchor = null;
+      } else if (e.todo != null && !(folding && e.todo!.isDone)) {
+        anchor = e.todo;
       }
-      // 완료 접기 행은 자리를 차지하지 않는다 (펼친 완료 항목은 그 뒤에 이어진다).
     }
 
-    final destItems = byCat[destCid]!;
-    if (destCid == dragged.category.id) {
-      final oldInDest = destItems.indexWhere((t) => t.id == dragged.id);
-      if (oldInDest < 0) return;
-      // onReorderSiblings 도 "제거 전" 인덱스 규약 → 뒤로 가는 이동은 +1 보정.
-      final newInDest = indexInDest >= oldInDest
-          ? indexInDest + 1
-          : indexInDest;
-      onReorderSiblings(destItems, oldInDest, newInDest);
+    // 원래 순서 목록 안에서의 자리(끈 항목을 뺀 좌표). 기준 항목 바로 뒤, 기준이
+    // 없으면 첫 진행 항목 앞. 숨은 완료 항목들 사이의 상대 순서는 그대로 남는다.
+    final orig = origByCat[destCid]!;
+    final without = [
+      for (final t in orig)
+        if (t.id != dragged.id) t,
+    ];
+    int at;
+    if (anchor != null) {
+      final anchorId = anchor.id;
+      at = without.indexWhere((t) => t.id == anchorId) + 1;
     } else {
-      onMoveToCategory(dragged, catOf[destCid]!, destItems, indexInDest);
+      final firstActive = without.indexWhere((t) => !(folding && t.isDone));
+      at = firstActive < 0 ? 0 : firstActive;
+    }
+
+    if (destCid == dragged.category.id) {
+      final oldInDest = orig.indexWhere((t) => t.id == dragged.id);
+      if (oldInDest < 0) return;
+      // onReorderSiblings 는 "제거 전" 인덱스 규약 → 뒤로 가는 이동은 +1 보정.
+      final newInDest = at >= oldInDest ? at + 1 : at;
+      onReorderSiblings(orig, oldInDest, newInDest);
+    } else {
+      onMoveToCategory(dragged, catOf[destCid]!, orig, at);
     }
   }
 
   return [
     SliverReorderableList(
       itemCount: entries.length,
-      onReorder: handleReorder,
+      onReorder: reorderEnabled ? handleReorder : (_, _) {},
       itemBuilder: (context, i) {
         final entry = entries[i];
         final cat = catOf[entry.categoryId]!;
@@ -228,6 +249,34 @@ List<Widget> todayCategorySectionSlivers({
 
         final childCount = childCounts[todo.id] ?? 0;
         final hasChildren = childCount > 0;
+        final tile = DismissibleTodoTile(
+          todo: todo,
+          onToggle: () => onToggle(todo),
+          onToggleInProgress: onToggleInProgress == null
+              ? null
+              : () => onToggleInProgress(todo),
+          onDelete: () => onDelete(todo),
+          onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
+          // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.
+          onAddChild: () => onAddChild(todo),
+          // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
+          onMove: () => onMove(todo),
+          onCopy: () => onCopy(todo),
+          onEditItem: () => onEdit(todo),
+          drillChildCount: hasChildren ? childCount : null,
+          childCount: childCount,
+          hiddenSeriesCount: todo.seriesId == null
+              ? 0
+              : (hiddenCountBySeries[todo.seriesId] ?? 0),
+          onStopRecurrence: onStopRecurrence == null
+              ? null
+              : () => onStopRecurrence(todo),
+          isCarriedOver:
+              now != null && CarryoverPolicy.shouldCarryOverToday(todo, now),
+        );
+        // 접기 안의 완료 항목은 끌지 않는다 — 놓아도 화면은 완료 구간으로 되돌아가
+        // 드래그가 무시된 것처럼 보이고 저장 순서만 바뀐다. (길게 누르기 메뉴는 그대로.)
+        final draggable = reorderEnabled && !(folding && todo.isDone);
         return Padding(
           key: ValueKey('drill-node-${todo.id}'),
           padding: const EdgeInsets.fromLTRB(
@@ -236,35 +285,9 @@ List<Widget> todayCategorySectionSlivers({
             AppTokens.space24,
             AppTokens.space8,
           ),
-          child: ReorderableDelayedDragStartListener(
-            index: i,
-            child: DismissibleTodoTile(
-              todo: todo,
-              onToggle: () => onToggle(todo),
-              onToggleInProgress: onToggleInProgress == null
-                  ? null
-                  : () => onToggleInProgress(todo),
-              onDelete: () => onDelete(todo),
-              onTap: () => hasChildren ? onDrillDown(todo) : onEdit(todo),
-              // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관 ＋하위 추가.
-              onAddChild: () => onAddChild(todo),
-              // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
-              onMove: () => onMove(todo),
-              onCopy: () => onCopy(todo),
-              onEditItem: () => onEdit(todo),
-              drillChildCount: hasChildren ? childCount : null,
-              childCount: childCount,
-              hiddenSeriesCount: todo.seriesId == null
-                  ? 0
-                  : (hiddenCountBySeries[todo.seriesId] ?? 0),
-              onStopRecurrence: onStopRecurrence == null
-                  ? null
-                  : () => onStopRecurrence(todo),
-              isCarriedOver:
-                  now != null &&
-                  CarryoverPolicy.shouldCarryOverToday(todo, now),
-            ),
-          ),
+          child: draggable
+              ? ReorderableDelayedDragStartListener(index: i, child: tile)
+              : tile,
         );
       },
     ),
