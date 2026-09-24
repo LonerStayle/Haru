@@ -57,11 +57,7 @@ class TrayService with TrayListener {
       items: [
         MenuItem(label: '오늘 $undoneCount건 미체크', disabled: true),
         MenuItem.separator(),
-        MenuItem(
-          key: 'add',
-          label: '새 할 일 (Cmd+N)',
-          onClick: (_) => onAddTodo(),
-        ),
+        MenuItem(key: 'add', label: '새 할 일 (⌘⇧N)', onClick: (_) => onAddTodo()),
         MenuItem.separator(),
         MenuItem(key: 'quit', label: '종료', onClick: (_) => onQuit()),
       ],

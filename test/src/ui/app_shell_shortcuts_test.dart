@@ -88,4 +88,15 @@ void main() {
     await tester.pump();
     expect(find.text('카테고리별 할 일과 메모를 한눈에'), findsOneWidget);
   });
+
+  testWidgets('앱 안 ⌘N → 곧바로 새 할 일 시트 (선택 시트 없이)', (tester) async {
+    // 2026-09-24 — 전역은 ⌘⇧N(다른 앱 ⌘N 비충돌), 앱 안은 ⌘N.
+    await pump(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
+    expect(find.text('무엇을 추가할까요?'), findsNothing);
+  });
 }

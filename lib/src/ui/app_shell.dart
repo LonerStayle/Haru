@@ -31,19 +31,22 @@ import 'destination.dart';
 import 'widgets/add_entity_buttons.dart';
 import 'widgets/undo_snackbar.dart';
 
-/// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + 1~5 카테고리 단축키.
+/// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + destination 숫자 단축키.
 ///
-/// 단축키: `0` = Today, `1` = work, `2` = personalDev, `3` = daily, `4` = longterm, `5` = idea.
-/// macOS 데스크탑 global Cmd+N 은 phase 6 의 hotkey_manager task 에서 연결.
+/// 단축키: `0` = 오늘, `1` = 전체보기, `2` = 캘린더, `3~9` = 카테고리 앞 7개
+/// ([AppDestination.buildAll] 이 단일 출처).
+///
+/// **새 할 일 단축키** (2026-09-24 대표님 결정):
+///   - 전역(OS 어디서든) = **⌘⇧N** (`hotkey_manager`, [HotKeyScope.system]).
+///     예전엔 전역 ⌘N 이라 하루가 켜져 있으면 Finder·브라우저·에디터의 "새 창/새 파일"
+///     ⌘N 을 가로챘다.
+///   - 앱 안 = **⌘N** (Flutter [Shortcuts]) — 하루 창이 앞에 있을 때만.
 ///
 /// **시스템 단축키 비충돌 점검** (macOS):
-///   - 우리가 잡는 modifier+key 조합은 **Cmd+N (글로벌)** 뿐. Cmd+W (Close window) /
-///     Cmd+Q (Quit) / Cmd+M (Minimize) / Cmd+H (Hide) / Cmd+, (Preferences) 등은
-///     macOS 가 그대로 처리하도록 둠.
-///   - 0~5 는 modifier 없는 plain digit — TextField focus 시 [isFocusInEditableText] 가드로
-///     숫자 입력에 양보 (text 입력 가능).
-///   - Esc 는 AddTodoSheet 의 _DismissIntent (sheet 닫기) — macOS 의 dialog 닫기와
-///     관행 일치, 충돌 없음.
+///   - Cmd+W / Cmd+Q / Cmd+M / Cmd+H / Cmd+, 등은 macOS 가 그대로 처리하도록 둠.
+///   - 숫자키는 modifier 없는 plain digit — TextField focus 시 [isFocusInEditableText]
+///     가드로 숫자 입력에 양보.
+///   - Esc 는 AddTodoSheet 의 _DismissIntent (sheet 닫기) — macOS 관행과 일치.
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -144,9 +147,11 @@ class _AppShellState extends ConsumerState<AppShell> {
       // `unregisterAll()` 은 hotkey_manager 의 process-scope 모든 hotkey 를 제거한다.
       // 다른 앱 영향은 없지만, 만약 향후 우리 앱이 hotkey 를 추가하면 함께 날아갈 위험이
       // 있어 **정확히 우리 단축키만** unregister 후 register 하는 형태로 안전화.
+      // 전역은 ⌘⇧N — 다른 앱의 ⌘N(새 창/새 파일)을 가로채지 않는다 (대표님 결정
+      // 2026-09-24). 앱 안의 ⌘N 은 _ShortcutsHost 가 따로 처리한다.
       final hotkey = HotKey(
         key: PhysicalKeyboardKey.keyN,
-        modifiers: const [HotKeyModifier.meta],
+        modifiers: const [HotKeyModifier.meta, HotKeyModifier.shift],
         scope: HotKeyScope.system,
       );
       try {
@@ -163,7 +168,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       _cmdN = hotkey;
     } catch (e) {
       // 글로벌 단축키 등록 실패 (test 환경 / 권한 거부) — FAB 으로 대체 가능하므로 fatal X.
-      debugPrint('[solo_todo] Cmd+N 글로벌 단축키 등록 실패: $e');
+      debugPrint('[haru] ⌘⇧N 전역 단축키 등록 실패: $e');
     }
   }
 
@@ -639,7 +644,7 @@ class _AppShellState extends ConsumerState<AppShell> {
             onPressed: _openAddTodo,
             icon: const Icon(Icons.add),
             label: const Text('새 할 일'),
-            tooltip: '새 할 일 (Cmd+N)',
+            tooltip: '새 할 일 (⌘N · 다른 앱에서 ⌘⇧N)',
           )
         : FloatingActionButton(
             key: const ValueKey('add-todo-fab'),
@@ -681,6 +686,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       destinations: _destinations,
       onSelect: _selectByDigit,
       onOpenSearch: _openSearch,
+      onAddTodo: _openAddTodo,
       // 모바일 시스템 뒤로가기 계단식 처리 — Drawer 닫기 / 그룹 나가기 / 오늘 복귀.
       // canPop=false 로 두면 predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅된다.
       child: PopScope(
@@ -762,11 +768,16 @@ class _OpenSearchIntent extends Intent {
   const _OpenSearchIntent();
 }
 
+class _NewTodoIntent extends Intent {
+  const _NewTodoIntent();
+}
+
 class _ShortcutsHost extends StatelessWidget {
   const _ShortcutsHost({
     required this.destinations,
     required this.onSelect,
     required this.onOpenSearch,
+    required this.onAddTodo,
     required this.child,
   });
 
@@ -776,6 +787,9 @@ class _ShortcutsHost extends StatelessWidget {
   /// Cmd+F — 전역 검색 열기. 숫자 단축키와 달리 modifier 조합이라 TextField 입력
   /// 중에도 그대로 동작한다 (숫자처럼 오타로 눌릴 일이 없다).
   final VoidCallback onOpenSearch;
+
+  /// ⌘N — 앱 안 새 할 일. (전역은 ⌘⇧N, hotkey_manager 가 담당)
+  final VoidCallback onAddTodo;
   final Widget child;
 
   /// 단축키 digit (0~9) ↔ LogicalKeyboardKey 매핑. destinations 의 shortcutDigit
@@ -806,6 +820,8 @@ class _ShortcutsHost extends StatelessWidget {
     // macOS 관례대로 Cmd+F = 찾기. Cmd+N (추가) 과 같은 계열의 앱 단축키다.
     shortcuts[const SingleActivator(LogicalKeyboardKey.keyF, meta: true)] =
         const _OpenSearchIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyN, meta: true)] =
+        const _NewTodoIntent();
 
     return Shortcuts(
       shortcuts: shortcuts,
@@ -817,6 +833,12 @@ class _ShortcutsHost extends StatelessWidget {
           _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
             onInvoke: (_) {
               onOpenSearch();
+              return null;
+            },
+          ),
+          _NewTodoIntent: CallbackAction<_NewTodoIntent>(
+            onInvoke: (_) {
+              onAddTodo();
               return null;
             },
           ),

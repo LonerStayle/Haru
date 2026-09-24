@@ -355,7 +355,7 @@ class _LoadedState extends State<_Loaded> {
               title: '오늘 할 일이 없어요',
               // 단축키 안내는 데스크탑에서만 — 폰에는 Cmd 키가 없다.
               subtitle: AppPlatform.isDesktop
-                  ? '⌘N 으로 어디서든 바로 추가할 수 있어요.'
+                  ? '⌘N 으로 바로 추가해요. 다른 앱을 쓰다가도 ⌘⇧N.'
                   : '아래 버튼이나 + 로 추가해 보세요.',
               action: FilledButton.tonalIcon(
                 key: const ValueKey('empty-add-todo'),
