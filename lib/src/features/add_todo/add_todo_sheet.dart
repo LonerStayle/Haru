@@ -1760,9 +1760,11 @@ class _DueRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final label = allDay
-        ? '${KoDate.pretty(dueAt)} · 하루 종일'
-        : '${KoDate.pretty(dueAt)} · ${KoDate.time(dueAt)}';
+    const wd = ['월', '화', '수', '목', '금', '토', '일'];
+    // "9월 24일 (목)" — 요일까지 쓰면 폰 폭에서 시작/마감 칩과 부딪혀 잘렸다.
+    final day = '${dueAt.month}월 ${dueAt.day}일 (${wd[dueAt.weekday - 1]})';
+    // 시각은 바로 위 ⏰ 칩에 보이니 여기선 날짜와 기준(시작/마감)만.
+    final label = allDay ? '$day · 하루 종일' : day;
 
     return Material(
       key: const ValueKey('add-todo-due-row'),
@@ -2652,9 +2654,11 @@ class _QuickDueChips extends StatelessWidget {
     final d = dueAt;
     final quick = _isDate(today) || _isDate(tomorrow) || _isDate(nextMonday);
     final hasTime = d != null && !allDay;
+    // 폰 폭(≈390)에 다섯 칩을 한 줄로 — 아직 안 정한 📅/⏰ 는 아이콘만.
+    final compact = AppPlatform.isMobile;
 
     return Wrap(
-      spacing: AppTokens.space8,
+      spacing: compact ? AppTokens.space4 + 2 : AppTokens.space8,
       runSpacing: AppTokens.space8,
       children: [
         _QuickDueChip(
@@ -2679,14 +2683,18 @@ class _QuickDueChips extends StatelessWidget {
           key: const ValueKey('quick-due-pick'),
           icon: Icons.event_outlined,
           // 칩에 없는 날짜를 골랐으면 그 날짜를 칩에 보여 준다.
-          label: (d != null && !quick) ? KoDate.shortDate(d) : '날짜',
+          label: (d != null && !quick)
+              ? KoDate.shortDate(d)
+              : (compact ? '' : '날짜'),
+          tooltip: '날짜 고르기',
           selected: d != null && !quick,
           onTap: onPickDate,
         ),
         _QuickDueChip(
           key: const ValueKey('quick-due-time'),
           icon: Icons.schedule_outlined,
-          label: hasTime ? KoDate.time(d) : '시간',
+          label: hasTime ? KoDate.time(d) : (compact ? '' : '시간'),
+          tooltip: '시간',
           selected: hasTime,
           onTap: onPickTime,
         ),
@@ -2700,12 +2708,15 @@ class _QuickDueChip extends StatelessWidget {
     super.key,
     required this.label,
     this.icon,
+    this.tooltip,
     required this.selected,
     required this.onTap,
   });
 
+  /// 비어 있으면 아이콘만 (폰의 안 정한 📅/⏰).
   final String label;
   final IconData? icon;
+  final String? tooltip;
   final bool selected;
   final VoidCallback onTap;
 
@@ -2726,36 +2737,39 @@ class _QuickDueChip extends StatelessWidget {
           : BorderSide.none,
     );
 
-    return Material(
+    final chip = Material(
       color: bg,
       shape: shape,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppTokens.radiusFull),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTokens.space12,
+          padding: EdgeInsets.symmetric(
+            horizontal: AppPlatform.isMobile
+                ? AppTokens.space8 + 2
+                : AppTokens.space12,
             vertical: AppTokens.space8,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: fg),
+              if (icon != null) Icon(icon, size: 16, color: fg),
+              if (icon != null && label.isNotEmpty)
                 const SizedBox(width: AppTokens.space4),
-              ],
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: fg,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              if (label.isNotEmpty)
+                Text(
+                  label,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: fg,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
       ),
     );
+    return tooltip == null ? chip : Tooltip(message: tooltip, child: chip);
   }
 }
 

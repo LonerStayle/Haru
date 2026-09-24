@@ -18,6 +18,7 @@ import '../recurrence/recurrence_actions.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_actions/toggle_with_undo.dart';
+import '../../ui/widgets/todo_status_check.dart';
 
 /// 기능 M — 하위 체크리스트 드릴다운 상세 화면.
 ///
@@ -102,13 +103,12 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
             IconButton(
               key: const ValueKey('detail-toggle'),
               tooltip: isDone ? '완료 취소' : '완료',
-              icon: Icon(
-                isDone
-                    ? Icons.check_circle_rounded
-                    : Icons.radio_button_unchecked,
-                color: isDone ? live.category.color : null,
+              // 목록과 같은 체크 모양(○/◐/●).
+              icon: TodoStatusCheck(
+                status: live.status,
+                color: live.category.color,
               ),
-              onPressed: () => actions.toggle(live),
+              onPressed: () => toggleWithUndo(context, actions, live),
             ),
           // ✎ 편집 — AddTodoSheet edit 모드.
           IconButton(

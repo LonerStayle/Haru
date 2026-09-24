@@ -422,7 +422,7 @@ void main() {
     const hintKey = ValueKey('drill-reorder-hint-draggable');
     const sortBlockedKey = ValueKey('drill-reorder-hint-sortBlocked');
     const filterBlockedKey = ValueKey('drill-reorder-hint-filterBlocked');
-    const hintText = '길게 눌러 순서를 바꿀 수 있어요';
+    const hintText = '길게 눌러 끌면 순서 변경 · 우클릭하면 메뉴';
     const sortBlockedText = '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요';
     const filterBlockedText = '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요';
 

@@ -380,37 +380,46 @@ class _CategorySectionHeader extends StatelessWidget {
           child: Icon(category.icon, size: 17, color: color),
         ),
         const SizedBox(width: AppTokens.space12),
-        Flexible(
-          child: Text(
-            category.label,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-            overflow: TextOverflow.ellipsis,
+        // 라벨·그룹 칩이 남는 폭을 다 갖고 진척은 오른쪽 끝에 붙인다. (Flexible 과
+        // Spacer 를 나란히 두면 남는 폭을 반씩 나눠 진척이 가운데 떠 있었다.)
+        Expanded(
+          child: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  category.label,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (groupLabel != null) ...[
+                const SizedBox(width: AppTokens.space8),
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppTokens.space8,
+                      vertical: AppTokens.space2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+                    ),
+                    child: Text(
+                      groupLabel!,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        if (groupLabel != null) ...[
-          const SizedBox(width: AppTokens.space8),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space8,
-              vertical: AppTokens.space2,
-            ),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-            ),
-            child: Text(
-              groupLabel!,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurface.withValues(alpha: 0.75),
-                fontWeight: FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-        const Spacer(),
         // 진척 — task 가 있을 때만. mini 바 + 분수.
         if (total > 0) ...[
           Container(

@@ -337,7 +337,11 @@ class _ReorderHintRow extends StatelessWidget {
   final _ReorderHintKind kind;
 
   String get _text => switch (kind) {
-    _ReorderHintKind.draggable => '길게 눌러 순서를 바꿀 수 있어요',
+    // 길게 누르기는 "끌면 순서 / 떼면 메뉴" (UX Phase 1). 데스크탑 메뉴는 우클릭.
+    _ReorderHintKind.draggable =>
+      AppPlatform.isMobile
+          ? '길게 눌러 끌면 순서 변경 · 그냥 떼면 메뉴'
+          : '길게 눌러 끌면 순서 변경 · 우클릭하면 메뉴',
     _ReorderHintKind.sortBlocked => '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요',
     _ReorderHintKind.filterBlocked => '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요',
   };

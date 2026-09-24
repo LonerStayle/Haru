@@ -4,6 +4,8 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +25,7 @@ import 'package:solo_todo/src/features/search/search_screen.dart';
 import 'package:solo_todo/src/features/settings/settings_sheet.dart';
 import 'package:solo_todo/src/features/todo_detail/todo_detail_screen.dart';
 import 'package:solo_todo/src/ui/app_shell.dart';
+import 'package:solo_todo/src/ui/widgets/todo_tile.dart';
 
 /// 캡처 결과 폴더. 환경변수 UX_SHOTS_OUT 으로 바꿀 수 있다.
 final _out = Platform.environment['UX_SHOTS_OUT'] ?? '/tmp/haru_ux_shots';
@@ -237,6 +240,23 @@ BuildContext _shellCtx(WidgetTester tester) =>
 
 Future<void> _tour(WidgetTester tester, _Cap cap, String prefix) async {
   await cap.shot('${prefix}_01_today');
+  // Phase 1 — 데스크탑: 마우스를 올리면 △ ↳ ⋮ / 폰: 길게 눌렀다 떼면 메뉴 시트.
+  final firstTile = find.byType(TodoTile).first;
+  if (AppPlatform.isDesktop) {
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: tester.getCenter(firstTile));
+    await cap.shot('${prefix}_01b_today_hover');
+    await mouse.moveTo(Offset.zero);
+    await mouse.removePointer();
+  } else {
+    final g = await tester.startGesture(tester.getCenter(firstTile));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    await tester.pump();
+    await g.up();
+    await cap.shot('${prefix}_01b_tile_menu');
+    Navigator.of(_shellCtx(tester), rootNavigator: true).pop();
+    await cap.settle();
+  }
   await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
   await cap.shot('${prefix}_02_outline');
   await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
@@ -262,6 +282,11 @@ Future<void> _tour(WidgetTester tester, _Cap cap, String prefix) async {
     onRequestMove: (_) {},
   );
   await cap.shot('${prefix}_06_edit_sheet');
+  // 설명·기간·반복이 있는 항목은 더보기가 이미 펼쳐져 열린다.
+  if (find.byKey(const ValueKey('add-todo-more-section')).evaluate().isEmpty) {
+    await tester.tap(find.byKey(const ValueKey('add-todo-more')));
+  }
+  await cap.shot('${prefix}_06b_edit_sheet_more');
   Navigator.of(ctx, rootNavigator: true).pop();
   await cap.settle();
 
