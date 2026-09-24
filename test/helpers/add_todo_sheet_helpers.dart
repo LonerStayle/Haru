@@ -12,6 +12,8 @@ Future<void> openSheetMore(WidgetTester tester) async {
     return;
   }
   final toggle = find.byKey(const ValueKey('add-todo-more'));
+  // 더보기에 담을 게 없는 시트(예: 이동 없는 메모 편집)에는 토글이 없다.
+  if (toggle.evaluate().isEmpty) return;
   await tester.ensureVisible(toggle);
   await tester.pumpAndSettle();
   await tester.tap(toggle);

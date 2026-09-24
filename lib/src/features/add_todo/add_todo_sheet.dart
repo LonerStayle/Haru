@@ -231,6 +231,10 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
   /// 부모 category 로 프리셋한다.
   bool get _isChildMode => !_isEditMode && widget.parentId != null;
 
+  /// 헤더의 카테고리 드롭다운. 열려 있으면 Esc·뒤로가기는 메뉴만 닫는다(시트 유지).
+  final MenuController _categoryMenu = MenuController();
+  bool _categoryMenuOpen = false;
+
   /// 더블 submit race 가드. _submit 이 한 번이라도 호출되면 true 로 set 되어 후속
   /// tap / Enter 가 추가 onSubmit 콜백 호출을 못 하게 막는다.
   bool _submitted = false;
@@ -247,7 +251,10 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     _category = source?.category ?? widget.initialCategory;
     // prefill 카테고리(edit/복사 공통)는 이미 영속된 실제 값 → 신뢰. add 기본값은 미신뢰.
     _categoryTrusted = source != null;
-    _dueAt = source?.dueAt ?? widget.initialDueAt;
+    // 동기화로 들어온 값은 UTC 다 — 시트는 로컬 달력 기준으로 다룬다. (UTC 그대로
+    // 연·월·일을 읽으면 한국 종일 항목이 전날이 되고, 열었다 닫기만 해도 하루 당겨져
+    // 저장됐다.) 저장 때 같은 시각이면 원본 인스턴스를 돌려 써 헛저장을 막는다.
+    _dueAt = (source?.dueAt ?? widget.initialDueAt)?.toLocal();
     _allDay = widget.initialAllDay;
     _type = source?.type ?? TodoType.task;
     // 3-상태는 편집 대상에서만 가져온다 — 복사(prefillFrom)는 체크·진행 표식을
@@ -294,7 +301,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         _allDay = false;
       case TodoDateMode.range:
         _dateMode = _DateInputMode.range;
-        _endAt = initial.endAt;
+        _endAt = initial.endAt?.toLocal();
         _rangeAllDay = initial.isAllDay;
     }
   }
@@ -422,13 +429,27 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     // 카테고리만 바뀌고 화면상 부모 아래 그대로 남아 "이동이 안 되는" 것처럼 보인다.)
     final movedCategory = _category.id != initial.category.id;
     final detach = movedCategory && initial.parentId != null;
+    // 같은 시각이면 원본 인스턴스 그대로 — 로컬/UTC 표현 차이만으로 "바뀜" 판정이
+    // 나 헛저장·자리 튐이 생기지 않게.
+    DateTime? same(DateTime? next, DateTime? orig) =>
+        (next != null && orig != null && next.isAtSameMomentAs(orig))
+        ? orig
+        : next;
+    final dueAt = same(date.dueAt, initial.dueAt);
+    // 그 모양에서 의미 없는 필드는 원본 값을 유지한다 — 일정 없음이면 종일 여부,
+    // 종일이면 시작/마감 기준. (캘린더에서 들어온 '종일 + 마감' 같은 조합이 열었다
+    // 닫기만 해도 바뀌어 저장되던 문제.)
+    final isAllDay = dueAt == null ? initial.isAllDay : date.isAllDay;
+    final timeAnchor = (dueAt == null || date.isAllDay)
+        ? initial.timeAnchor
+        : date.timeAnchor;
     final updated = initial.copyWith(
       title: _titleCtrl.text.trim(),
       category: _category,
-      dueAt: date.dueAt,
-      endAt: date.endAt,
-      isAllDay: date.isAllDay,
-      timeAnchor: date.timeAnchor,
+      dueAt: dueAt,
+      endAt: same(date.endAt, initial.endAt),
+      isAllDay: isAllDay,
+      timeAnchor: timeAnchor,
       type: _type,
       description: descOrNull,
       parentId: detach ? null : initial.parentId,
@@ -653,13 +674,19 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
             _dueAt = DateTime(base.year, base.month, base.day, 9, 0);
           }
         case _DateInputMode.range:
-          // 기간 — 시작은 현재 dueAt(날짜), 종료는 시작 다음날 디폴트.
           final base = _dueAt ?? (widget.now ?? DateTime.now)();
-          final startDay = DateTime(base.year, base.month, base.day);
-          _dueAt = startDay;
-          _endAt = startDay.add(const Duration(days: 1));
-          _rangeAllDay = true;
-          _allDay = true;
+          if (_dueAt != null && !_allDay) {
+            // 시간까지 정해 둔 일정 → 그 시각부터 1시간짜리 기간 (시간 유지).
+            _endAt = base.add(const Duration(hours: 1));
+            _rangeAllDay = false;
+          } else {
+            // 날짜만 → 시작일부터 다음날까지 종일 기간.
+            final startDay = DateTime(base.year, base.month, base.day);
+            _dueAt = startDay;
+            _endAt = startDay.add(const Duration(days: 1));
+            _rangeAllDay = true;
+            _allDay = true;
+          }
       }
     });
   }
@@ -767,7 +794,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final d0 = DateTime(date.year, date.month, date.day);
     final cur = _dueAt;
     if (cur != null && _isSameDate(cur, d0)) {
-      _clearDueAt();
+      // 같은 칩 다시 누르기 = 해제 — 단, 날짜만 있는 단일 일정일 때만. 시간·기간이
+      // 있으면 확인하려고 누른 것일 수 있어 아무것도 지우지 않는다.
+      if (_dateMode != _DateInputMode.range && _allDay) _clearDueAt();
       return;
     }
     setState(() {
@@ -813,6 +842,17 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     });
   }
 
+  /// 기간 모드의 📅 칩 — 고른 날로 기간을 통째로 옮긴다(길이 유지). 시작만 옮기면
+  /// 종료보다 뒤가 되어 저장이 막힐 수 있다.
+  Future<void> _pickRangeShift() async {
+    final d = await _pickDate(_dueAt ?? (widget.now ?? DateTime.now)());
+    if (d == null || !mounted) return;
+    // 같은 날을 골랐어도 해제되지 않게 _setQuickDate 대신 직접 옮긴다.
+    final cur = _dueAt;
+    if (cur != null && _isSameDate(cur, d)) return;
+    _setQuickDate(d);
+  }
+
   Future<void> _pickRangeEndDate() async {
     final d = await _pickDate(
       _endAt ?? _dueAt ?? (widget.now ?? DateTime.now)(),
@@ -831,6 +871,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     final time = await _showTime(TimeOfDay.fromDateTime(base));
     if (time == null || !mounted) return;
     setState(() {
+      final wasAllDay = _rangeAllDay;
       _rangeAllDay = false;
       _dueAt = DateTime(
         base.year,
@@ -839,6 +880,18 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         time.hour,
         time.minute,
       );
+      // 종일 기간에 시간을 처음 넣으면 종료도 시각을 받는다 — 그대로 두면 종료가
+      // "마지막 날 00:00" 이 되어 마지막 날이 통째로 빠진다.
+      final end = _endAt;
+      if (wasAllDay && end != null) {
+        _endAt = DateTime(
+          end.year,
+          end.month,
+          end.day,
+          time.hour,
+          time.minute,
+        ).add(const Duration(hours: 1));
+      }
     });
   }
 
@@ -926,7 +979,8 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       if (_type == TodoType.task && _descriptionCtrl.text.trim().isNotEmpty)
         '설명',
       if (_type == TodoType.task && _dueAt != null && _addToCalendar) '캘린더',
-      if (_recurrenceFreq != null) '반복',
+      if (_type == TodoType.task && _dueAt != null && _recurrenceFreq != null)
+        '반복',
     ];
     return parts.isEmpty ? null : parts.join(' · ');
   }
@@ -943,7 +997,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         _descriptionField(hint: '자세한 내용 (선택)'),
       ],
       // 기간 — 시작 날짜가 정해진 뒤에 "종료" 를 붙이는 방식.
-      if (isTask && _dateMode != _DateInputMode.range) ...[
+      if (isTask && _dueAt != null && _dateMode != _DateInputMode.range) ...[
         const SizedBox(height: AppTokens.space12),
         Align(
           alignment: Alignment.centerLeft,
@@ -1050,14 +1104,22 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       });
     }
 
+    final moreChildren = _moreChildren();
+
     return PopScope(
+      // 카테고리 메뉴가 열려 있으면 뒤로가기는 메뉴만 닫는다.
+      canPop: !_categoryMenuOpen,
       // edit 모드 자동 저장 — 배경 탭 / 아래로 드래그 / Esc / 뒤로가기 등 어떤 경로로
       // 닫혀도 입력값을 저장한다 (저장 버튼은 확인용일 뿐). 신규 추가 모드는 기존대로
       // 닫힘 = 취소. 빈 제목·잘못된 기간이면 저장할 수 없으므로 취소로 처리한다.
       // 무변경 닫힘은 TodoActionsController.update 의 _isUnchanged 가 no-op 으로
       // 걸러주므로 순서 bump / updatedAt 갱신이 일어나지 않는다.
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop || !_isEditMode || _submitted) return;
+        if (!didPop) {
+          if (_categoryMenu.isOpen) _categoryMenu.close();
+          return;
+        }
+        if (!_isEditMode || _submitted) return;
         if (_titleCtrl.text.trim().isEmpty || _rangeInvalid) return;
         _submitted = true;
         _applyEdit();
@@ -1085,7 +1147,13 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
               actions: <Type, Action<Intent>>{
                 _DismissIntent: CallbackAction<_DismissIntent>(
                   onInvoke: (_) {
-                    Navigator.of(context).maybePop();
+                    // 카테고리 메뉴가 열려 있으면 Esc 는 메뉴만 닫는다 — 포커스가 제목
+                    // 칸에 남아 있어 메뉴의 Esc 보다 시트의 Esc 가 먼저 받는다.
+                    if (_categoryMenu.isOpen) {
+                      _categoryMenu.close();
+                    } else {
+                      Navigator.of(context).maybePop();
+                    }
                     return null;
                   },
                 ),
@@ -1129,6 +1197,11 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                         const SizedBox(width: AppTokens.space8),
                         // "하위 추가" 는 부모 카테고리로 고정 — 보여 주기만 한다.
                         _CategoryPicker(
+                          controller: _categoryMenu,
+                          onOpenChanged: (open) {
+                            if (!mounted) return;
+                            setState(() => _categoryMenuOpen = open);
+                          },
                           categories: categories,
                           groups: groups,
                           selected: _category,
@@ -1181,7 +1254,7 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                             : _allDay,
                         onSelectDate: _setQuickDate,
                         onPickDate: _dateMode == _DateInputMode.range
-                            ? _pickRangeStartDate
+                            ? _pickRangeShift
                             : _pickDueDate,
                         onPickTime: _dateMode == _DateInputMode.range
                             ? _pickRangeStartTime
@@ -1219,24 +1292,26 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                       children: [
                         _TypeToggle(selected: _type, onSelect: _setType),
                         const Spacer(),
-                        _MoreToggle(
-                          expanded: _showMore,
-                          summary: _moreSummary(),
-                          onToggle: () =>
-                              setState(() => _showMore = !_showMore),
-                        ),
+                        // 더보기에 담을 게 없으면(메모 추가) 토글도 없다.
+                        if (moreChildren.isNotEmpty)
+                          _MoreToggle(
+                            expanded: _showMore,
+                            summary: _moreSummary(),
+                            onToggle: () =>
+                                setState(() => _showMore = !_showMore),
+                          ),
                       ],
                     ),
                     // ── 2단: 더보기 ────────────────────────────────────────
                     AnimatedSize(
                       duration: AppTokens.motionFast,
                       alignment: Alignment.topCenter,
-                      child: !_showMore
+                      child: !_showMore || moreChildren.isEmpty
                           ? const SizedBox(width: double.infinity)
                           : Column(
                               key: const ValueKey('add-todo-more-section'),
                               crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: _moreChildren(),
+                              children: moreChildren,
                             ),
                     ),
                     const SizedBox(height: AppTokens.space20),
@@ -1841,6 +1916,8 @@ class _MoreToggle extends StatelessWidget {
 /// 헤더 오른쪽 카테고리 드롭다운. 누르면 그룹별 칩 목록([_CategoryChips])이 뜬다.
 class _CategoryPicker extends StatefulWidget {
   const _CategoryPicker({
+    required this.controller,
+    required this.onOpenChanged,
     required this.categories,
     required this.groups,
     required this.selected,
@@ -1848,6 +1925,9 @@ class _CategoryPicker extends StatefulWidget {
     required this.onSelect,
   });
 
+  /// 시트가 들고 있는 메뉴 컨트롤러 — 시트의 Esc·뒤로가기가 메뉴부터 닫게.
+  final MenuController controller;
+  final ValueChanged<bool> onOpenChanged;
   final List<Category> categories;
   final List<Group> groups;
   final Category selected;
@@ -1861,7 +1941,7 @@ class _CategoryPicker extends StatefulWidget {
 }
 
 class _CategoryPickerState extends State<_CategoryPicker> {
-  final _menu = MenuController();
+  MenuController get _menu => widget.controller;
 
   @override
   Widget build(BuildContext context) {
@@ -1907,6 +1987,8 @@ class _CategoryPickerState extends State<_CategoryPicker> {
     if (!widget.enabled) return button;
     return MenuAnchor(
       controller: _menu,
+      onOpen: () => widget.onOpenChanged(true),
+      onClose: () => widget.onOpenChanged(false),
       alignmentOffset: const Offset(0, AppTokens.space4),
       menuChildren: [
         ConstrainedBox(

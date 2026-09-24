@@ -303,6 +303,9 @@ void main() {
     ) async {
       final submissions = await mount(tester, fixedNow: now);
 
+      // 종료는 시작 날짜가 있어야 붙일 수 있다.
+      await tester.tap(find.byKey(const ValueKey('quick-due-today')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('add-todo-more')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));
@@ -327,6 +330,9 @@ void main() {
     testWidgets('기간 없애기 → 시작 날짜만 남은 단일 일정', (tester) async {
       final submissions = await mount(tester, fixedNow: now);
 
+      // 종료는 시작 날짜가 있어야 붙일 수 있다.
+      await tester.tap(find.byKey(const ValueKey('quick-due-today')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('add-todo-more')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));
@@ -348,6 +354,9 @@ void main() {
     testWidgets('기간 모드 디폴트는 유효 — invalid 메시지 없음 + 저장 가능', (tester) async {
       await mount(tester, fixedNow: now);
 
+      // 종료는 시작 날짜가 있어야 붙일 수 있다.
+      await tester.tap(find.byKey(const ValueKey('quick-due-today')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('add-todo-more')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));

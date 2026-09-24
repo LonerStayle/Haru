@@ -49,7 +49,9 @@ class TodoDateLabel {
   const TodoDateLabel._();
 
   static String? format(Todo todo) {
-    final due = todo.dueAt;
+    // 다른 기기에서 동기화된 값은 UTC 로 들어온다 — 날짜를 읽기 전에 로컬로.
+    // (그대로 읽으면 한국 종일 항목이 전날로 보인다.)
+    final due = todo.dueAt?.toLocal();
     if (due == null) return null;
     switch (todo.dateMode) {
       case TodoDateMode.none:
@@ -61,7 +63,7 @@ class TodoDateLabel {
       case TodoDateMode.endTime:
         return '마감 ${KoDate.shortDateTime(due)}';
       case TodoDateMode.range:
-        final end = todo.endAt;
+        final end = todo.endAt?.toLocal();
         if (end == null) return KoDate.shortDate(due);
         if (todo.isAllDay) {
           return '${KoDate.shortDate(due)} ~ ${KoDate.shortDate(end)}';
