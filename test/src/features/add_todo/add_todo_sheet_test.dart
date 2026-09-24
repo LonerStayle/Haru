@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,9 +95,11 @@ void main() {
     final submissions = await mount(tester);
 
     await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
-    // 그룹 없음 → 평면 나열이라 칩이 바로 보인다.
-    await tester.tap(find.text('개인개발'));
-    await tester.pump();
+    // 카테고리는 헤더 오른쪽 드롭다운 — 열면 칩이 보인다 (그룹 없음 → 평면 나열).
+    await tester.tap(find.byKey(const ValueKey('add-todo-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-chip-personal_dev')));
+    await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, '추가'));
     await tester.pump();
 
@@ -107,6 +110,8 @@ void main() {
     // initialCategory 가 daily → "일상" chip 이 selected.
     await mount(tester);
     await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('add-todo-category')));
+    await tester.pumpAndSettle();
 
     // selected chip("일상")의 Material — 칩 key 로 특정.
     final materialFinder = find.descendant(
@@ -148,7 +153,7 @@ void main() {
     expect(submissions.first.title, '빠른 추가');
   });
 
-  group('하루 종일 옵션 (시간 picker 강제 제거)', () {
+  group('일정 요약 줄 (UX Phase 1 — 날짜 → 시간 → 종료)', () {
     testWidgets('initialDueAt + initialAllDay=true → 라벨이 "· 하루 종일" 로 표시', (
       tester,
     ) async {
@@ -159,9 +164,10 @@ void main() {
       );
 
       expect(find.textContaining('하루 종일'), findsWidgets);
-      // 종일 상태에서는 "시간 추가" 액션이 나오고 "하루 종일" 토글 버튼은 안 나옴.
-      expect(find.widgetWithText(OutlinedButton, '시간 추가'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, '하루 종일'), findsNothing);
+      // 종일이면 시작/마감 기준·하루 종일로 버튼이 없다 (시간은 ⏰ 칩으로 추가).
+      expect(find.byKey(const ValueKey('due-anchor-start')), findsNothing);
+      expect(find.byKey(const ValueKey('due-make-all-day')), findsNothing);
+      expect(find.byKey(const ValueKey('quick-due-time')), findsOneWidget);
     });
 
     testWidgets('종일 상태로 추가 → submission.isAllDay == true + dueAt 시간 부분 00:00', (
@@ -189,30 +195,33 @@ void main() {
       expect(submissions.first.isAllDay, isTrue);
     });
 
-    testWidgets('initialAllDay=false (시간 지정) → "시간 변경" + "하루 종일" 토글 모두 노출', (
-      tester,
-    ) async {
+    testWidgets('시간 지정 → ⏰ 칩에 시각, 시작/마감 기준 + 하루 종일로 노출', (tester) async {
       await mount(
         tester,
         initialDueAt: DateTime(2026, 5, 28, 14, 30),
         initialAllDay: false,
       );
 
-      expect(find.textContaining('14:30'), findsWidgets);
-      expect(find.widgetWithText(OutlinedButton, '시간 변경'), findsOneWidget);
-      expect(find.widgetWithText(OutlinedButton, '하루 종일'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('quick-due-time')),
+          matching: find.text('14:30'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('due-anchor-start')), findsOneWidget);
+      expect(find.byKey(const ValueKey('due-anchor-end')), findsOneWidget);
+      expect(find.byKey(const ValueKey('due-make-all-day')), findsOneWidget);
     });
 
-    testWidgets('"하루 종일" 토글 누르면 시간이 00:00 으로 리셋되고 라벨이 종일로 변경', (tester) async {
+    testWidgets('"하루 종일로" 누르면 시간이 00:00 으로 리셋되고 라벨이 종일로 변경', (tester) async {
       final submissions = await mount(
         tester,
         initialDueAt: DateTime(2026, 5, 28, 14, 30),
         initialAllDay: false,
       );
 
-      tester
-          .widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '하루 종일'))
-          .onPressed!();
+      await tester.tap(find.byKey(const ValueKey('due-make-all-day')));
       await tester.pump();
 
       expect(find.textContaining('하루 종일'), findsWidgets);
@@ -228,32 +237,53 @@ void main() {
       expect(submissions.first.isAllDay, isTrue);
     });
 
-    testWidgets('일정 없음 (dueAt null) → 종일/시간 버튼 둘 다 안 보임', (tester) async {
+    testWidgets('일정 없음 (dueAt null) → 요약 줄 자체가 없다', (tester) async {
       await mount(tester); // initialDueAt 미주입
-      expect(find.widgetWithText(OutlinedButton, '시간 추가'), findsNothing);
-      expect(find.widgetWithText(OutlinedButton, '시간 변경'), findsNothing);
-      expect(find.widgetWithText(OutlinedButton, '하루 종일'), findsNothing);
+      expect(find.byKey(const ValueKey('add-todo-due-row')), findsNothing);
+    });
+
+    testWidgets('시간을 정한 뒤 날짜 칩을 바꿔도 시간은 유지된다', (tester) async {
+      final submissions = await mount(
+        tester,
+        initialDueAt: DateTime(2026, 5, 27, 14, 30),
+        initialAllDay: false,
+        fixedNow: DateTime(2026, 5, 27, 10),
+      );
+      await tester.tap(find.byKey(const ValueKey('quick-due-tomorrow')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
+      await tester.pump();
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '추가'))
+          .onPressed!();
+      await tester.pump();
+      expect(submissions.first.dueAt, DateTime(2026, 5, 28, 14, 30));
+      expect(submissions.first.isAllDay, isFalse);
     });
   });
 
-  group('fast-tasks — 4 모드 + 기간', () {
+  group('날짜 모드 칩 제거 — 시작/마감 기준 + 기간은 더보기', () {
     final now = DateTime(2026, 5, 27, 10);
 
-    testWidgets('4 모드 칩 모두 렌더', (tester) async {
+    testWidgets('예전 4 모드 칩(하루종일/시작/마감/기간)은 없다', (tester) async {
       await mount(tester, fixedNow: now);
-      expect(find.byKey(const ValueKey('date-mode-all-day')), findsOneWidget);
-      expect(find.byKey(const ValueKey('date-mode-start')), findsOneWidget);
-      expect(find.byKey(const ValueKey('date-mode-end')), findsOneWidget);
-      expect(find.byKey(const ValueKey('date-mode-range')), findsOneWidget);
+      expect(find.byKey(const ValueKey('date-mode-all-day')), findsNothing);
+      expect(find.byKey(const ValueKey('date-mode-start')), findsNothing);
+      expect(find.byKey(const ValueKey('date-mode-end')), findsNothing);
+      expect(find.byKey(const ValueKey('date-mode-range')), findsNothing);
     });
 
-    testWidgets('마감시간 모드 → submission.timeAnchor = end', (tester) async {
-      final submissions = await mount(tester, fixedNow: now);
+    testWidgets('시간 있는 일정에서 "마감" → submission.timeAnchor = end', (
+      tester,
+    ) async {
+      final submissions = await mount(
+        tester,
+        fixedNow: now,
+        initialDueAt: DateTime(2026, 5, 27, 18),
+        initialAllDay: false,
+      );
 
-      // 먼저 날짜 지정 (오늘) 후 마감시간 모드 — _setDateMode 가 09:00 채움.
-      await tester.tap(find.byKey(const ValueKey('quick-due-today')));
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('date-mode-end')));
+      await tester.tap(find.byKey(const ValueKey('due-anchor-end')));
       await tester.pump();
 
       await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
@@ -268,11 +298,15 @@ void main() {
       expect(submissions.first.endAt, isNull);
     });
 
-    testWidgets('기간 모드 → 시작/종료 row 노출 + submission.endAt 채워짐', (tester) async {
+    testWidgets('더보기 → 종료 날짜 추가 → 시작/종료 row + submission.endAt', (
+      tester,
+    ) async {
       final submissions = await mount(tester, fixedNow: now);
 
-      await tester.tap(find.byKey(const ValueKey('date-mode-range')));
-      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('add-todo-more')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('range-start-row')), findsOneWidget);
       expect(find.byKey(const ValueKey('range-end-row')), findsOneWidget);
@@ -290,22 +324,55 @@ void main() {
       expect(submissions.first.isAllDay, isTrue);
     });
 
-    testWidgets('기간 모드에서 종료<시작 이면 invalid 메시지 + 저장 비활성', (tester) async {
+    testWidgets('기간 없애기 → 시작 날짜만 남은 단일 일정', (tester) async {
+      final submissions = await mount(tester, fixedNow: now);
+
+      await tester.tap(find.byKey(const ValueKey('add-todo-more')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('range-clear')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('range-end-row')), findsNothing);
+      await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
+      await tester.pump();
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '추가'))
+          .onPressed!();
+      await tester.pump();
+      expect(submissions.first.dueAt, DateTime(2026, 5, 27));
+      expect(submissions.first.endAt, isNull);
+    });
+
+    testWidgets('기간 모드 디폴트는 유효 — invalid 메시지 없음 + 저장 가능', (tester) async {
       await mount(tester, fixedNow: now);
 
-      await tester.tap(find.byKey(const ValueKey('date-mode-range')));
-      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('add-todo-more')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('add-todo-add-end')));
+      await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('add-todo-title')), 'x');
       await tester.pump();
 
-      // 디폴트는 시작<종료라 유효. invalid 를 강제하려면 종료를 시작 이전으로 돌려야
-      // 하는데 picker 우회가 어려우므로, 디폴트 유효 상태에서 저장 가능 여부만 확인.
       final btn = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, '추가'),
       );
       expect(btn.onPressed, isNotNull);
       expect(find.byKey(const ValueKey('range-invalid-msg')), findsNothing);
     });
+  });
+
+  testWidgets('⌘Enter 로 저장 (여러 줄 설명 칸에 있어도)', (tester) async {
+    final submissions = await mount(tester);
+    await tester.enterText(find.byKey(const ValueKey('add-todo-title')), '단축키');
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    expect(submissions, hasLength(1));
+    expect(submissions.first.title, '단축키');
   });
 
   testWidgets('더블 submit 가드: 빠르게 두 번 tap → onSubmit 한 번만 호출', (tester) async {
@@ -401,7 +468,9 @@ void main() {
       expect(submissions.first.isAllDay, isTrue);
     });
 
-    testWidgets('"다음주" 탭 → dueAt = 오늘 + 7일 자정 (= 1주일 뒤)', (tester) async {
+    testWidgets('"다음주 월" 탭 → dueAt = 다음주 월요일 자정 (수 5/27 → 월 6/1)', (
+      tester,
+    ) async {
       final submissions = await mount(tester, fixedNow: now);
 
       await tester.tap(find.byKey(const ValueKey('quick-due-next-week')));
@@ -415,7 +484,7 @@ void main() {
           ?.call();
       await tester.pump();
 
-      expect(submissions.first.dueAt, DateTime(2026, 6, 3));
+      expect(submissions.first.dueAt, DateTime(2026, 6, 1));
       expect(submissions.first.isAllDay, isTrue);
     });
 
@@ -580,11 +649,10 @@ void main() {
       await mount(tester);
       await tester.tap(find.byKey(const ValueKey('type-note')));
       await tester.pump();
-      expect(find.text('일정'), findsNothing);
+      expect(find.byKey(const ValueKey('quick-due-today')), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('type-task')));
       await tester.pump();
-      expect(find.text('일정'), findsOneWidget);
       expect(find.byKey(const ValueKey('quick-due-today')), findsOneWidget);
     });
 

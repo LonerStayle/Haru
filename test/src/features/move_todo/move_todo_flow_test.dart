@@ -13,6 +13,8 @@ import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/move_todo/move_todo_sheet.dart';
 import 'package:solo_todo/src/features/todo_actions/todo_actions_controller.dart';
 
+import '../../../helpers/add_todo_sheet_helpers.dart';
+
 /// 이동 flow **전체** — 시트 선택부터 로컬 DB 반영까지 한 번에 검증한다.
 ///
 /// 기존 테스트는 시트가 돌려주는 [MoveDestination] (widget) 과
@@ -180,6 +182,7 @@ void main() {
       await tester.enterText(find.byType(TextField).first, editTitle);
       await tester.pump();
     }
+    await openSheetMore(tester);
     await tester.tap(find.byKey(const ValueKey('edit-move')));
     await tester.pumpAndSettle();
   }
@@ -250,6 +253,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('편집'));
     await tester.pumpAndSettle();
+    await openSheetMore(tester);
     await tester.tap(find.byKey(const ValueKey('edit-move')));
     await tester.pumpAndSettle();
 

@@ -11,6 +11,8 @@ import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/ui/widgets/in_progress_triangle.dart';
 import 'package:solo_todo/src/ui/widgets/undone_square.dart';
 
+import '../../../helpers/add_todo_sheet_helpers.dart';
+
 /// 편집 시트의 "상태" 섹션 — □ 미완료 / △ 진행중 / ◯ 완료.
 ///
 /// 고정하는 경계:
@@ -69,6 +71,7 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('open-sheet')));
     await tester.pumpAndSettle();
+    await openSheetMore(tester);
     return (updates: updates, statusSaves: statusSaves);
   }
 

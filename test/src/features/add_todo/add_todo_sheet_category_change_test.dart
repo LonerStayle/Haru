@@ -91,7 +91,9 @@ void main() {
       );
 
       // 아코디언(J) — 초기 선택(일상)은 미분류 섹션이라 '사이드' 그룹은 접혀 있다.
-      // 그룹 헤더를 탭해 펼친 뒤 '코기토' 칩을 탭해 선택.
+      // 헤더 오른쪽 카테고리 드롭다운을 열고, 그룹 헤더를 펼친 뒤 '코기토' 칩을 탭.
+      await tester.tap(find.byKey(const ValueKey('add-todo-category')));
+      await tester.pumpAndSettle();
       await tester.tap(
         find.byKey(const ValueKey('category-group-header-group-x')),
       );
@@ -121,7 +123,9 @@ void main() {
       groups: const [groupX],
     );
 
-    // 그룹 헤더는 항상 전부 보인다.
+    // 카테고리는 헤더 드롭다운 안 — 열면 그룹 헤더가 전부 보인다.
+    await tester.tap(find.byKey(const ValueKey('add-todo-category')));
+    await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('category-group-header-ungrouped')),
       findsOneWidget,

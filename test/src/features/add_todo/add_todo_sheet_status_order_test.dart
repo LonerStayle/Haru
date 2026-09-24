@@ -13,6 +13,8 @@ import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/todo_actions/todo_actions_controller.dart';
 
+import '../../../helpers/add_todo_sheet_helpers.dart';
+
 /// 편집 시트의 3-상태 탭이 **자리(sortOrder)를 튀게 하지 않는지** — 실제 컨트롤러 +
 /// 저장소까지 태워 최종 저장값으로 고정한다.
 ///
@@ -98,6 +100,7 @@ void main() {
     );
     await tester.tap(find.byKey(const ValueKey('open-sheet')));
     await tester.pumpAndSettle();
+    await openSheetMore(tester);
   }
 
   Future<void> tapStatus(WidgetTester tester, String key) async {

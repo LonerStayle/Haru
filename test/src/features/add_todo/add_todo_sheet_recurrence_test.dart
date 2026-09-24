@@ -9,6 +9,8 @@ import 'package:solo_todo/src/features/add_todo/add_todo_sheet.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
 
+import '../../../helpers/add_todo_sheet_helpers.dart';
+
 void main() {
   final submissions = <AddTodoSubmission>[];
 
@@ -44,6 +46,7 @@ void main() {
       ),
     );
     await tester.pump(); // categoriesProvider stream emit 흡수
+    await openSheetMore(tester);
   }
 
   Future<void> enterTitle(WidgetTester tester, String text) =>
@@ -83,7 +86,7 @@ void main() {
     await mount(tester, initialDueAt: DateTime(2026, 1, 5));
     await enterTitle(tester, '격주 회의');
     await tester.tap(find.byKey(const ValueKey('recur-freq-weekly')));
-    await tester.pump();
+    await tester.pumpAndSettle(); // 더보기 영역이 커지는 애니메이션까지.
     await tester.tap(find.byKey(const ValueKey('recur-interval-plus')));
     await tester.pump();
     expect(find.text('2주마다'), findsOneWidget);
@@ -101,7 +104,7 @@ void main() {
     await mount(tester, initialDueAt: DateTime(2026, 1, 5));
     await enterTitle(tester, '주간보고');
     await tester.tap(find.byKey(const ValueKey('recur-freq-weekly')));
-    await tester.pump();
+    await tester.pumpAndSettle(); // 더보기 영역이 커지는 애니메이션까지.
     await tester.tap(find.byKey(const ValueKey('recur-weekday-3'))); // 수
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, '추가'));
