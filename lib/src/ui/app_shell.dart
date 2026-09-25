@@ -470,11 +470,16 @@ class _AppShellState extends ConsumerState<AppShell> {
     ref.listen(lastUsedCategoryProvider, (_, _) {});
     final categoriesAsync = ref.watch(activeCategoriesProvider);
     final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
-    _destinations = AppDestination.buildAll(categories);
 
     // v1.3 — 활성 그룹 stream. 사이드바가 그룹 헤더 + 미분류 섹션으로 카테고리를 묶는다.
     final groups =
         ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
+    // 목적지 순서 = 사이드바에 보이는 순서(그룹 → 카테고리, 미분류는 아래). 숫자 단축키
+    // 3~9 도 이 순서로 붙는다 — 카테고리 sortOrder 만 쓰면 그룹이 생긴 뒤 맨 위 카테고리가
+    // 9번이 되는 식으로 보이는 순서와 번호가 뒤섞였다.
+    _destinations = AppDestination.buildAll(
+      categoriesInSidebarOrder(categories, groups),
+    );
 
     var location = ref.watch(shellLocationProvider);
     // 데스크탑엔 카테고리 목록 화면이 없다(사이드바가 그 역할) → 오늘로.
