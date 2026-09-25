@@ -192,6 +192,26 @@ void main() {
     });
   });
 
+  testWidgets('데스크탑은 떠 있는 버튼 없이 사이드바 "새 할 일"', (tester) async {
+    await pump(tester);
+    expect(find.byType(FloatingActionButton), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('sidebar-new-todo')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
+  });
+
+  testWidgets('새 할 일을 연달아 열어도 시트는 한 장', (tester) async {
+    await pump(tester);
+    // 시트가 뜨기 전에 ⌘N 두 번 (전역 ⌘⇧N·메뉴바 연타와 같은 상황).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
+  });
+
   testWidgets('사이드바 "오늘" 옆 남은 할 일 수', (tester) async {
     await pump(tester, today: [todo('t1', 'a'), todo('t2', 'b')]);
     expect(find.byKey(const ValueKey('sidebar-badge')), findsOneWidget);

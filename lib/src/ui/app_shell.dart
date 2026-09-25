@@ -270,7 +270,24 @@ class _AppShellState extends ConsumerState<AppShell> {
   ///
   /// 기본 카테고리 = "지금 보고 있는 화면" 기준: 카테고리 화면이면 그 카테고리,
   /// 오늘·전체보기에서 그룹 필터가 켜져 있으면 그 그룹의 첫 카테고리.
+  /// 추가 시트가 떠 있는 중 — 전역 ⌘⇧N·메뉴바·트레이를 연달아 눌러도 한 장만.
+  bool _addSheetOpen = false;
+
+  /// 설정 시트가 떠 있는 중 — ⌘, · 메뉴바 · 버튼을 연달아 눌러도 한 장만.
+  bool _settingsOpen = false;
+
+  Future<void> _openSettings() async {
+    if (_settingsOpen) return;
+    _settingsOpen = true;
+    try {
+      await SettingsSheet.show(context);
+    } finally {
+      _settingsOpen = false;
+    }
+  }
+
   Future<void> _openAddTodo() async {
+    if (_addSheetOpen) return;
     final categories =
         ref.read(activeCategoriesProvider).asData?.value ??
         Category.builtinSeeds;
@@ -287,7 +304,12 @@ class _AppShellState extends ConsumerState<AppShell> {
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
     );
 
-    await showNewTodoSheet(context, ref, initialCategory: initialCategory);
+    _addSheetOpen = true;
+    try {
+      await showNewTodoSheet(context, ref, initialCategory: initialCategory);
+    } finally {
+      _addSheetOpen = false;
+    }
   }
 
   /// 모바일 하단 바 — `[오늘, 전체보기, 캘린더, 카테고리]` 4칸 고정.
@@ -402,16 +424,10 @@ class _AppShellState extends ConsumerState<AppShell> {
       _ => _MainArea(destination: destination ?? _destinations.first),
     };
 
-    // 모바일은 NavigationBar 를 가리지 않도록 컴팩트한 원형 FAB (endFloat 가 바 위로 띄움).
-    // 데스크탑은 nav bar 가 없어 넓은 extended FAB 유지.
-    final fab = AppPlatform.isDesktop
-        ? FloatingActionButton.extended(
-            key: const ValueKey('add-todo-fab'),
-            onPressed: _openAddTodo,
-            icon: const Icon(Icons.add),
-            label: const Text('새 할 일'),
-            tooltip: '새 할 일 (⌘N · 다른 앱에서 ⌘⇧N)',
-          )
+    // 모바일만 떠 있는 원형 버튼 (endFloat 가 네비 바 위로 띄움). 데스크탑은 오른쪽
+    // 인스펙터를 가리지 않도록 떠 있는 버튼 없이 사이드바 위 "새 할 일" + ⌘N (Phase 3).
+    final Widget? fab = AppPlatform.isDesktop
+        ? null
         : FloatingActionButton(
             key: const ValueKey('add-todo-fab'),
             onPressed: _openAddTodo,
@@ -433,6 +449,7 @@ class _AppShellState extends ConsumerState<AppShell> {
             selectedGroupId: onScopedPage ? scopedGroupId : null,
             onSelect: _select,
             onSelectGroup: _openGroup,
+            onAddTodo: _openAddTodo,
             onMoveCategoryInto: (dragged, gid, siblings, at) => ref
                 .read(categoriesControllerProvider)
                 .moveCategoryInto(dragged, gid, siblings, at),
@@ -453,7 +470,7 @@ class _AppShellState extends ConsumerState<AppShell> {
           if (_inspector.isOpen) ...[
             const VerticalDivider(width: AppTokens.hairline),
             SizedBox(
-              width: InspectorPanel.width,
+              width: InspectorPanel.widthFor(MediaQuery.sizeOf(context).width),
               child: InspectorPanel(controller: _inspector),
             ),
           ],
@@ -473,7 +490,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       onSelect: _selectByDigit,
       onOpenSearch: _openSearch,
       onAddTodo: _openAddTodo,
-      onOpenSettings: () => SettingsSheet.show(context),
+      onOpenSettings: _openSettings,
       onCloseInspector: () {
         if (!_inspector.isOpen) return false;
         _inspector.close();
@@ -521,7 +538,7 @@ class _AppShellState extends ConsumerState<AppShell> {
                       key: const ValueKey('settings-button'),
                       icon: const Icon(Icons.settings_outlined),
                       tooltip: '설정',
-                      onPressed: () => SettingsSheet.show(context),
+                      onPressed: _openSettings,
                     ),
                   ],
                 ),
@@ -579,7 +596,7 @@ class _AppShellState extends ConsumerState<AppShell> {
             members: [
               item(
                 '설정…',
-                () => SettingsSheet.show(context),
+                _openSettings,
                 const SingleActivator(LogicalKeyboardKey.comma, meta: true),
               ),
             ],
@@ -844,6 +861,7 @@ class _Sidebar extends ConsumerStatefulWidget {
     required this.selectedGroupId,
     required this.onSelect,
     required this.onSelectGroup,
+    required this.onAddTodo,
     required this.onMoveCategoryInto,
     required this.onReorderGroups,
   });
@@ -860,6 +878,9 @@ class _Sidebar extends ConsumerStatefulWidget {
 
   /// 그룹 머리 탭 → 전체보기 + 그 그룹 필터.
   final ValueChanged<String> onSelectGroup;
+
+  /// 사이드바 위 "새 할 일" — 데스크탑의 추가 진입점(⌘N 과 같음).
+  final VoidCallback onAddTodo;
 
   /// 드래그→드롭(⠿/본문)을 다른 카테고리 행 위로 — [dragged] 를 [targetGroupId] 그룹의
   /// [orderedSiblings] 중 [insertIndex] 위치로 이동/순서변경.
@@ -1103,18 +1124,55 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             IconButton(
               key: const ValueKey('search-button'),
               icon: const Icon(Icons.search, size: 20),
-              tooltip: '검색 (Cmd+F)',
+              tooltip: '검색 (⌘F · ⌘K)',
               visualDensity: VisualDensity.compact,
               onPressed: () => SearchScreen.show(context),
             ),
             IconButton(
               key: const ValueKey('settings-button'),
               icon: const Icon(Icons.settings_outlined, size: 20),
-              tooltip: '설정',
+              tooltip: '설정 (⌘,)',
               visualDensity: VisualDensity.compact,
               onPressed: () => SettingsSheet.show(context),
             ),
           ],
+        ),
+      ),
+      // 새 할 일 — 항상 같은 자리(떠 있는 버튼은 인스펙터를 가려서 뺐다).
+      Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppTokens.space12,
+          0,
+          AppTokens.space12,
+          AppTokens.space12,
+        ),
+        child: Tooltip(
+          message: '새 할 일 (⌘N · 다른 앱에서 ⌘⇧N)',
+          child: FilledButton.tonal(
+            key: const ValueKey('sidebar-new-todo'),
+            onPressed: widget.onAddTodo,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(40),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.space12,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.add, size: 18),
+                const SizedBox(width: AppTokens.space8),
+                const Expanded(child: Text('새 할 일')),
+                Text(
+                  '⌘N',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSecondaryContainer.withValues(
+                      alpha: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
       if (todayIndex != null) _item(todayIndex),

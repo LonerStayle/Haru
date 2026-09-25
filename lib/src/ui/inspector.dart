@@ -83,8 +83,12 @@ class InspectorPanel extends ConsumerWidget {
 
   final InspectorController controller;
 
-  /// 패널 폭 — 상세 카드와 하위 목록이 한 줄에 읽히는 최소 폭.
-  static const double width = 440;
+  /// 패널 폭 — 넓은 창 440, 좁은 창은 창 폭의 35% (최소 340) 로 줄여 목록 폭을 지킨다.
+  static const double maxWidth = 440;
+  static const double minWidth = 340;
+
+  static double widthFor(double windowWidth) =>
+      (windowWidth * 0.35).clamp(minWidth, maxWidth);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
