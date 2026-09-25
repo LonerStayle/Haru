@@ -9,6 +9,7 @@ import '../data/providers.dart';
 import '../data/remote/supabase_realtime_sync.dart';
 import '../domain/category.dart';
 import '../domain/group.dart';
+import '../domain/todo.dart';
 import '../features/add_todo/add_todo_controller.dart';
 import '../features/add_todo/add_todo_default_category.dart';
 import '../features/auth/auth_providers.dart';
@@ -26,10 +27,13 @@ import '../features/category/category_actions.dart';
 import '../core/ui_prefs.dart';
 import '../features/outline/outline_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/settings/app_preferences.dart';
 import '../features/todo_actions/todo_row_actions.dart';
 import '../features/settings/archive_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
+import '../features/system/window_service.dart';
+import '../features/todo_actions/todo_actions_controller.dart';
 import 'destination.dart';
 import 'inspector.dart';
 import 'shell_state.dart';
@@ -92,9 +96,16 @@ class _AppShellState extends ConsumerState<AppShell> {
   Future<void> _initTray() async {
     if (!AppPlatform.isDesktop) return;
     final tray = TrayService(
-      onAddTodo: () {
+      onOpen: () => const WindowService().showMainWindow(),
+      onAddTodo: () async {
+        await const WindowService().showMainWindow();
         if (mounted) _openAddTodo();
       },
+      onOpenSettings: () async {
+        await const WindowService().showMainWindow();
+        if (mounted) _openSettings();
+      },
+      onToggleTodo: _toggleFromTray,
       onQuit: () {
         if (mounted) _confirmQuit();
       },
@@ -105,6 +116,33 @@ class _AppShellState extends ConsumerState<AppShell> {
       return;
     }
     _tray = tray;
+    _pushTrayState();
+  }
+
+  /// 트레이에서 할 일 완료 — 창을 띄우지 않고 바로 체크(되돌리기는 앱의 ⌘Z/목록).
+  Future<void> _toggleFromTray(String id) async {
+    final todo = ref
+        .read(undoneTodayTodosProvider)
+        .where((t) => t.id == id)
+        .firstOrNull;
+    if (todo == null) return;
+    await ref.read(todoActionsProvider).toggle(todo);
+  }
+
+  void _pushTrayState() {
+    final tray = _tray;
+    if (tray == null) return;
+    final undone = ref.read(undoneTodayTodosProvider);
+    tray.update(
+      TrayState(
+        top: [
+          for (final t in undone.take(trayTopLimit))
+            TrayTodo(id: t.id, title: t.title, inProgress: t.isInProgress),
+        ],
+        undoneCount: undone.length,
+        pendingSync: ref.read(outboxCountProvider).value ?? 0,
+      ),
+    );
   }
 
   /// tray menu 의 "종료" — outbox 가 비어 있으면 즉시 종료, pending 이 있으면 confirm dialog.
@@ -163,7 +201,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
       await hotKeyManager.register(
         hotkey,
-        keyDownHandler: (_) {
+        keyDownHandler: (_) async {
+          // 창이 다른 앱 뒤에 있으면 시트가 안 보인다 — 먼저 앞으로.
+          await const WindowService().showMainWindow();
           if (mounted) _openAddTodo();
         },
       );
@@ -327,6 +367,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       destinations: _destinations,
       index: _indexOf(location),
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
+      preferredCategoryId: ref.read(defaultCategoryIdProvider),
     );
 
     // 캘린더 화면에서 누르면 거기서 고른 날짜가 기본값 — 날짜를 다시 고르는 단계를 없앤다.
@@ -398,9 +439,12 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   Widget build(BuildContext context) {
     // 미체크 카운트가 바뀌면 tray title 갱신 (macOS 만 실효).
-    ref.listen<int>(undoneTodayCountProvider, (_, next) {
-      _tray?.updateUndoneCount(next);
-    });
+    // 오늘 남은 할 일·동기화 대기가 바뀌면 트레이 제목·메뉴 갱신 (macOS 만 실효).
+    ref.listen<List<Todo>>(
+      undoneTodayTodosProvider,
+      (_, _) => _pushTrayState(),
+    );
+    ref.listen(outboxCountProvider, (_, _) => _pushTrayState());
 
     // Supabase realtime sync — 인증된 user 가 있을 때만 활성. lifecycle 은 provider 가 관리.
     ref.watch(supabaseRealtimeSyncProvider);

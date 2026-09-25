@@ -114,6 +114,10 @@ void main() {
     final auth = _FakeCalendarAuth(authSucceeds: authSucceeds);
     final gateway = FakeCalendarGateway(calendars: calendars);
 
+    // 공통 옵션 제목이 붙어 목록이 길어졌다 — 아래쪽 버튼까지 한 화면에.
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     // 연결 해제가 대기 큐를 비우므로 실제 DB 파일 대신 in-memory 를 물린다.
     final db = AppDatabase.memory();
     addTearDown(db.close);
@@ -302,6 +306,13 @@ void main() {
 
         await tester.tap(find.byKey(const ValueKey('disconnect-button')));
         await tester.pumpAndSettle();
+        // 확인 창을 거친다 (Phase 4).
+        expect(
+          find.byKey(const ValueKey('disconnect-confirm')),
+          findsOneWidget,
+        );
+        await tester.tap(find.byKey(const ValueKey('disconnect-confirm-ok')));
+        await tester.pumpAndSettle();
 
         expect(result.auth.signOutCalls, 1);
 
@@ -318,5 +329,50 @@ void main() {
         expect(find.byKey(const ValueKey('connect-button')), findsOneWidget);
       },
     );
+  });
+
+  group('Phase 4 보강', () {
+    testWidgets('연결 해제 확인에서 취소하면 그대로, 대기 건수를 알린다', (tester) async {
+      final result = await pump(
+        tester,
+        initialSettings: const CalendarSettings(connected: true),
+        pendingCount: 3,
+      );
+      await tester.tap(find.byKey(const ValueKey('disconnect-button')));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('disconnect-confirm')),
+          matching: find.textContaining('대기 3건'),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+      expect(result.auth.signOutCalls, 0);
+      expect(find.text('연결됨'), findsOneWidget);
+    });
+
+    testWidgets('공통 옵션은 "모든 캘린더에 적용" 제목 아래', (tester) async {
+      await pump(
+        tester,
+        initialSettings: const CalendarSettings(connected: true),
+      );
+      expect(
+        find.byKey(const ValueKey('calendar-common-options')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('마지막 동기화는 날짜까지 보인다', (tester) async {
+      await pump(
+        tester,
+        initialSettings: CalendarSettings(
+          connected: true,
+          lastSyncedAt: DateTime(2020, 3, 4, 9, 5),
+        ),
+      );
+      expect(find.textContaining('3/4'), findsOneWidget);
+    });
   });
 }

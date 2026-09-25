@@ -59,6 +59,7 @@ dependencies:
   # Microsoft 동의 화면을 Android 기본 브라우저로 여는 데 필요 (macOS 는 `open` 사용).
   # flutter.dev 공식 유지보수 패키지. 역시 transitive 였던 것을 직접 의존으로 승격.
   url_launcher: ^6.3.1
+  package_info_plus: ^10.2.1
 
 dev_dependencies:
   flutter_test:
@@ -108,6 +109,7 @@ flutter:
   # Flutter resolution-aware — 2.0x / 3.0x variant 가 자동 선택됨 (variants 폴더 구조).
   assets:
     - assets/tray_icon.png
+    - assets/branding/app_icon_256.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:
