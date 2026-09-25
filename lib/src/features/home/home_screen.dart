@@ -95,6 +95,8 @@ class HomeScreen extends ConsumerWidget {
         final inProgressCount = tasks.where((t) => t.isInProgress).length;
         final totalCount = tasks.length;
         return _Loaded(
+          // 그룹을 바꾸면 화면 상태(이월만 보기·완료 펼침)를 새로 — 예전 그룹 화면처럼.
+          key: ValueKey('today-${group?.id}'),
           todos: todos,
           allTodos: allTodos,
           groups: groups,
@@ -182,6 +184,7 @@ Category _defaultCategoryFor(WidgetRef ref, Group? group) {
 
 class _Loaded extends StatefulWidget {
   const _Loaded({
+    super.key,
     required this.todos,
     required this.allTodos,
     required this.groups,

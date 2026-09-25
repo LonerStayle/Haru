@@ -175,17 +175,41 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   void _go(ShellLocation location) => _nav.go(location);
 
-  /// destination index → 이동 (사이드바 · 하단 네비).
+  /// destination index → 이동 (사이드바 · 하단 네비 · 숫자키).
+  ///
+  /// 지금 보고 있는 오늘/전체보기를 **다시** 고르면 그룹 필터를 푼다 — "전체보기" 를
+  /// 눌렀는데 한 그룹만 보이는 막다른 길을 없앤다. (오늘↔전체보기 사이 이동은 필터
+  /// 유지 — 두 화면이 같은 그룹을 공유한다.)
   void _select(int i) {
     if (i < 0 || i >= _destinations.length) return;
-    _go(ShellLocation.of(_destinations[i]));
+    final next = ShellLocation.of(_destinations[i]);
+    final scoped =
+        next.page == ShellPage.today || next.page == ShellPage.outline;
+    if (scoped && ref.read(shellLocationProvider) == next) {
+      ref.read(groupScopeProvider.notifier).set(null);
+    }
+    _go(next);
   }
 
   /// 사이드바 그룹 머리 탭 → 전체보기 + 그 그룹 필터 (예전 그룹 화면 대체).
+  /// 이미 그 그룹을 보고 있으면 필터를 푼다(토글).
   void _openGroup(String groupId) {
-    ref.read(groupScopeProvider.notifier).set(groupId);
+    final scope = ref.read(groupScopeProvider.notifier);
+    final location = ref.read(shellLocationProvider);
+    final onScoped =
+        location.page == ShellPage.today || location.page == ShellPage.outline;
+    if (onScoped && ref.read(groupScopeProvider) == groupId) {
+      scope.set(null);
+      return;
+    }
+    scope.set(groupId);
     _go(ShellLocation.outline);
   }
+
+  /// 카테고리 화면의 상위 — 들어온 곳(전체보기) 또는 카테고리 목록.
+  ShellLocation get _categoryParent =>
+      _nav.returnTo ??
+      (AppPlatform.isMobile ? ShellLocation.categories : ShellLocation.today);
 
   /// 지금 위치가 가리키는 destination 의 index. 카테고리가 사라졌으면 -1.
   int _indexOf(ShellLocation location) {
@@ -204,13 +228,13 @@ class _AppShellState extends ConsumerState<AppShell> {
       AppPlatform.isMobile && location.page != ShellPage.today;
 
   /// 모바일 시스템 뒤로가기 계단:
-  ///   1) 카테고리 화면 → 카테고리 목록 (하단 네비 같은 칸의 상위 화면)
+  ///   1) 카테고리 화면 → 들어온 곳(전체보기) 또는 카테고리 목록
   ///   2) 그 밖의 비-오늘 화면 → 오늘
   /// (오늘이면 canPop=true 라 여기 오지 않음 → 그때만 OS 가 앱을 종료.)
   void _handleMobileBack() {
     final location = ref.read(shellLocationProvider);
     if (location.page == ShellPage.category) {
-      _go(ShellLocation.categories);
+      _go(_categoryParent);
       return;
     }
     if (location.page != ShellPage.today) _go(ShellLocation.today);
@@ -257,13 +281,19 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// 4번째 칸은 카테고리 **목록 화면**이다(예전엔 관리 Drawer 를 열었다). 카테고리
   /// 화면에 들어가 있으면 그 칸이 선택된 채 라벨·아이콘이 그 카테고리로 바뀐다.
   Widget _buildMobileNavBar(ShellLocation location, AppDestination? current) {
+    // 전체보기에서 들어온 카테고리 화면은 전체보기 칸을 유지한다(돌아갈 곳과 일치).
+    final fromOutline =
+        location.page == ShellPage.category &&
+        _nav.returnTo == ShellLocation.outline;
     final navSelected = switch (location.page) {
       ShellPage.today => 0,
       ShellPage.outline => 1,
       ShellPage.calendar => 2,
+      ShellPage.category when fromOutline => 1,
       ShellPage.categories || ShellPage.category => 3,
     };
-    final onCategory = location.page == ShellPage.category && current != null;
+    final onCategory =
+        location.page == ShellPage.category && current != null && !fromOutline;
 
     return NavigationBar(
       selectedIndex: navSelected,
@@ -436,8 +466,10 @@ class _AppShellState extends ConsumerState<AppShell> {
                       ? IconButton(
                           key: const ValueKey('category-back-button'),
                           icon: const Icon(Icons.arrow_back),
-                          tooltip: '카테고리 목록',
-                          onPressed: () => _go(ShellLocation.categories),
+                          tooltip: _nav.returnTo == ShellLocation.outline
+                              ? '전체보기'
+                              : '카테고리 목록',
+                          onPressed: () => _go(_categoryParent),
                         )
                       : null,
                   automaticallyImplyLeading: false,
@@ -792,7 +824,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                     AppTokens.space8,
                   ),
                   child: Text(
-                    '여기로 드래그하면 그룹에서 빼요',
+                    '여기로 끌어 놓으면 그룹에서 빠져요',
                     style: textTheme.bodySmall?.copyWith(
                       color: scheme.onSurface.withValues(alpha: 0.55),
                     ),
@@ -879,11 +911,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       if (outlineIndex != null) _item(outlineIndex),
       // v1.6 — 캘린더 (월 달력 + 선택일 목록). 전체보기 다음, v1.5 타임라인 자리.
       if (calendarIndex != null) _item(calendarIndex),
-      // 미분류 섹션 — 그룹이 있으면 DragTarget(그룹 빼기)+라벨, 없으면 평면 리스트.
-      if (widget.groups.isEmpty) ...[
-        if (ungrouped.isNotEmpty) _categorySection(ungrouped),
-      ] else
-        _ungroupedSection(ungrouped, textTheme),
       // 그룹별 섹션 — 헤더의 드래그 핸들(⠿)로 그룹 순서 변경(ReorderableListView).
       // 바깥 ListView 안에 들어가므로 shrinkWrap + NeverScrollable. 각 섹션은
       // 헤더(탭=그룹 화면 진입, chevron=접힘 토글, 드롭 타겟) + 펼침 시 카테고리.
@@ -900,6 +927,12 @@ class _SidebarState extends ConsumerState<_Sidebar> {
               _buildGroupSection(i, widget.groups[i], byGroup),
           ],
         ),
+      // 미분류 — 그룹들 **아래** (전체보기·카테고리 목록과 같은 순서, Phase 2).
+      // 그룹이 있으면 DragTarget(그룹 빼기)+라벨, 없으면 평면 리스트.
+      if (widget.groups.isEmpty) ...[
+        if (ungrouped.isNotEmpty) _categorySection(ungrouped),
+      ] else
+        _ungroupedSection(ungrouped, textTheme),
       // 카테고리/그룹 추가 — 목록 바로 아래 (FAB/Cmd+N 은 새 할 일 전용, Phase 0).
       const SizedBox(height: AppTokens.space8),
       const AddEntityButtons(),

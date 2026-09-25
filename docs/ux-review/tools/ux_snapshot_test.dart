@@ -210,6 +210,30 @@ Future<_Cap> _mount(
   await db.groupsDao.upsert(
     const Group(id: 'g-work', label: '업무', colorValue: 0xFF2A66FF),
   );
+  // Phase 2 — 그룹 계층이 보이도록: 업무 = 회사·개인개발, 생활 = 일상 + 빈 카테고리.
+  await db.groupsDao.upsert(
+    const Group(
+      id: 'g-life',
+      label: '생활',
+      colorValue: 0xFF22A06B,
+      sortOrder: 1,
+    ),
+  );
+  await db.categoriesDao.upsert(Category.work.copyWith(groupId: 'g-work'));
+  await db.categoriesDao.upsert(
+    Category.personalDev.copyWith(groupId: 'g-work'),
+  );
+  await db.categoriesDao.upsert(Category.daily.copyWith(groupId: 'g-life'));
+  await db.categoriesDao.upsert(
+    const Category(
+      id: 'cat-read',
+      label: '독서',
+      iconCodePoint: 0xe865,
+      colorValue: 0xFF6366F1,
+      sortOrder: 100,
+      groupId: 'g-life',
+    ),
+  );
   final key = GlobalKey();
   await tester.pumpWidget(
     ProviderScope(
@@ -259,6 +283,11 @@ Future<void> _tour(WidgetTester tester, _Cap cap, String prefix) async {
   }
   await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
   await cap.shot('${prefix}_02_outline');
+  // Phase 2 — 그룹 칩 '업무' → 그 그룹만.
+  await tester.tap(find.byKey(const ValueKey('group-scope-g-work')));
+  await cap.shot('${prefix}_02b_outline_group');
+  await tester.tap(find.byKey(const ValueKey('group-scope-all')));
+  await cap.settle();
   await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
   await cap.shot('${prefix}_03_calendar');
   await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
@@ -337,11 +366,14 @@ void main() {
         size: const Size(390, 844),
       );
       await _tour(tester, cap, 'mobile');
-      final menu = find.byIcon(Icons.menu);
-      if (menu.evaluate().isNotEmpty) {
-        await tester.tap(menu.first);
-        await cap.shot('mobile_10_drawer');
-      }
+      // Phase 2 — 4번째 칸 = 카테고리 목록 화면 (예전 Drawer).
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('카테고리'),
+        ),
+      );
+      await cap.shot('mobile_10_categories');
     });
   });
 

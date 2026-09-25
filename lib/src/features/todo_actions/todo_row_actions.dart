@@ -13,8 +13,13 @@ import 'todo_actions_controller.dart';
 /// 삭제+되돌리기를 한 곳에 모았다 (UX 개선 Phase 2: "행 동작은 어디서나 같다").
 
 /// 할 일 편집 시트 (닫힘 = 저장).
+///
+/// 시트 안의 '이동' 은 행이 이미 사라졌을 수 있어(시트에서 완료 → 완료 접기로 이동 등)
+/// 여는 순간 잡아 둔 Navigator·container 로 띄운다.
 Future<void> openTodoEdit(BuildContext context, WidgetRef ref, Todo todo) {
   final actions = ref.read(todoActionsProvider);
+  final navigator = Navigator.of(context);
+  final container = ProviderScope.containerOf(context, listen: false);
   return AddTodoSheet.show(
     context,
     initialCategory: todo.category,
@@ -22,7 +27,8 @@ Future<void> openTodoEdit(BuildContext context, WidgetRef ref, Todo todo) {
     onSubmit: (_) {},
     onUpdate: actions.update,
     onStatusChanged: actions.updatePreservingOrder,
-    onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
+    onRequestMove: (item) =>
+        showMoveTodoSheetOn(navigator.context, container, item: item),
   );
 }
 
@@ -52,6 +58,6 @@ Future<void> deleteTodoWithUndo(
     message: children > 0
         ? '"${todo.title}"(하위 $children개 포함) 삭제됨'
         : '"${todo.title}" 삭제됨',
-    onUndo: () => actions.restoreAll(snapshot),
+    onUndo: () => actions.restoreDeleted(snapshot),
   );
 }

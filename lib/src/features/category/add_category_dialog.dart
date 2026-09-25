@@ -154,14 +154,27 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
 
   /// 같은 이름(대소문자·앞뒤 공백 무시)의 다른 카테고리가 있는지. 보관된 것도 포함 —
   /// 복원하면 같은 이름 두 개가 나란히 보이게 되므로.
-  bool get _isDuplicate {
+  bool get _isDuplicate => _duplicate != null;
+
+  /// 이름이 겹치는 다른 카테고리 (보관 포함) — 없으면 null.
+  dynamic get _duplicate {
     final label = _labelCtrl.text.trim().toLowerCase();
-    if (label.isEmpty) return false;
+    if (label.isEmpty) return null;
     final all = ref.read(categoriesProvider).asData?.value ?? const [];
-    return all.any(
-      (c) =>
-          c.id != widget.existing?.id && c.label.trim().toLowerCase() == label,
-    );
+    for (final c in all) {
+      if (c.id != widget.existing?.id &&
+          c.label.trim().toLowerCase() == label) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /// 중복 안내 — 보관된 것과 겹치면 어디 있는지 알려 준다(목록에 안 보이므로).
+  String? get _duplicateMessage {
+    final d = _duplicate;
+    if (d == null) return null;
+    return d.archived == true ? '보관함에 같은 이름의 카테고리가 있어요' : '같은 이름의 카테고리가 이미 있어요';
   }
 
   bool get _canSubmit =>
@@ -222,7 +235,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 decoration: InputDecoration(
                   labelText: '이름',
                   hintText: '예: 독서, 운동',
-                  errorText: _isDuplicate ? '같은 이름의 카테고리가 이미 있어요' : null,
+                  errorText: _duplicateMessage,
                 ),
                 onChanged: (_) => setState(() {}),
                 // 데스크탑 키보드 흐름 — Enter 로 바로 저장.

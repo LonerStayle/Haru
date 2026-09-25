@@ -19,6 +19,18 @@ Future<void> showMoveTodoSheet(
   BuildContext context,
   WidgetRef ref, {
   required Todo item,
+}) => showMoveTodoSheetOn(
+  context,
+  ProviderScope.containerOf(context, listen: false),
+  item: item,
+);
+
+/// [showMoveTodoSheet] 의 container 버전 — 호출한 목록 행이 곧 사라질 수 있을 때
+/// (편집 시트 안의 '이동' 등) 오래 사는 context(Navigator) 와 container 로 띄운다.
+Future<void> showMoveTodoSheetOn(
+  BuildContext context,
+  ProviderContainer ref, {
+  required Todo item,
 }) async {
   final destination = await showModalBottomSheet<MoveDestination>(
     context: context,

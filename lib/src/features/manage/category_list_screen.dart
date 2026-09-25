@@ -52,7 +52,35 @@ class _CategoryListScreenState extends ConsumerState<CategoryListScreen> {
 
   static const Object _ungroupedKey = Object();
 
+  final ScrollController _scroll = ScrollController();
+
   CategoryActions get _actions => CategoryActions.of(context);
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// ⠿ 로 끄는 중 화면 위·아래 끝에 가까우면 그쪽으로 스크롤 — 긴 목록에서도
+  /// 화면 밖 자리까지 옮길 수 있게.
+  void _autoScroll(Offset global) {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !_scroll.hasClients) return;
+    final local = box.globalToLocal(global);
+    const edge = 72.0;
+    double delta = 0;
+    if (local.dy < edge) {
+      delta = -(edge - local.dy) / 3;
+    } else if (local.dy > box.size.height - edge) {
+      delta = (local.dy - (box.size.height - edge)) / 3;
+    }
+    if (delta == 0) return;
+    final pos = _scroll.position;
+    _scroll.jumpTo(
+      (pos.pixels + delta).clamp(pos.minScrollExtent, pos.maxScrollExtent),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,6 +112,15 @@ class _CategoryListScreenState extends ConsumerState<CategoryListScreen> {
       }
     }
 
+    void moveInto(
+      Category dragged,
+      String? gid,
+      List<Category> ordered,
+      int at,
+    ) => ref
+        .read(categoriesControllerProvider)
+        .moveCategoryInto(dragged, gid, ordered, at);
+
     Widget rows(List<Category> siblings, String? groupId) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -93,16 +130,26 @@ class _CategoryListScreenState extends ConsumerState<CategoryListScreen> {
             target: c,
             targetGroupId: groupId,
             siblings: siblings,
-            onMoveInto: (dragged, gid, ordered, at) => ref
-                .read(categoriesControllerProvider)
-                .moveCategoryInto(dragged, gid, ordered, at),
+            onMoveInto: moveInto,
             child: _CategoryRow(
               category: c,
               undone: undoneByCategory[c.id] ?? 0,
               onTap: () => widget.onSelectCategory(c),
               onMenu: () => _actions.showCategoryMenu(c),
+              onDragUpdate: _autoScroll,
             ),
           ),
+        // 구역 끝 — 여기 놓으면 이 구역 맨 뒤로 (같은 구역 안에서도).
+        _SectionEndTarget(
+          key: ValueKey('manage-end-${groupId ?? 'none'}'),
+          onAccept: (dragged) {
+            final others = [
+              for (final c in siblings)
+                if (c.id != dragged.id) c,
+            ];
+            moveInto(dragged, groupId, others, others.length);
+          },
+        ),
       ],
     );
 
@@ -112,6 +159,7 @@ class _CategoryListScreenState extends ConsumerState<CategoryListScreen> {
         Expanded(
           child: ListView(
             key: const PageStorageKey('category-list'),
+            controller: _scroll,
             padding: const EdgeInsets.only(
               top: AppTokens.space8,
               bottom: AppTokens.space8,
@@ -161,8 +209,19 @@ class _CategoryListScreenState extends ConsumerState<CategoryListScreen> {
                           ),
                           if (!collapsed.contains(groups[i].id))
                             (byGroup[groups[i].id] ?? const []).isEmpty
-                                ? const _EmptyHint(
-                                    text: '카테고리를 ⠿ 로 끌어다 놓으면 이 그룹에 들어가요',
+                                // 빈 그룹 — 안내 자리에 놓아도 이 그룹으로 들어간다.
+                                ? DragTarget<Category>(
+                                    onWillAcceptWithDetails: (d) =>
+                                        d.data.groupId != groups[i].id,
+                                    onAcceptWithDetails: (d) =>
+                                        _actions.moveCategoryToGroup(
+                                          d.data,
+                                          groups[i].id,
+                                        ),
+                                    builder: (context, cand, _) => _EmptyHint(
+                                      text: '카테고리를 ⠿로 끌어 놓으면 이 그룹에 들어가요',
+                                      highlight: cand.isNotEmpty,
+                                    ),
                                   )
                                 : rows(byGroup[groups[i].id]!, groups[i].id),
                         ],
@@ -213,12 +272,14 @@ class _CategoryRow extends StatelessWidget {
     required this.undone,
     required this.onTap,
     required this.onMenu,
+    required this.onDragUpdate,
   });
 
   final Category category;
   final int undone;
   final VoidCallback onTap;
   final VoidCallback onMenu;
+  final ValueChanged<Offset> onDragUpdate;
 
   @override
   Widget build(BuildContext context) {
@@ -271,23 +332,29 @@ class _CategoryRow extends StatelessWidget {
                     icon: Icon(Icons.more_vert, size: 20, color: muted),
                   ),
                   // ⠿ — 끌어서 순서 변경·그룹 이동 (위 DragTarget 들이 받는다).
-                  Draggable<Category>(
-                    data: category,
-                    dragAnchorStrategy: pointerDragAnchorStrategy,
-                    feedback: _DragFeedback(category: category),
-                    childWhenDragging: SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: Icon(
-                        Icons.drag_indicator,
-                        color: scheme.onSurface.withValues(alpha: 0.2),
+                  // 탭은 여기서 삼킨다 — ⠿ 를 눌렀다 뗐을 뿐인데 카테고리가 열리지 않게.
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {},
+                    child: Draggable<Category>(
+                      data: category,
+                      dragAnchorStrategy: pointerDragAnchorStrategy,
+                      onDragUpdate: (d) => onDragUpdate(d.globalPosition),
+                      feedback: _DragFeedback(category: category),
+                      childWhenDragging: SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: Icon(
+                          Icons.drag_indicator,
+                          color: scheme.onSurface.withValues(alpha: 0.2),
+                        ),
                       ),
-                    ),
-                    child: SizedBox(
-                      key: ValueKey('manage-cat-drag-${category.id}'),
-                      width: 44,
-                      height: 44,
-                      child: Icon(Icons.drag_indicator, color: muted),
+                      child: SizedBox(
+                        key: ValueKey('manage-cat-drag-${category.id}'),
+                        width: 44,
+                        height: 44,
+                        child: Icon(Icons.drag_indicator, color: muted),
+                      ),
                     ),
                   ),
                 ],
@@ -361,6 +428,34 @@ class _CategoryDropRowState extends State<_CategoryDropRow> {
           ),
         ),
         child: widget.child,
+      ),
+    );
+  }
+}
+
+/// 구역 끝의 얇은 놓을 자리 — 끌고 있을 때만 두꺼워지고 선이 보인다.
+class _SectionEndTarget extends StatelessWidget {
+  const _SectionEndTarget({super.key, required this.onAccept});
+
+  final ValueChanged<Category> onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DragTarget<Category>(
+      onAcceptWithDetails: (d) => onAccept(d.data),
+      builder: (context, candidate, rejected) => AnimatedContainer(
+        duration: AppTokens.motionFast,
+        height: candidate.isNotEmpty ? 28 : 12,
+        margin: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: candidate.isNotEmpty ? scheme.primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -451,7 +546,7 @@ class _GroupHeader extends StatelessWidget {
                   ),
                   if (collapsed && count > 0)
                     Text(
-                      '카테고리 $count',
+                      '카테고리 $count개',
                       style: theme.textTheme.labelSmall?.copyWith(color: muted),
                     ),
                   IconButton(
@@ -552,16 +647,24 @@ class _UngroupedZone extends StatelessWidget {
 }
 
 class _EmptyHint extends StatelessWidget {
-  const _EmptyHint({required this.text});
+  const _EmptyHint({required this.text, this.highlight = false});
 
   final String text;
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+        border: highlight
+            ? Border.all(color: theme.colorScheme.primary, width: 1.4)
+            : null,
+      ),
       padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space20,
+        horizontal: AppTokens.space8,
         vertical: AppTokens.space8,
       ),
       child: Text(

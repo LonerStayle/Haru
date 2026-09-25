@@ -431,5 +431,22 @@ void main() {
       expect(await repo.getById('p'), p);
       expect(await repo.getById('c'), c);
     });
+
+    test('restoreDeleted — 캘린더 연결은 끊고 되살린다', () async {
+      final p = node('p').copyWith(
+        calendarEventId: 'evt-1',
+        calendarId: 'primary',
+        calendarProvider: 'google',
+      );
+      await repo.upsert(p);
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreDeleted(snapshot);
+
+      final back = await repo.getById('p');
+      expect(back, isNotNull);
+      expect(back!.calendarEventId, isNull);
+      expect(back.calendarId, isNull);
+      expect(back.title, p.title);
+    });
   });
 }

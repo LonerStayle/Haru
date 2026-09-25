@@ -255,13 +255,31 @@ class _Header extends StatelessWidget {
     // 모바일은 앱바가 카테고리 이름을 이미 보여 준다 → 큰 아이콘·제목 줄을 빼고
     // 필터 칩 + 정렬 버튼 한 줄만 둔다 (제목 중복 제거, UX 감사).
     if (AppPlatform.isMobile) {
-      return Row(
+      return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: showFilters ? filterBar : const SizedBox.shrink()),
-          const SizedBox(width: AppTokens.space8),
-          sortButton,
-          menuButton,
+          Row(
+            children: [
+              // 진척 한 줄 — 데스크탑 제목 아래 줄과 같은 내용(폰은 앱바가 제목).
+              Expanded(
+                child: tasks > 0
+                    ? Text(
+                        '완료 ${counts.done}/$tasks · ${tasks - counts.done}개 남음',
+                        key: const ValueKey('category-header-progress'),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              sortButton,
+              menuButton,
+            ],
+          ),
+          if (showFilters) ...[
+            const SizedBox(height: AppTokens.space8),
+            filterBar,
+          ],
         ],
       );
     }
@@ -294,7 +312,7 @@ class _Header extends StatelessWidget {
                   // 진척 한 줄 — 할 일이 있을 때만.
                   if (tasks > 0)
                     Text(
-                      '완료 ${counts.done}/$tasks · 남은 ${tasks - counts.done}개',
+                      '완료 ${counts.done}/$tasks · ${tasks - counts.done}개 남음',
                       key: const ValueKey('category-header-progress'),
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,

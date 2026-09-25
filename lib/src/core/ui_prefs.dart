@@ -45,23 +45,27 @@ final uiPrefsStoreProvider = Provider<UiPrefsStore>(
 
 /// 키 하나에 묶인 id 집합(예: 접힌 그룹 id 들) — 앱을 다시 켜도 유지된다.
 ///
-/// 저장값은 시작 직후 비동기로 복원된다. 복원 전에 사용자가 바꿨다면 그 선택이
-/// 우선한다([SortModeNotifier] 와 같은 규칙). 저장소 오류는 조용히 넘어간다 — 보기
-/// 상태일 뿐이라 이번 세션 동안만 유지돼도 괜찮다.
+/// 저장값은 시작 직후 비동기로 복원된다. 복원 전에 사용자가 바꾼 것이 있으면 저장값
+/// 위에 그 변경(넣기/빼기)만 다시 얹는다 — 집합을 통째로 덮으면 다른 항목의 저장값이
+/// 날아간다. 저장소 오류는 조용히 넘어간다 — 보기 상태일 뿐이다.
 class PersistedIdSet extends Notifier<Set<String>> {
   PersistedIdSet(this.key);
 
   final String key;
 
-  bool _userChanged = false;
+  bool _restoring = true;
   bool _disposed = false;
+
+  /// 복원 전에 들어온 변경 — (id, 넣기 여부). 복원 후 저장값 위에 다시 얹는다.
+  final List<(String, bool)> _pending = [];
 
   /// 복원이 끝나는 Future — 테스트 대기용.
   late Future<void> restored;
 
   @override
   Set<String> build() {
-    _userChanged = false;
+    _restoring = true;
+    _pending.clear();
     _disposed = false;
     ref.onDispose(() => _disposed = true);
     restored = _restore();
@@ -69,30 +73,46 @@ class PersistedIdSet extends Notifier<Set<String>> {
   }
 
   Future<void> _restore() async {
-    final Set<String> loaded;
+    Set<String>? loaded;
     try {
       loaded = await ref.read(uiPrefsStoreProvider).loadIds(key);
     } catch (_) {
-      return;
+      loaded = null;
     }
-    if (_disposed || _userChanged) return;
-    state = loaded;
+    if (_disposed) return;
+    _restoring = false;
+    if (loaded == null) return;
+    final merged = {...loaded};
+    for (final (id, present) in _pending) {
+      present ? merged.add(id) : merged.remove(id);
+    }
+    final hadPending = _pending.isNotEmpty;
+    _pending.clear();
+    state = Set.unmodifiable(merged);
+    if (hadPending) _save();
   }
 
   bool contains(String id) => state.contains(id);
 
-  void toggle(String id) =>
-      replace(state.contains(id) ? ({...state}..remove(id)) : {...state, id});
+  void toggle(String id) => set(id, !state.contains(id));
 
   void set(String id, bool present) {
     if (state.contains(id) == present) return;
-    toggle(id);
+    replace(present ? {...state, id} : ({...state}..remove(id)));
   }
 
   void replace(Set<String> ids) {
-    _userChanged = true;
+    if (_restoring) {
+      // 바뀐 것만 기록 — 복원 후 저장값 위에 얹는다.
+      for (final id in ids.difference(state)) {
+        _pending.add((id, true));
+      }
+      for (final id in state.difference(ids)) {
+        _pending.add((id, false));
+      }
+    }
     state = Set.unmodifiable(ids);
-    _save();
+    if (!_restoring) _save();
   }
 
   Future<void> _save() async {

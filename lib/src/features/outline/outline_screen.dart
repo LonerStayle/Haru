@@ -71,41 +71,62 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
       scope: scoped,
     );
     final visibleIds = {for (final c in layout.allCategories) c.id};
+    // 반복 시리즈 마스터는 규칙 보관용 — 목록에 보이지 않는다(검색·이동 시트와 같은 규칙).
     final pool = [
       for (final t in allTodos)
-        if (visibleIds.contains(t.category.id)) t,
+        if (visibleIds.contains(t.category.id) && !t.isSeriesMaster) t,
     ];
+    // 부모 id → 직속 하위 수 — 행마다 전체를 훑지 않게 한 번만 센다.
+    final childCounts = <String, int>{};
+    for (final t in allTodos) {
+      final pid = t.parentId;
+      if (pid != null && !t.isSeriesMaster) {
+        childCounts[pid] = (childCounts[pid] ?? 0) + 1;
+      }
+    }
     final counts = TodoStatusCounts.of(pool);
     // 필터로 고른 상태가 비면(마지막 메모를 지우는 등) 전체로 돌아간다.
     final filter = counts.countOf(_filter) == 0
         ? TodoStatusFilter.all
         : _filter;
 
-    final catKeys = [for (final c in layout.allCategories) 'cat:${c.id}'];
-    final anyExpanded = catKeys.any((k) => !collapsed.contains(k));
+    // 모두 접기/펼치기의 대상 — 실제로 접을 수 있는(할 일이 있는) 카테고리.
+    final withItems = {for (final t in pool) t.category.id};
+    final catKeys = [
+      for (final c in layout.allCategories)
+        if (withItems.contains(c.id)) 'cat:${c.id}',
+    ];
+    final grpKeys = [
+      for (final sec in layout.sections)
+        if (sec.group != null) 'grp:${sec.group!.id}',
+    ];
+    // 지금 화면에 펼쳐져 보이는 카드가 하나라도 있으면 "모두 접기".
+    final anyExpanded = layout.sections.any(
+      (sec) =>
+          (sec.group == null || !collapsed.contains('grp:${sec.group!.id}')) &&
+          sec.categories.any(
+            (c) =>
+                withItems.contains(c.id) && !collapsed.contains('cat:${c.id}'),
+          ),
+    );
 
     final slivers = <Widget>[
       SliverToBoxAdapter(
         child: _Toolbar(
           showTitle: !AppPlatform.isMobile,
+          hasGroups: groups.isNotEmpty,
           canToggleAll: filter == TodoStatusFilter.all && catKeys.isNotEmpty,
           anyExpanded: anyExpanded,
+          // 펼칠 때는 접힌 그룹도 함께 연다 — 눌렀는데 그대로인 일이 없게.
           onToggleAll: () => _collapse.replace(
             anyExpanded
                 ? {...collapsed, ...catKeys}
-                : ({...collapsed}..removeAll(catKeys)),
+                : ({...collapsed}
+                    ..removeAll(catKeys)
+                    ..removeAll(grpKeys)),
           ),
         ),
       ),
-      if (groups.isNotEmpty)
-        const SliverPadding(
-          padding: EdgeInsets.only(bottom: AppTokens.space8),
-          sliver: SliverToBoxAdapter(
-            child: GroupScopeChips(
-              padding: EdgeInsets.symmetric(horizontal: AppTokens.space16),
-            ),
-          ),
-        ),
       if (pool.isNotEmpty)
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(
@@ -147,7 +168,7 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
           ),
           sliver: SliverList(
             delegate: SliverChildListDelegate(
-              _treeChildren(layout, collapsed, allTodos),
+              _treeChildren(layout, collapsed, allTodos, childCounts),
             ),
           ),
         ),
@@ -163,7 +184,7 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
           ),
           sliver: SliverList(
             delegate: SliverChildListDelegate(
-              _filteredChildren(layout, pool, allTodos, filter),
+              _filteredChildren(layout, pool, allTodos, filter, childCounts),
             ),
           ),
         ),
@@ -181,11 +202,13 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
     _OutlineLayout layout,
     Set<String> collapsed,
     List<Todo> allTodos,
+    Map<String, int> childCounts,
   ) {
     Widget card(Category c) => _OutlineCategoryCard(
       key: ValueKey('outline-card-${c.id}'),
       category: c,
       allTodos: allTodos,
+      childCounts: childCounts,
       expanded: !collapsed.contains('cat:${c.id}'),
       onToggle: () => _collapse.toggle('cat:${c.id}'),
       doneShown: _doneShown.contains(c.id),
@@ -225,13 +248,47 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
     List<Todo> pool,
     List<Todo> allTodos,
     TodoStatusFilter filter,
+    Map<String, int> childCounts,
   ) {
     final byId = {for (final t in allTodos) t.id: t};
+    // 트리 순서(부모 → 자식, 형제는 sortOrder 순)로 훑는다 — 자식이 부모보다 먼저
+    // 나오지 않게. 상세 화면의 상태 칩 목록과 같은 순서.
+    final byParent = <String?, List<Todo>>{};
+    for (final t in pool) {
+      byParent.putIfAbsent(t.parentId, () => []).add(t);
+    }
+    for (final list in byParent.values) {
+      list.sort((a, b) {
+        final so = a.sortOrder.compareTo(b.sortOrder);
+        if (so != 0) return so;
+        final cr = b.createdAt.compareTo(a.createdAt);
+        return cr != 0 ? cr : a.id.compareTo(b.id);
+      });
+    }
+    List<Todo> depthFirst(String categoryId) {
+      final out = <Todo>[];
+      final seen = <String>{};
+      void walk(String? pid) {
+        for (final t in byParent[pid] ?? const <Todo>[]) {
+          if (t.category.id != categoryId || !seen.add(t.id)) continue;
+          out.add(t);
+          walk(t.id);
+        }
+      }
+
+      walk(null);
+      // 부모가 목록에 없는 항목(부모가 다른 카테고리 등)도 빠뜨리지 않는다.
+      for (final t in pool) {
+        if (t.category.id == categoryId && seen.add(t.id)) out.add(t);
+      }
+      return out;
+    }
+
     final children = <Widget>[];
     for (final c in layout.allCategories) {
       final matched = [
-        for (final t in pool)
-          if (t.category.id == c.id && filter.matches(t)) t,
+        for (final t in depthFirst(c.id))
+          if (filter.matches(t)) t,
       ];
       if (matched.isEmpty) continue;
       children.add(
@@ -260,7 +317,7 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
                       for (final t in matched)
                         OutlineTodoRow(
                           todo: t,
-                          allTodos: allTodos,
+                          childCount: childCounts[t.id] ?? 0,
                           breadcrumb: _breadcrumbOf(t, byId),
                         ),
                     ],
@@ -359,16 +416,19 @@ class _Section {
   final List<Category> categories;
 }
 
-/// 제목 줄 — 데스크탑은 큰 제목, 폰은 앱바가 제목이라 버튼만.
+/// 제목 줄 + 그룹 칩. 데스크탑은 큰 제목 아래 칩, 폰은 앱바가 제목이라 칩 줄 끝에
+/// 접기 버튼을 붙여 한 줄로.
 class _Toolbar extends StatelessWidget {
   const _Toolbar({
     required this.showTitle,
+    required this.hasGroups,
     required this.canToggleAll,
     required this.anyExpanded,
     required this.onToggleAll,
   });
 
   final bool showTitle;
+  final bool hasGroups;
   final bool canToggleAll;
   final bool anyExpanded;
   final VoidCallback onToggleAll;
@@ -376,26 +436,32 @@ class _Toolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final toggle = canToggleAll
-        ? TextButton.icon(
-            key: const ValueKey('outline-toggle-all'),
-            onPressed: onToggleAll,
-            icon: Icon(
-              anyExpanded ? Icons.unfold_less_rounded : Icons.unfold_more,
-              size: 18,
-            ),
-            label: Text(anyExpanded ? '모두 접기' : '모두 펼치기'),
-          )
-        : null;
+    final label = anyExpanded ? '모두 접기' : '모두 펼치기';
+    final icon = anyExpanded ? Icons.unfold_less_rounded : Icons.unfold_more;
     if (!showTitle) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(
-          AppTokens.space16,
-          AppTokens.space8,
+          0,
           AppTokens.space8,
           AppTokens.space4,
+          AppTokens.space8,
         ),
-        child: Row(children: [const Spacer(), ?toggle]),
+        child: Row(
+          children: [
+            Expanded(
+              child: hasGroups
+                  ? const GroupScopeChips()
+                  : const SizedBox.shrink(),
+            ),
+            if (canToggleAll)
+              IconButton(
+                key: const ValueKey('outline-toggle-all'),
+                tooltip: label,
+                onPressed: onToggleAll,
+                icon: Icon(icon),
+              ),
+          ],
+        ),
       );
     }
     return Padding(
@@ -405,28 +471,43 @@ class _Toolbar extends StatelessWidget {
         AppTokens.space16,
         AppTokens.space12,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '전체보기',
-                  style: theme.textTheme.displayMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '전체보기',
+                      style: theme.textTheme.displayMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: AppTokens.space4),
+                    Text(
+                      '그룹 · 카테고리별 할 일과 메모를 한눈에',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: AppTokens.space4),
-                Text(
-                  '그룹 · 카테고리별 할 일과 메모를 한눈에',
-                  style: theme.textTheme.bodyMedium,
+              ),
+              if (canToggleAll)
+                TextButton.icon(
+                  key: const ValueKey('outline-toggle-all'),
+                  onPressed: onToggleAll,
+                  icon: Icon(icon, size: 18),
+                  label: Text(label),
                 ),
-              ],
-            ),
+            ],
           ),
-          ?toggle,
+          if (hasGroups) ...[
+            const SizedBox(height: AppTokens.space12),
+            const GroupScopeChips(padding: EdgeInsets.zero),
+          ],
         ],
       ),
     );
@@ -490,7 +571,7 @@ class _OutlineGroupHeader extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(right: AppTokens.space8),
                   child: Text(
-                    '카테고리 $count',
+                    '카테고리 $count개',
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -594,6 +675,7 @@ class _OutlineCategoryCard extends ConsumerWidget {
     super.key,
     required this.category,
     required this.allTodos,
+    required this.childCounts,
     required this.expanded,
     required this.onToggle,
     required this.doneShown,
@@ -602,6 +684,7 @@ class _OutlineCategoryCard extends ConsumerWidget {
 
   final Category category;
   final List<Todo> allTodos;
+  final Map<String, int> childCounts;
   final bool expanded;
   final VoidCallback onToggle;
   final bool doneShown;
@@ -609,22 +692,28 @@ class _OutlineCategoryCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final roots =
-        ref.watch(rootsOfCategoryProvider(category)).asData?.value ??
-        const <Todo>[];
+    // 반복 시리즈 마스터는 목록에 보이지 않는다.
+    final roots = [
+      for (final r
+          in ref.watch(rootsOfCategoryProvider(category)).asData?.value ??
+              const <Todo>[])
+        if (!r.isSeriesMaster) r,
+    ];
 
-    // 카테고리 진척 = 이 카테고리의 모든 task (하위 포함).
+    // 카테고리 진척 = 보이는 항목들(최상위 + 그 하위)의 task. 부모 없이 남은 유령이나
+    // 시리즈 마스터는 세지 않는다 — 배지 숫자와 눈에 보이는 항목이 어긋나지 않게.
     var done = 0;
     var total = 0;
-    var any = false;
-    for (final t in allTodos) {
-      if (t.category.id != category.id) continue;
-      any = true;
-      if (t.type != TodoType.task) continue;
-      total++;
-      if (t.isDone) done++;
+    for (final r in roots) {
+      if (r.type == TodoType.task) {
+        total++;
+        if (r.isDone) done++;
+      }
+      final p = computeSubtreeProgress(r, allTodos);
+      total += p.taskCount;
+      done += p.doneCount;
     }
-    final empty = !any && roots.isEmpty;
+    final empty = roots.isEmpty;
 
     final active = <Todo>[];
     final doneRoots = <Todo>[];
@@ -662,7 +751,10 @@ class _OutlineCategoryCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final r in active)
-                      OutlineTodoRow(todo: r, allTodos: allTodos),
+                      OutlineTodoRow(
+                        todo: r,
+                        childCount: childCounts[r.id] ?? 0,
+                      ),
                     if (doneRoots.isNotEmpty) ...[
                       _DoneCollapseRow(
                         catId: category.id,
@@ -673,7 +765,10 @@ class _OutlineCategoryCard extends ConsumerWidget {
                       ),
                       if (doneShown)
                         for (final r in doneRoots)
-                          OutlineTodoRow(todo: r, allTodos: allTodos),
+                          OutlineTodoRow(
+                            todo: r,
+                            childCount: childCounts[r.id] ?? 0,
+                          ),
                     ],
                   ],
                 ),
@@ -708,8 +803,9 @@ class _CategoryHeaderRow extends ConsumerWidget {
     final fade = empty ? 0.55 : 1.0;
     return InkWell(
       key: ValueKey('outline-category-${category.id}'),
-      onTap: () =>
-          ref.read(shellLocationProvider.notifier).openCategory(category.id),
+      onTap: () => ref
+          .read(shellLocationProvider.notifier)
+          .openCategory(category.id, from: ShellLocation.outline),
       borderRadius: BorderRadius.circular(AppTokens.radiusL),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -796,20 +892,18 @@ class OutlineTodoRow extends ConsumerWidget {
   const OutlineTodoRow({
     super.key,
     required this.todo,
-    required this.allTodos,
+    required this.childCount,
     this.breadcrumb,
   });
 
   final Todo todo;
-  final List<Todo> allTodos;
+
+  /// 직속 하위 수 — 화면이 한 번에 세어 넘긴다.
+  final int childCount;
   final String? breadcrumb;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    var childCount = 0;
-    for (final t in allTodos) {
-      if (t.parentId == todo.id) childCount++;
-    }
     final isTask = todo.type == TodoType.task;
     return Padding(
       key: ValueKey('outline-node-${todo.id}'),

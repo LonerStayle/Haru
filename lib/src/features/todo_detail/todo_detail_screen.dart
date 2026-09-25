@@ -57,6 +57,19 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
     }
   }
 
+  /// 다른 곳에서 지워졌을 때 — 맨 위면 닫고, 위에 다른 화면(하위 상세·시트)이 있으면
+  /// 스택에서 조용히 뺀다. 지워진 항목의 상세가 뒤에 남아 있다가 고치면 되살아난다.
+  void _removeSelf() {
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isActive) return;
+    if (route.isCurrent) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).removeRoute(route);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final parent = widget.parent;
@@ -80,7 +93,7 @@ class _TodoDetailScreenState extends ConsumerState<TodoDetailScreen> {
       body: TodoDetailView(
         parent: parent,
         suppressGoneNotice: _deleting,
-        onGone: _closeIfCurrent,
+        onGone: _deleting ? _closeIfCurrent : _removeSelf,
       ),
     );
   }
@@ -160,6 +173,16 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
 
   bool _goneHandled = false;
 
+  @override
+  void didUpdateWidget(TodoDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 인스펙터처럼 같은 자리에서 다른 항목으로 바뀌면 화면 상태를 새로.
+    if (oldWidget.parent.id != widget.parent.id) {
+      _goneHandled = false;
+      _filter = TodoStatusFilter.all;
+    }
+  }
+
   void _handleGone(Todo last) {
     if (_goneHandled) return;
     _goneHandled = true;
@@ -171,7 +194,7 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
       if (!self && messenger != null && messenger.mounted) {
         messenger.showSnackBar(
           SnackBar(
-            content: Text('"${last.title}" 이 다른 곳에서 삭제돼 닫았어요.'),
+            content: Text('"${last.title}" 항목이 다른 곳에서 삭제돼 닫았어요.'),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -194,9 +217,8 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
       (t) => t.id == parent.id,
       orElse: () => parent,
     );
-    if (asyncAll.hasValue && !allTodos.any((t) => t.id == parent.id)) {
-      _handleGone(live);
-    }
+    final gone = asyncAll.hasValue && !allTodos.any((t) => t.id == parent.id);
+    if (gone) _handleGone(live);
 
     final actions = ref.read(todoActionsProvider);
     final openTodo =
@@ -215,14 +237,23 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
           todo: live,
           allTodos: allTodos,
           groups: groups,
-          onToggle: () => toggleWithUndo(context, actions, live),
-          onToggleInProgress: () => actions.toggleInProgress(live),
-          onRename: (title) => actions.update(live.copyWith(title: title)),
-          onDescribe: (text) => actions.update(
-            live.copyWith(description: text.isEmpty ? null : text),
-          ),
-          onEdit: () => openTodoEdit(context, ref, live),
-          onMove: () => showMoveTodoSheet(context, ref, item: live),
+          // 지워진 항목(스냅샷만 남음)에 쓰면 되살아난다 — 전부 막는다.
+          onToggle: gone ? null : () => toggleWithUndo(context, actions, live),
+          onToggleInProgress: gone
+              ? null
+              : () => actions.toggleInProgress(live),
+          onRename: gone
+              ? null
+              : (title) => actions.update(live.copyWith(title: title)),
+          onDescribe: gone
+              ? null
+              : (text) => actions.update(
+                  live.copyWith(description: text.isEmpty ? null : text),
+                ),
+          onEdit: gone ? null : () => openTodoEdit(context, ref, live),
+          onMove: gone
+              ? null
+              : () => showMoveTodoSheet(context, ref, item: live),
         ),
       ),
     );
@@ -361,12 +392,12 @@ class _ParentCard extends StatelessWidget {
   final Todo todo;
   final List<Todo> allTodos;
   final List<Group> groups;
-  final VoidCallback onToggle;
-  final VoidCallback onToggleInProgress;
-  final ValueChanged<String> onRename;
-  final ValueChanged<String> onDescribe;
-  final VoidCallback onEdit;
-  final VoidCallback onMove;
+  final VoidCallback? onToggle;
+  final VoidCallback? onToggleInProgress;
+  final ValueChanged<String>? onRename;
+  final ValueChanged<String>? onDescribe;
+  final VoidCallback? onEdit;
+  final VoidCallback? onMove;
 
   @override
   Widget build(BuildContext context) {
@@ -557,8 +588,8 @@ class _ParentCard extends StatelessWidget {
   }
 }
 
-/// 눌러서 바로 고치는 글자 — 평소엔 글자, 누르면 입력칸. Enter·바깥 탭·포커스 이탈 = 저장,
-/// Esc = 취소. 바뀐 게 없으면 저장하지 않는다(열람만으로 순서가 바뀌지 않게).
+/// 눌러서 바로 고치는 글자 — 평소엔 글자, 누르면 입력칸. Enter(제목)·Esc·바깥 탭·
+/// 포커스 이탈 = 저장. 바뀐 게 없으면 저장하지 않는다(열람만으로 순서가 바뀌지 않게).
 class _InlineText extends StatefulWidget {
   const _InlineText({
     super.key,
@@ -575,7 +606,9 @@ class _InlineText extends StatefulWidget {
   final String value;
   final String placeholder;
   final TextStyle? style;
-  final ValueChanged<String> onSave;
+
+  /// null 이면 고칠 수 없다(글자만).
+  final ValueChanged<String>? onSave;
   final bool allowEmpty;
   final bool multiline;
 
@@ -614,21 +647,24 @@ class _InlineTextState extends State<_InlineText> {
 
   void _commit() {
     if (!_editing) return;
-    final next = widget.multiline ? _ctrl.text.trimRight() : _ctrl.text.trim();
+    // 편집 시트와 같은 정규화(trim) — 앞뒤 공백만 다른 값은 "바뀐 것" 이 아니다.
+    // 안 그러면 열었다 닫기만 해도 저장·맨 위로 올라가기가 일어난다.
+    final next = _ctrl.text.trim();
     setState(() => _editing = false);
-    if (next == widget.value) return;
+    if (next == widget.value.trim()) return;
     if (next.isEmpty && !widget.allowEmpty) return;
-    widget.onSave(next);
+    widget.onSave?.call(next);
   }
-
-  void _cancel() => setState(() => _editing = false);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (_editing) {
       return CallbackShortcuts(
-        bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
+        // Esc = 저장하고 닫기 — 앱 전체의 "닫힘 = 저장" 규칙과 같다(쓴 글을 잃지 않게).
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.escape): _focus.unfocus,
+        },
         child: TextField(
           key: widget.fieldKey,
           controller: _ctrl,
@@ -657,7 +693,7 @@ class _InlineTextState extends State<_InlineText> {
       button: true,
       label: empty ? widget.placeholder : '${widget.value}, 눌러서 고치기',
       child: InkWell(
-        onTap: _start,
+        onTap: widget.onSave == null ? null : _start,
         borderRadius: BorderRadius.circular(AppTokens.radiusS),
         child: Padding(
           padding: const EdgeInsets.symmetric(
@@ -697,7 +733,7 @@ class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final String tooltip;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color? color;
   final bool muted;
   final bool selected;

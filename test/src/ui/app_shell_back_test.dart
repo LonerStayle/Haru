@@ -16,6 +16,7 @@ import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/category/category_view.dart';
 import 'package:solo_todo/src/features/home/home_screen.dart';
 import 'package:solo_todo/src/features/manage/category_list_screen.dart';
+import 'package:solo_todo/src/features/outline/outline_screen.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/ui/app_shell.dart';
@@ -152,6 +153,27 @@ void main() {
     await systemBack(tester);
     expect(find.byType(HomeScreen), findsOneWidget, reason: '오늘로');
     expect(exits, isEmpty);
+  });
+
+  testWidgets('전체보기 카테고리 머리 → 카테고리 → back → 전체보기로', (tester) async {
+    await pump(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('전체보기'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        ValueKey('outline-category-${Category.builtinSeeds.first.id}'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CategoryView), findsOneWidget);
+
+    await systemBack(tester);
+    expect(find.byType(OutlineScreen), findsOneWidget, reason: '들어온 곳으로');
   });
 
   testWidgets('오늘 탭(루트) → 시스템 back → 앱 종료 호출', (tester) async {

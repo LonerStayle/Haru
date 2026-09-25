@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -155,6 +156,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect((await repo.getById('p'))!.description, '메모 내용');
+  });
+
+  testWidgets('Esc 는 버리지 않고 저장한다 (닫힘 = 저장)', (tester) async {
+    final p = make('p');
+    await repo.upsert(p);
+    await mount(tester, p, [p]);
+
+    await tester.tap(find.text('설명 추가'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('detail-description-field')),
+      '긴 설명',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect((await repo.getById('p'))!.description, '긴 설명');
   });
 
   testWidgets('⋮ 삭제 → 하위까지 지우고 닫힌 뒤 되돌리기 스낵바', (tester) async {

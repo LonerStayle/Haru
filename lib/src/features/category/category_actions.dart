@@ -253,22 +253,37 @@ class CategoryActions {
     await moveCategoryToGroup(category, picked.groupId, groups: groups);
   }
 
-  /// 카테고리를 [groupId] 그룹(null = 미분류)으로 옮기고 되돌리기 스낵바.
-  /// 드래그 드롭도 이 길을 쓴다.
+  /// 카테고리를 [groupId] 그룹(null = 미분류) **맨 뒤**로 옮기고 되돌리기 스낵바.
+  /// 드래그 드롭(그룹 머리·미분류)도 이 길을 쓴다. 되돌리기는 원래 그룹·순서 그대로.
   Future<void> moveCategoryToGroup(
     Category category,
     String? groupId, {
     List<Group>? groups,
   }) async {
-    final before = category.groupId;
-    if (before == groupId) return;
-    await _categories.moveToGroup(category.id, groupId);
+    if (category.groupId == groupId) return;
     final all =
         groups ??
         _container.read(activeGroupsProvider).asData?.value ??
         const <Group>[];
+    final groupIds = {for (final g in all) g.id};
+    // 대상 구역의 현재 화면 순서(자신 제외). 사라진 그룹을 가리키는 카테고리는 미분류로 본다.
+    final active =
+        _container.read(activeCategoriesProvider).asData?.value ??
+        const <Category>[];
+    String? sectionOf(Category c) =>
+        c.groupId != null && groupIds.contains(c.groupId) ? c.groupId : null;
+    final siblings = [
+      for (final c in active)
+        if (c.id != category.id && sectionOf(c) == groupId) c,
+    ];
+    await _categories.moveCategoryInto(
+      category,
+      groupId,
+      siblings,
+      siblings.length,
+    );
+
     String nameOf(String? id) {
-      if (id == null) return '미분류';
       for (final g in all) {
         if (g.id == id) return g.label;
       }
@@ -280,7 +295,8 @@ class CategoryActions {
     showUndoSnackbarOn(
       messenger,
       message: "'${category.label}' → ${nameOf(groupId)}(으)로 옮겼어요.",
-      onUndo: () => _categories.moveToGroup(category.id, before),
+      // 원본 그대로 되돌려 쓴다 — 그룹과 순서가 모두 돌아온다.
+      onUndo: () => _categories.add(category),
     );
   }
 

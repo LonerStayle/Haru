@@ -82,6 +82,26 @@ void main() {
     expect(c.read(shellLocationProvider), ShellLocation.outline);
   });
 
+  testWidgets('그룹 필터 중 "전체보기" 를 다시 누르면 필터가 풀린다', (tester) async {
+    final c = await pump(tester);
+    await tester.tap(find.text('업무').first);
+    await tester.pumpAndSettle();
+    expect(c.read(groupScopeProvider), 'ga');
+
+    await tester.tap(find.text('전체보기').first);
+    await tester.pumpAndSettle();
+    expect(c.read(groupScopeProvider), isNull);
+  });
+
+  testWidgets('같은 그룹 머리를 다시 누르면 필터가 풀린다', (tester) async {
+    final c = await pump(tester);
+    await tester.tap(find.text('업무').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('업무').first);
+    await tester.pumpAndSettle();
+    expect(c.read(groupScopeProvider), isNull);
+  });
+
   testWidgets('오늘 화면에도 같은 그룹 칩이 있다', (tester) async {
     final c = await pump(tester);
     expect(find.byType(HomeScreen), findsOneWidget);

@@ -79,14 +79,27 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
   }
 
   /// 같은 이름(대소문자·앞뒤 공백 무시)의 다른 그룹이 있는지 (보관 포함).
-  bool get _isDuplicate {
+  bool get _isDuplicate => _duplicate != null;
+
+  /// 이름이 겹치는 다른 그룹 (보관 포함) — 없으면 null.
+  dynamic get _duplicate {
     final label = _labelCtrl.text.trim().toLowerCase();
-    if (label.isEmpty) return false;
+    if (label.isEmpty) return null;
     final all = ref.read(groupsProvider).asData?.value ?? const [];
-    return all.any(
-      (g) =>
-          g.id != widget.existing?.id && g.label.trim().toLowerCase() == label,
-    );
+    for (final g in all) {
+      if (g.id != widget.existing?.id &&
+          g.label.trim().toLowerCase() == label) {
+        return g;
+      }
+    }
+    return null;
+  }
+
+  /// 중복 안내 — 보관된 것과 겹치면 어디 있는지 알려 준다(목록에 안 보이므로).
+  String? get _duplicateMessage {
+    final d = _duplicate;
+    if (d == null) return null;
+    return d.archived == true ? '보관함에 같은 이름의 그룹이 있어요' : '같은 이름의 그룹이 이미 있어요';
   }
 
   bool get _canSubmit =>
@@ -143,7 +156,7 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
                 decoration: InputDecoration(
                   labelText: '이름',
                   hintText: '예: 회사, 사이드프로젝트',
-                  errorText: _isDuplicate ? '같은 이름의 그룹이 이미 있어요' : null,
+                  errorText: _duplicateMessage,
                 ),
                 onChanged: (_) => setState(() {}),
                 // 카테고리 다이얼로그와 같이 Enter 로 바로 저장.

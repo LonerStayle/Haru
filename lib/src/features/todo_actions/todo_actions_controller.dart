@@ -57,11 +57,31 @@ class TodoActionsController {
       }
     }
     final snapshot = [root, ...MovePolicy.descendants(todo.id, everything)];
-    // 자식부터 지운다 — 도중에 멈춰도 부모 없는 자식이 남지 않게.
-    for (final t in snapshot.reversed) {
+    // 부모부터 지운다 — 목록에서 그 줄이 첫 갱신에 바로 사라진다(밀어서 지운 행이
+    // 자식 삭제마다 다시 그려지면 Dismissible 이 "이미 지운 행" 오류를 낸다).
+    for (final t in snapshot) {
       await _repo.deleteById(t.id);
     }
     return snapshot;
+  }
+
+  /// 삭제 되돌리기 — [restoreAll] 과 같되 **캘린더 연결은 끊고** 되살린다.
+  ///
+  /// 삭제할 때 연결된 캘린더 일정도 지우기로 예약됐으므로, 옛 일정 id 를 그대로 두면
+  /// 이후 수정이 없는 일정으로 간다. 연결을 비워 두면 저장 규칙(기본 캘린더 등록 설정)에
+  /// 따라 새 일정으로 다시 만들어진다.
+  Future<void> restoreDeleted(List<Todo> snapshot) async {
+    for (final t in snapshot) {
+      await _repo.upsert(
+        t.calendarEventId == null
+            ? t
+            : t.copyWith(
+                calendarEventId: null,
+                calendarId: null,
+                calendarProvider: null,
+              ),
+      );
+    }
   }
 
   /// [delete] 로 지워진 Todo 를 그대로 복원 (id 동일, updatedAt 보존).

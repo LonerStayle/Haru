@@ -46,7 +46,8 @@ class GroupScopeChips extends ConsumerWidget {
         children: [
           _ScopeChip(
             key: const ValueKey('group-scope-all'),
-            label: '전체',
+            // '전체' 는 상태 칩(전체 N)과 겹쳐 헷갈린다 → 그룹 축임을 이름에.
+            label: '모든 그룹',
             color: null,
             selected: selected == null,
             onTap: () => notifier.set(null),

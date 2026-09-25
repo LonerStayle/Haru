@@ -54,13 +54,24 @@ class ShellLocation {
 }
 
 class ShellLocationNotifier extends Notifier<ShellLocation> {
+  /// 카테고리 화면에서 뒤로 갈 곳 — 전체보기의 카테고리 머리로 들어왔으면 전체보기.
+  /// null 이면 카테고리 목록(모바일) / 없음(데스크탑).
+  ShellLocation? get returnTo => _returnTo;
+  ShellLocation? _returnTo;
+
   @override
   ShellLocation build() => ShellLocation.today;
 
-  void go(ShellLocation location) => state = location;
+  void go(ShellLocation location) {
+    _returnTo = null;
+    state = location;
+  }
 
-  void openCategory(String categoryId) =>
-      state = ShellLocation.category(categoryId);
+  /// [from] — 들어온 화면. 뒤로가기·앱바 ← 가 여기로 돌아간다.
+  void openCategory(String categoryId, {ShellLocation? from}) {
+    _returnTo = from;
+    state = ShellLocation.category(categoryId);
+  }
 }
 
 /// 메인 영역 위치 — 사이드바·하단 네비·단축키·화면 안 링크가 모두 이걸 바꾼다.
