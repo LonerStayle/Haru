@@ -263,23 +263,19 @@ void main() {
   });
 
   group('모바일 레이아웃', () {
-    testWidgets('달력 접기 토글이 있고, 접으면 격자가 사라진다', (tester) async {
+    testWidgets('헤더는 두 줄 — 접기 버튼 없이 [달력|타임라인] 과 월 제목이 나뉜다', (tester) async {
       await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
-      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
-
-      await tester.tap(find.byKey(const ValueKey('calendar-collapse-toggle')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsNothing);
-      // 목록은 그대로 — 접기는 달력만 숨긴다.
-      expect(find.text('8월 15일 (토)'), findsOneWidget);
-    });
-
-    testWidgets('데스크탑에는 접기 토글이 없다', (tester) async {
-      await mount(tester);
       expect(
         find.byKey(const ValueKey('calendar-collapse-toggle')),
         findsNothing,
       );
+      final title = tester.getCenter(
+        find.byKey(const ValueKey('calendar-month-title')),
+      );
+      final segment = tester.getCenter(
+        find.byKey(const ValueKey('calendar-segment-grid')),
+      );
+      expect(segment.dy, greaterThan(title.dy + 10));
     });
 
     testWidgets('모바일에는 ‹ › 대신 스와이프로 달을 넘긴다', (tester) async {
@@ -321,37 +317,51 @@ void main() {
     });
   });
 
-  group('모바일 — 목록 패널 접기', () {
-    testWidgets('패널 헤더를 누르면 접히고 하단 막대만 남는다', (tester) async {
-      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
-      expect(
-        find.byKey(const ValueKey('calendar-panel-collapse')),
-        findsOneWidget,
+  group('모바일 — 목록 손잡이 하나로 크기 조절', () {
+    Future<void> dragHandle(WidgetTester tester, double dy) async {
+      await tester.drag(
+        find.byKey(const ValueKey('calendar-panel-handle')),
+        Offset(0, dy),
       );
+      await tester.pumpAndSettle();
+    }
 
-      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
+    testWidgets('손잡이를 누르면 목록이 접히고 하단 막대만 남는다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-handle')));
       await tester.pumpAndSettle();
 
-      // 목록 본문은 사라지고(‘이 날짜로 추가’ 가 그 증거) 펼치기 막대만 남는다.
       expect(find.byKey(const ValueKey('calendar-add-on-day')), findsNothing);
       expect(
         find.byKey(const ValueKey('calendar-panel-expand')),
         findsOneWidget,
       );
-      // 달력은 그대로 — 접기의 목적이 달력을 크게 보는 것이다.
       expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
     });
 
-    testWidgets('하단 막대를 누르면 다시 펼쳐진다', (tester) async {
+    testWidgets('아래로 끌면 달력 크게, 막대를 누르면 다시 분할', (tester) async {
       await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
-      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
-      await tester.pumpAndSettle();
+      await dragHandle(tester, 120);
+      expect(
+        find.byKey(const ValueKey('calendar-panel-expand')),
+        findsOneWidget,
+      );
 
       await tester.tap(find.byKey(const ValueKey('calendar-panel-expand')));
       await tester.pumpAndSettle();
-
       expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
-      expect(find.byKey(const ValueKey('calendar-panel-expand')), findsNothing);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+    });
+
+    testWidgets('위로 끌면 목록이 화면 전체, 다시 아래로 끌면 분할', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await dragHandle(tester, -120);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsNothing);
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
+
+      await dragHandle(tester, 120);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
     });
 
     testWidgets('접힌 막대에 선택일과 건수가 나온다', (tester) async {
@@ -359,43 +369,18 @@ void main() {
         tester,
         form: FormFactor.mobile,
         size: const Size(420, 900),
-        todos: [
-          Todo(
-            id: 'x',
-            title: '회의',
-            category: Category.work,
-            dueAt: DateTime(2026, 8, 15, 10),
-            doneAt: null,
-            createdAt: now,
-            updatedAt: now,
-            calendarEventId: null,
-          ),
-        ],
+        todos: [make(id: 'x', title: '회의', dueAt: DateTime(2026, 8, 15, 10))],
       );
-      await tester.tap(find.byKey(const ValueKey('calendar-panel-collapse')));
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-handle')));
       await tester.pumpAndSettle();
 
       expect(find.text('8월 15일 (토)'), findsOneWidget);
       expect(find.text('1건'), findsOneWidget);
     });
 
-    testWidgets('달력을 접은 상태에서는 목록 접기를 막는다 (둘 다 접히면 빈 화면)', (tester) async {
-      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
-      await tester.tap(find.byKey(const ValueKey('calendar-collapse-toggle')));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.byKey(const ValueKey('calendar-panel-collapse')),
-        findsNothing,
-      );
-    });
-
-    testWidgets('데스크탑 패널에는 접기 affordance 가 없다 (헤더 토글이 담당)', (tester) async {
+    testWidgets('데스크탑 패널에는 손잡이가 없다 (헤더 토글이 담당)', (tester) async {
       await mount(tester);
-      expect(
-        find.byKey(const ValueKey('calendar-panel-collapse')),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('calendar-panel-handle')), findsNothing);
     });
   });
 }

@@ -6,10 +6,7 @@ import '../../domain/category.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
-import '../move_todo/move_todo_sheet.dart';
-import '../todo_actions/todo_actions_controller.dart';
 import 'calendar_entry.dart';
 
 /// 엔트리를 **조작 가능한 실제 Todo** 로 바꾼다.
@@ -31,21 +28,6 @@ Future<Todo?> resolveEntryTodo(WidgetRef ref, CalendarEntry entry) async {
   if (instance == null) return null;
   await ref.read(todoRepositoryProvider).upsert(instance);
   return instance;
-}
-
-/// 캘린더에서 여는 편집 시트 — 전 앱 공통 관용구 그대로.
-/// 닫으면 저장이 규칙이므로 취소 개념을 넣지 않는다.
-void openCalendarEditSheet(BuildContext context, WidgetRef ref, Todo todo) {
-  AddTodoSheet.show(
-    context,
-    initialCategory: todo.category,
-    initialTodo: todo,
-    onSubmit: (_) {},
-    onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
-    onStatusChanged: (updated) =>
-        ref.read(todoActionsProvider).updatePreservingOrder(updated),
-    onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
-  );
 }
 
 /// "이 날짜로 추가" — [date] 가 이미 채워진 추가 시트를 연다.

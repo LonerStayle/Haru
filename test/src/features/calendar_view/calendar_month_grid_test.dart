@@ -191,11 +191,11 @@ void main() {
       expect(find.text('세금계산서'), findsOneWidget);
     });
 
-    testWidgets('상한 3개를 넘으면 "외 N건"', (tester) async {
+    testWidgets('상한 4개를 넘으면 "외 N건"', (tester) async {
       await mount(
         tester,
         entries: [
-          for (var i = 0; i < 5; i++)
+          for (var i = 0; i < 6; i++)
             TodoEntry(
               make(
                 id: 'e$i',
@@ -205,7 +205,7 @@ void main() {
             ),
         ],
       );
-      expect(find.byType(CalendarEntryChip), findsNWidgets(3));
+      expect(find.byType(CalendarEntryChip), findsNWidgets(4));
       expect(
         find.byKey(ValueKey('calendar-more-${calendarDateKey(today)}')),
         findsOneWidget,
@@ -225,7 +225,7 @@ void main() {
               doneAt: DateTime(2026, 8, 15, 20),
             ),
           ),
-          for (var i = 0; i < 3; i++)
+          for (var i = 0; i < 4; i++)
             TodoEntry(
               make(
                 id: 'u$i',

@@ -15,6 +15,8 @@ import '../features/auth/auth_providers.dart';
 import '../features/calendar/calendar_providers.dart';
 import '../features/category/categories_controller.dart';
 import '../features/category/groups_controller.dart';
+import '../features/calendar_view/calendar_providers.dart'
+    show calendarSelectionProvider;
 import '../features/calendar_view/calendar_screen.dart';
 import '../features/category/category_view.dart';
 import '../features/home/home_screen.dart';
@@ -304,9 +306,19 @@ class _AppShellState extends ConsumerState<AppShell> {
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
     );
 
+    // 캘린더 화면에서 누르면 거기서 고른 날짜가 기본값 — 날짜를 다시 고르는 단계를 없앤다.
+    final calendarDay = location.page == ShellPage.calendar
+        ? ref.read(calendarSelectionProvider).selectedDay
+        : null;
+
     _addSheetOpen = true;
     try {
-      await showNewTodoSheet(context, ref, initialCategory: initialCategory);
+      await showNewTodoSheet(
+        context,
+        ref,
+        initialCategory: initialCategory,
+        initialDueAt: calendarDay,
+      );
     } finally {
       _addSheetOpen = false;
     }

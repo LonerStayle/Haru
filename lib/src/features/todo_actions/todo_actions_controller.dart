@@ -167,6 +167,21 @@ class TodoActionsController {
     );
   }
 
+  /// 날짜 되돌리기 — [before] 의 일정(dueAt / endAt / 종일 / 시각 기준)만 **지금 저장된
+  /// 행**에 되돌려 쓴다. 캘린더 드래그의 되돌리기용. 그사이 고친 제목 등은 살린다.
+  Future<void> restoreSchedule(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(
+        dueAt: before.dueAt,
+        endAt: before.endAt,
+        isAllDay: before.isAllDay,
+        timeAnchor: before.timeAnchor,
+      ),
+    );
+  }
+
   /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.
   ///
   /// 순서·동기화 메타(sortOrder / updatedAt)는 비교에서 제외한다 — 판정의 목적이

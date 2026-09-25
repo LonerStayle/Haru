@@ -20,6 +20,8 @@ class CalendarMonthGrid extends StatelessWidget {
     required this.selectedDay,
     this.onSelectDay,
     this.onLongPressDay,
+    this.onSecondaryTapDay,
+    this.chipWrapper,
     this.dayCellBuilder,
   });
 
@@ -32,6 +34,8 @@ class CalendarMonthGrid extends StatelessWidget {
 
   final void Function(DateTime date)? onSelectDay;
   final void Function(DateTime date)? onLongPressDay;
+  final void Function(DateTime date, Offset globalPosition)? onSecondaryTapDay;
+  final Widget Function(CalendarEntry entry, Widget chip)? chipWrapper;
 
   /// 셀을 드롭 타깃으로 감싸기 위한 훅 — [CalendarWeekRow.dayCellBuilder] 참조.
   final Widget Function(DateTime date, CalendarDayCellBuilder build)?
@@ -63,6 +67,8 @@ class CalendarMonthGrid extends StatelessWidget {
                       selectedDay: selected0,
                       onSelectDay: onSelectDay,
                       onLongPressDay: onLongPressDay,
+                      onSecondaryTapDay: onSecondaryTapDay,
+                      chipWrapper: chipWrapper,
                       dayCellBuilder: dayCellBuilder,
                     ),
                   ),
