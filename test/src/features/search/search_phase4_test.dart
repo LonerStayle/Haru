@@ -214,7 +214,7 @@ void main() {
       final m = await mount(tester, todos: todos);
       await type(tester, '주간');
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(m.edited, ['2']);
@@ -251,6 +251,66 @@ void main() {
       expect(find.byKey(const ValueKey('search-recent-주간')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('search-recent-주간')));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('search-hit-2')), findsOneWidget);
+    });
+
+    testWidgets('카테고리로 좁혔다가 "모든 카테고리" 로 되돌린다', (tester) async {
+      await mount(
+        tester,
+        todos: [
+          ...todos,
+          make(id: '9', title: '회의 장소', category: Category.daily),
+        ],
+      );
+      await type(tester, '회의');
+      expect(find.text('4건'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('search-filter-category')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(Category.daily.label).last);
+      await tester.pumpAndSettle();
+      expect(find.text('1건'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('search-filter-category')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('search-filter-category-all')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('4건'), findsOneWidget);
+    });
+
+    testWidgets('오버레이 바깥을 누르면 닫힌다', (tester) async {
+      await mount(tester, todos: todos);
+      await tester.tapAt(const Offset(20, 880));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('search-overlay')), findsNothing);
+    });
+
+    testWidgets('오버레이 안의 되돌리기 스낵바는 오버레이 위에 뜬다', (tester) async {
+      await mount(tester, todos: todos);
+      await type(tester, '주간');
+      // 결과 줄이 찾는 스낵바 창구가 오버레이 안에 있다(배리어 아래 뒤 화면이 아니라).
+      ScaffoldMessenger.of(
+        tester.element(find.byKey(const ValueKey('search-hit-2'))),
+      ).showSnackBar(const SnackBar(content: Text('되돌리기 테스트')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(
+        find.descendant(
+          of: find.byType(SearchScreen),
+          matching: find.text('되돌리기 테스트'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('폰 키보드 "검색" 키는 결과를 멋대로 열지 않는다', (tester) async {
+      await mount(tester, todos: todos, form: FormFactor.mobile);
+      await type(tester, '주간');
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pumpAndSettle();
+      expect(find.byType(SearchScreen), findsOneWidget);
       expect(find.byKey(const ValueKey('search-hit-2')), findsOneWidget);
     });
 

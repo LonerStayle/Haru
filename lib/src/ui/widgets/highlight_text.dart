@@ -52,6 +52,9 @@ class HighlightText extends StatelessWidget {
     if (query.isEmpty) return const [];
     final lower = text.toLowerCase();
     final q = query.toLowerCase();
+    // 소문자로 바꾸며 길이가 달라지는 글자('İ' 등)가 있으면 위치가 어긋난다 — 강조를
+    // 포기한다(글자는 그대로 보인다).
+    if (lower.length != text.length) return const [];
     final out = <(int, int)>[];
     var from = 0;
     while (true) {

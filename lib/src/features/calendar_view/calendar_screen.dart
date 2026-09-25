@@ -109,7 +109,8 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   @override
   void dispose() {
     _edgeFlipTimer?.cancel();
-    _selection.selectedDay = null;
+    // 새 캘린더 화면이 이미 자기 값을 썼을 수 있다 — 내 값일 때만 지운다.
+    if (_selection.selectedDay == _selectedDay) _selection.selectedDay = null;
     _pager.dispose();
     super.dispose();
   }
@@ -144,7 +145,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   void _setSelected(DateTime date) {
     _selectedDay = dateOnly(date);
-    _selection.selectedDay = _selectedDay;
+    if (_segment == CalendarSegment.grid) _selection.selectedDay = _selectedDay;
   }
 
   void _selectDay(DateTime date) {
@@ -328,7 +329,13 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                 onPrev: () => _shiftMonth(-1),
                 onNext: () => _shiftMonth(1),
                 onToday: _goToToday,
-                onSegment: (s) => setState(() => _segment = s),
+                onSegment: (s) => setState(() {
+                  _segment = s;
+                  // 타임라인에서는 선택일이 안 보이니 ⌘N 기본 날짜로 쓰지 않는다.
+                  _selection.selectedDay = s == CalendarSegment.grid
+                      ? _selectedDay
+                      : null;
+                }),
                 panelCollapsed: panelCollapsed,
                 // 우측 패널은 데스크탑에만 있다 — 모바일은 아래위 분할이라 대상이 없다.
                 onTogglePanel: compact
@@ -391,9 +398,15 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
             if (showPanel) ...[
               _PanelResizer(
                 onDrag: (dx) => setState(
-                  () => _draggingPanelWidth = (width - dx)
-                      .clamp(_panelMinWidth, math.max(_panelMinWidth, maxWidth))
-                      .toDouble(),
+                  // 한 프레임에 이동이 여러 번 와도 빠짐없이 쌓는다(옛 build 폭 기준이면
+                  // 마지막 이동만 반영돼 경계가 커서보다 늦게 따라왔다).
+                  () => _draggingPanelWidth =
+                      ((_draggingPanelWidth ?? width) - dx)
+                          .clamp(
+                            _panelMinWidth,
+                            math.max(_panelMinWidth, maxWidth),
+                          )
+                          .toDouble(),
                 ),
                 onDragEnd: () {
                   final w = _draggingPanelWidth;
@@ -405,6 +418,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                       .replace({w.round().toString()});
                   setState(() => _draggingPanelWidth = null);
                 },
+                onDragCancel: () => setState(() => _draggingPanelWidth = null),
               ),
               SizedBox(width: width, child: _buildPanel()),
             ],
@@ -543,7 +557,7 @@ enum _DayMenuAction { add, today }
 /// 끄는 중 가장자리 감지 폭 — 격자 바깥 여백(12) 안쪽에 대부분 걸치게.
 const double _edgeFlipWidth = 18;
 
-/// 드래그 중 달력 가장자리 — 위에 머물면 달을 넘긴다. 떨어뜨려도 아무 일 없다.
+/// 드래그 중 달력 가장자리 — 위에 머물면 달을 넘긴다. 드롭은 아래 칸이 받는다.
 ///
 /// 드래그가 없을 땐 빈 영역이라 아래 칸의 클릭을 막지 않는다.
 class _EdgeFlipTarget extends StatelessWidget {
@@ -558,14 +572,15 @@ class _EdgeFlipTarget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 드롭은 **거절**한다 — 이 띠는 가장자리 칸(일·토) 위에 조금 걸쳐 있어서, 받아 버리면
+    // 거기 놓은 항목이 날짜는 그대로인 채 달만 넘어갔다. 거절하면 아래 칸이 받는다.
     return DragTarget<CalendarDragData>(
       onWillAcceptWithDetails: (_) {
         onEnter();
-        return true;
+        return false;
       },
       onLeave: (_) => onLeave(),
-      onAcceptWithDetails: (_) => onLeave(),
-      builder: (context, candidate, _) => candidate.isEmpty
+      builder: (context, _, rejected) => rejected.isEmpty
           ? const SizedBox.expand()
           : DecoratedBox(
               decoration: BoxDecoration(
@@ -580,11 +595,16 @@ class _EdgeFlipTarget extends StatelessWidget {
 
 /// 데스크탑 격자와 패널 사이 — 끌어서 패널 폭을 바꾼다(저장됨).
 class _PanelResizer extends StatelessWidget {
-  const _PanelResizer({required this.onDrag, required this.onDragEnd});
+  const _PanelResizer({
+    required this.onDrag,
+    required this.onDragEnd,
+    required this.onDragCancel,
+  });
 
   /// 가로 이동량(오른쪽 +). 패널은 오른쪽에 있으니 호출측이 빼서 쓴다.
   final void Function(double dx) onDrag;
   final VoidCallback onDragEnd;
+  final VoidCallback onDragCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -595,6 +615,7 @@ class _PanelResizer extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
         onHorizontalDragEnd: (_) => onDragEnd(),
+        onHorizontalDragCancel: onDragCancel,
         child: const SizedBox(
           width: 7,
           child: Center(
@@ -643,6 +664,9 @@ class _PanelHandleState extends State<_PanelHandle> {
     return Semantics(
       button: true,
       label: '목록 크기 바꾸기',
+      // 화면낭독기는 끌 수 없으니 늘리기/줄이기 동작으로 같은 전환을 준다.
+      onIncrease: widget.onDragUp,
+      onDecrease: widget.onDragDown,
       child: GestureDetector(
         key: const ValueKey('calendar-panel-handle'),
         behavior: HitTestBehavior.opaque,

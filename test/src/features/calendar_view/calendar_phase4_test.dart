@@ -140,6 +140,16 @@ void main() {
       ),
     );
     expect(tooltip.message, '분기 결산 보고 · 14:30');
+
+    // 마우스를 올리면 실제로 뜬다.
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('calendar-chip-todo:a'))),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('분기 결산 보고 · 14:30'), findsOneWidget);
   });
 
   group('격자 칩 드래그', () {
@@ -165,6 +175,38 @@ void main() {
       await tester.tap(find.text('되돌리기'));
       await settle(tester);
       expect((await db.todosDao.getById('a'))!.dueAt, DateTime(2026, 8, 15));
+    });
+
+    testWidgets('가장자리 칸(토요일)에 놓아도 달 넘김 띠가 드롭을 삼키지 않는다', (tester) async {
+      await mount(
+        tester,
+        seed: [make(id: 'a', title: '세금계산서', dueAt: DateTime(2026, 8, 15))],
+      );
+      // 8/22(토) 칸의 오른쪽 끝 — 달 넘김 띠가 걸쳐 있는 자리.
+      final target = tester.getTopRight(cell(DateTime(2026, 8, 22)));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('calendar-chip-todo:a'))),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(0, 20));
+      await tester.pump();
+      await gesture.moveTo(target + const Offset(-3, 30));
+      await tester.pump(const Duration(milliseconds: 100));
+      await gesture.up();
+      await settle(tester);
+      expect((await db.todosDao.getById('a'))!.dueAt, DateTime(2026, 8, 22));
+    });
+
+    testWidgets('데스크탑 칩 위 길게 누르기도 칸의 "이 날짜로 추가" 로 간다', (tester) async {
+      await mount(
+        tester,
+        seed: [make(id: 'a', title: '세금계산서', dueAt: DateTime(2026, 8, 20))],
+      );
+      await tester.longPress(
+        find.byKey(const ValueKey('calendar-chip-todo:a')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(AddTodoSheet), findsOneWidget);
     });
 
     testWidgets('칩을 그냥 클릭하면 드래그가 아니라 그 날 선택', (tester) async {
@@ -341,6 +383,16 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('timeline-bucket-later')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('timeline-tile-far')), findsOneWidget);
+    });
+
+    testWidgets('타임라인을 보는 동안은 선택일을 ⌘N 기본값으로 넘기지 않는다', (tester) async {
+      await mount(tester);
+      await tester.tap(find.byKey(const ValueKey('calendar-segment-list')));
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(CalendarScreen)),
+      );
+      expect(container.read(calendarSelectionProvider).selectedDay, isNull);
     });
   });
 }

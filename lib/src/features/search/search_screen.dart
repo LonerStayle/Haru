@@ -74,6 +74,9 @@ class SearchScreen extends ConsumerStatefulWidget {
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
+/// 카테고리 필터 "모든 카테고리" 센티널.
+const String _allCategories = '__all__';
+
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _fieldFocus = FocusNode();
@@ -109,20 +112,32 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _fieldFocus.requestFocus();
   }
 
-  /// 마지막 build 의 결과 — 키 입력(↑↓·↩) 처리가 쓴다(빌드 밖에서 watch 금지).
+  /// 마지막 build 의 결과 — 결과 수 표시가 쓴다.
   List<TodoSearchHit> _lastHits = const [];
 
-  List<TodoSearchHit> _hits() => _lastHits;
+  /// 키 입력(↑↓·↩) 처리용 — 지금 검색어로 **새로** 계산한다. 붙여넣기·한글 조합
+  /// 확정과 Enter 가 같은 프레임에 오면 지난 build 의 결과는 옛 검색어 것이다.
+  List<TodoSearchHit> _hits() {
+    final all = ref.read(allTodosProvider).asData?.value;
+    return all == null ? const [] : _search(all, watch: false);
+  }
 
-  /// build 안에서만 부른다 (watch).
-  List<TodoSearchHit> _search(List<Todo> all) {
+  /// [watch] 는 build 안에서만 true (build 밖 watch 금지).
+  List<TodoSearchHit> _search(List<Todo> all, {bool watch = true}) {
     final groups =
-        ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
+        (watch
+                ? ref.watch(activeGroupsProvider)
+                : ref.read(activeGroupsProvider))
+            .asData
+            ?.value ??
+        const <Group>[];
     return searchTodos(
       all: all,
       query: _query,
       // 보관된 카테고리의 항목은 다른 화면과 마찬가지로 검색에서도 빠진다.
-      excludedCategoryIds: ref.watch(archivedCategoryIdsProvider),
+      excludedCategoryIds: watch
+          ? ref.watch(archivedCategoryIdsProvider)
+          : ref.read(archivedCategoryIdsProvider),
       includeDone: _includeDone,
       notesOnly: _notesOnly,
       categoryId: _categoryId,
@@ -172,14 +187,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
   }
 
-  void _submit() {
+  /// ↩ — 오버레이는 고른 결과를 연다. 폰 키보드의 "검색" 키는 검색어만 기록하고
+  /// 키보드를 내린다(결과를 멋대로 열지 않는다).
+  void _submit({bool edit = false}) {
     final hits = _hits();
-    if (hits.isEmpty) {
+    if (hits.isNotEmpty) {
       ref.read(recentSearchesProvider.notifier).record(_query);
+    }
+    if (!widget.overlay || hits.isEmpty) {
+      _fieldFocus.unfocus();
       return;
     }
     final i = _selected.clamp(0, hits.length - 1);
-    _open(hits[i].todo, edit: HardwareKeyboard.instance.isMetaPressed);
+    _open(hits[i].todo, edit: edit || HardwareKeyboard.instance.isMetaPressed);
   }
 
   /// 입력칸의 ↑↓ — 커서 이동 대신 결과 고르기.
@@ -193,6 +213,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     }
     if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
       _moveSelection(-1);
+      return KeyEventResult.handled;
+    }
+    // ⌘↩ 는 여기서 직접 — 입력칸의 onSubmitted 를 거치지 않을 수 있다(macOS).
+    // 그냥 ↩ 는 한글 조합 확정과 얽히지 않게 onSubmitted 에 맡긴다.
+    if (widget.overlay &&
+        event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        HardwareKeyboard.instance.isMetaPressed) {
+      _submit(edit: true);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -227,7 +257,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             },
           ),
         },
-        child: widget.overlay ? _overlay(context, body) : _page(context, body),
+        child: widget.overlay
+            // 오버레이 안에서 체크·삭제하면 되돌리기 스낵바가 배리어 **아래**(뒤 화면)에
+            // 떠서 누를 수 없었다 — 오버레이 자신의 스낵바 자리를 둔다.
+            ? ScaffoldMessenger(
+                child: Scaffold(
+                  backgroundColor: Colors.transparent,
+                  body: _overlay(context, body),
+                ),
+              )
+            : _page(context, body),
       ),
     );
   }
@@ -285,6 +324,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   Widget _overlay(BuildContext context, Widget body) {
+    // 카드 바깥을 누르면 닫힌다 — 오버레이 스낵바 자리(Scaffold)가 배리어를 가리므로
+    // 바깥 탭을 여기서 직접 받는다.
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(
+            key: const ValueKey('search-overlay-outside'),
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
+          ),
+        ),
+        _overlayCard(context, body),
+      ],
+    );
+  }
+
+  Widget _overlayCard(BuildContext context, Widget body) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final size = MediaQuery.sizeOf(context);
@@ -360,7 +416,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final selectedCategory = _categoryId == null
         ? null
         : categories.where((c) => c.id == _categoryId).firstOrNull;
-    final count = _query.trim().isEmpty ? null : _hits().length;
+    final loaded = ref.watch(allTodosProvider).hasValue;
+    final count = _query.trim().isEmpty || !loaded ? null : _lastHits.length;
     final mobile = AppPlatform.isMobile;
 
     return Padding(
@@ -405,21 +462,24 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     }),
                   ),
                   const SizedBox(width: AppTokens.space8),
-                  PopupMenuButton<String?>(
+                  // 값 null 인 항목을 고르면 Flutter 는 onSelected 대신 onCanceled 를
+                  // 부른다 — "모든 카테고리" 는 센티널 값으로 둔다.
+                  PopupMenuButton<String>(
                     key: const ValueKey('search-filter-category'),
                     tooltip: '카테고리로 좁히기',
-                    initialValue: _categoryId,
+                    initialValue: _categoryId ?? _allCategories,
                     onSelected: (id) => setState(() {
-                      _categoryId = id;
+                      _categoryId = id == _allCategories ? null : id;
                       _selected = 0;
                     }),
                     itemBuilder: (context) => [
-                      const PopupMenuItem<String?>(
-                        value: null,
+                      const PopupMenuItem<String>(
+                        key: ValueKey('search-filter-category-all'),
+                        value: _allCategories,
                         child: Text('모든 카테고리'),
                       ),
                       for (final c in categories)
-                        PopupMenuItem<String?>(
+                        PopupMenuItem<String>(
                           value: c.id,
                           child: Row(
                             children: [

@@ -390,6 +390,52 @@ void main() {
     expect(row.sortOrder, 4);
   });
 
+  group('restoreSchedule — 캘린더 드래그 되돌리기 (Phase 4)', () {
+    test('날짜 없던 항목을 되돌리면 다시 날짜 없음, 제목 편집·순서는 보존', () async {
+      final before = seed().copyWith(sortOrder: 7);
+      await repo.upsert(before);
+      await controller.updatePreservingOrder(
+        before.copyWith(dueAt: DateTime(2026, 8, 20), isAllDay: true),
+      );
+      final moved = (await repo.getById('a'))!;
+      await repo.upsert(moved.copyWith(title: '회의 (수정)'));
+
+      await controller.restoreSchedule(before);
+
+      final row = (await repo.getById('a'))!;
+      expect(row.dueAt, isNull);
+      expect(row.title, '회의 (수정)');
+      expect(row.sortOrder, 7);
+    });
+
+    test('기간·시각 항목은 원래 시작·끝·종일 여부로', () async {
+      final before = seed().copyWith(
+        dueAt: DateTime(2026, 8, 10, 9),
+        endAt: DateTime(2026, 8, 12, 18),
+        isAllDay: false,
+      );
+      await repo.upsert(before);
+      await controller.updatePreservingOrder(
+        before.copyWith(
+          dueAt: DateTime(2026, 8, 17, 9),
+          endAt: DateTime(2026, 8, 19, 18),
+        ),
+      );
+
+      await controller.restoreSchedule(before);
+
+      final row = (await repo.getById('a'))!;
+      expect(row.dueAt, DateTime(2026, 8, 10, 9));
+      expect(row.endAt, DateTime(2026, 8, 12, 18));
+      expect(row.isAllDay, isFalse);
+    });
+
+    test('그사이 지워졌으면 아무것도 되살리지 않는다', () async {
+      await controller.restoreSchedule(seed());
+      expect(await repo.getById('a'), isNull);
+    });
+  });
+
   group('deleteTree — 하위 포함 삭제 (Phase 2)', () {
     Todo node(String id, {String? parentId}) => Todo(
       id: id,

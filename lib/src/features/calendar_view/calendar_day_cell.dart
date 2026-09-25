@@ -336,6 +336,9 @@ class _ChipColumn extends StatelessWidget {
     final withTip = Tooltip(
       message: tip,
       waitDuration: const Duration(milliseconds: 400),
+      // 마우스를 올릴 때만 — 길게 누르기를 툴팁이 가져가면 칸의 "이 날짜로 추가" 가
+      // 막힌다.
+      triggerMode: TooltipTriggerMode.manual,
       child: chip,
     );
     return chipWrapper?.call(e, withTip) ?? withTip;

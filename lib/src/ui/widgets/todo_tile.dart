@@ -586,8 +586,8 @@ class _TodoTileState extends State<TodoTile> {
     // 데스크탑 인스펙터에 열려 있는 항목은 테두리로 표시 — 오른쪽 패널이 어느 줄을
     // 보고 있는지 목록에서 바로 찾게.
     final inspector = InspectorScope.maybeOf(context);
+    // key 는 바꾸지 않는다 — 바꾸면 안쪽이 통째로 새로 만들어져 hover·물결 상태가 사라진다.
     Widget card({required bool selected, required Widget child}) => Card(
-      key: selected ? ValueKey('todo-tile-inspected-${todo.id}') : null,
       // note 는 카테고리색 틴트 배경(헤딩=진한 틴트 / leaf=연한 틴트).
       color: isNoteHeading
           ? NoteVisual.headingTint(todo.category, theme.brightness)
@@ -619,10 +619,14 @@ class _TodoTileState extends State<TodoTile> {
         ? card(selected: false, child: inkwell)
         : ListenableBuilder(
             listenable: inspector,
-            builder: (context, child) => card(
-              selected: inspector.stack.any((t) => t.id == todo.id),
-              child: child!,
-            ),
+            builder: (context, child) {
+              // 목록에서 연 항목 하나만(패널 안에서 하위로 들어가도 부모 줄 유지).
+              final selected = inspector.stack.firstOrNull?.id == todo.id;
+              return Semantics(
+                selected: selected,
+                child: card(selected: selected, child: child!),
+              );
+            },
             child: inkwell,
           );
 
