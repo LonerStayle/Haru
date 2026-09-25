@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/core/theme.dart';
+import 'package:solo_todo/src/core/ui_prefs.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
@@ -15,6 +16,7 @@ import 'package:solo_todo/src/features/home/today_providers.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/ui/app_shell.dart';
 
+import 'package:solo_todo/src/features/add_todo/add_todo_sheet.dart';
 import 'package:solo_todo/src/ui/shell_state.dart';
 
 /// 숫자 단축키 = 사이드바에 보이는 순서 (2026-09-25 대표님 제보: Bxg 가 맨 위인데 9번).
@@ -80,6 +82,7 @@ void main() {
           groupsProvider.overrideWith(
             (_) => Stream.value(const [project, company]),
           ),
+          uiPrefsStoreProvider.overrideWithValue(MemoryUiPrefsStore()),
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -114,5 +117,24 @@ void main() {
       final loc = container.read(shellLocationProvider);
       expect(loc.categoryId, cats.firstWhere((c) => c.label == e.value).id);
     }
+  });
+
+  testWidgets('마지막으로 연 카테고리 화면 → 오늘로 와서 ⌘N 해도 그 카테고리 (2026-09-25)', (
+    tester,
+  ) async {
+    await pump(tester);
+    await press(tester, LogicalKeyboardKey.digit5); // JS슈퍼
+    await press(tester, LogicalKeyboardKey.digit0); // 오늘
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(AddTodoSheet),
+        matching: find.text('JS슈퍼'),
+      ),
+      findsOneWidget,
+    );
   });
 }

@@ -468,6 +468,14 @@ class _AppShellState extends ConsumerState<AppShell> {
     // ⌘N 기본값(마지막에 쓴 카테고리)을 앱 시작 때 미리 복원해 둔다 — 값이 바뀌어도
     // 셸을 다시 그릴 필요는 없어 listen 으로 살려 두기만 한다.
     ref.listen(lastUsedCategoryProvider, (_, _) {});
+    // "마지막에 쓴" = 새 할 일을 추가한 카테고리 + 마지막으로 연 카테고리 화면(대표님 결정,
+    // 2026-09-25). Bxg 를 보다가 오늘로 와서 ⌘N 해도 Bxg 로 열린다.
+    ref.listen(shellLocationProvider, (_, next) {
+      final id = next.categoryId;
+      if (next.page == ShellPage.category && id != null) {
+        ref.read(lastUsedCategoryProvider.notifier).record(id);
+      }
+    });
     final categoriesAsync = ref.watch(activeCategoriesProvider);
     final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
 

@@ -80,7 +80,8 @@ List<Category> categoriesInSidebarOrder(
   ];
 }
 
-/// 새 할 일을 마지막으로 넣은 카테고리 id — 다음 ⌘N 의 기본값. 기기별 로컬 설정.
+/// 마지막에 쓴 카테고리 id — 새 할 일을 넣었거나 마지막으로 연 카테고리 화면. 다음 ⌘N 의
+/// 기본값. 기기별 로컬 설정.
 ///
 /// 앱 시작 직후 비동기로 복원된다. 복원 전에 새로 기록되면 그 값이 이긴다.
 class LastUsedCategoryNotifier extends Notifier<String?> {
