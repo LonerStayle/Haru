@@ -205,11 +205,24 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
     });
   }
 
+  /// 전환 중 — 더블클릭으로 하위가 두 벌 생기지 않게.
+  bool _converting = false;
+
   /// 설명 속 목록을 하위 항목으로 옮긴다 — 되돌리기 스낵바(⌘Z)로 원래대로.
   Future<void> _checklistToChildren(
     Todo live,
     DescriptionChecklist checklist,
   ) async {
+    if (_converting) return;
+    _converting = true;
+    try {
+      await _convert(live, checklist);
+    } finally {
+      _converting = false;
+    }
+  }
+
+  Future<void> _convert(Todo live, DescriptionChecklist checklist) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final actions = ref.read(todoActionsProvider);
     final result = await actions.checklistToChildren(
@@ -834,7 +847,6 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-/// "하위 항목 N" 머리 — 정렬(전역 설정) + 하위 추가.
 /// "설명에 목록 N개가 있어요 → 하위 항목으로" 제안 줄. 누르기 전엔 아무것도 바꾸지 않는다.
 class _ChecklistSuggestion extends StatelessWidget {
   const _ChecklistSuggestion({
@@ -883,6 +895,7 @@ class _ChecklistSuggestion extends StatelessWidget {
   }
 }
 
+/// "하위 항목 N" 머리 — 정렬(전역 설정) + 하위 추가.
 class _ChildrenHeader extends StatelessWidget {
   const _ChildrenHeader({
     required this.count,

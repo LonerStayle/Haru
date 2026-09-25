@@ -70,4 +70,13 @@ void main() {
     expect(DescriptionChecklist.stripListLine('평범한 줄'), '평범한 줄');
     expect(DescriptionChecklist.stripListLine('2026년 계획'), '2026년 계획');
   });
+
+  test('오탐 회귀 — __init__ 은 그대로, 구분선은 항목이 아니다', () {
+    expect(
+      DescriptionChecklist.stripListLine('- __init__.py 정리'),
+      '__init__.py 정리',
+    );
+    final r = DescriptionChecklist.parse('- 하나\n* * *\n- 둘');
+    expect(r.items.map((i) => i.title), ['하나', '둘']);
+  });
 }

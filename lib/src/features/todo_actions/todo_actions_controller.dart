@@ -371,12 +371,35 @@ class TodoActionsController {
     return (created: created, parentBefore: parent);
   }
 
-  /// [checklistToChildren] 되돌리기 — 만든 하위를 지우고 부모 설명을 되살린다.
+  /// [checklistToChildren] 되돌리기 — 만든 하위를 지우고 부모 **설명만** 되살린다.
+  /// 그사이 제목·상태를 고쳤으면 그 편집은 살린다([restoreStatus] 와 같은 관례).
   Future<void> undoChecklist(List<Todo> created, Todo parentBefore) async {
     for (final c in created) {
       await _repo.deleteById(c.id);
     }
-    await updatePreservingOrder(parentBefore);
+    final current = await _repo.getById(parentBefore.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(description: parentBefore.description),
+    );
+  }
+
+  /// 날짜 되돌리기 — [before] 의 날짜 필드만 **지금 저장된 행**에 되돌려 쓴다.
+  ///
+  /// 스냅샷을 통째로 upsert 하면 예전 updatedAt 이 써져 다른 기기의 LWW 에서 무시되고,
+  /// 그사이 붙은 캘린더 링크(calendarEventId)도 지워져 일정이 고아가 된다. 여기서는
+  /// updatedAt 을 새로 찍고 링크를 보존하므로, 날짜가 빠지면 저장소가 일정 삭제를 큐잉한다.
+  Future<void> restoreDates(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(
+        dueAt: before.dueAt,
+        endAt: before.endAt,
+        isAllDay: before.isAllDay,
+        timeAnchor: before.timeAnchor,
+      ),
+    );
   }
 }
 

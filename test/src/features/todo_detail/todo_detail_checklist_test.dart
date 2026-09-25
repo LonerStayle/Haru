@@ -142,4 +142,31 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('더블클릭해도 하위는 한 벌만 생긴다', (tester) async {
+    final p = make('p', description: '- 하나\n- 둘');
+    await repo.upsert(p);
+    await mount(tester, p, [p]);
+    final button = find.byKey(const ValueKey('detail-checklist-convert'));
+    await tester.tap(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect((await childrenInDb('p')).map((k) => k.title), ['하나', '둘']);
+  });
+
+  testWidgets('되돌리기는 설명만 되살리고 그사이 고친 제목은 둔다', (tester) async {
+    final p = make('p', description: '- 하나\n- 둘');
+    await repo.upsert(p);
+    await mount(tester, p, [p]);
+    await tester.tap(find.byKey(const ValueKey('detail-checklist-convert')));
+    await tester.pumpAndSettle();
+    final current = (await repo.getById('p'))!;
+    await repo.upsert(current.copyWith(title: '고친 제목'));
+
+    await tester.tap(find.text('되돌리기'));
+    await tester.pumpAndSettle();
+    final back = (await repo.getById('p'))!;
+    expect(back.title, '고친 제목');
+    expect(back.description, '- 하나\n- 둘');
+  });
 }

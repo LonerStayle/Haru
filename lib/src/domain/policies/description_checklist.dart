@@ -34,7 +34,8 @@ class DescriptionChecklist {
       if (_bullet.hasMatch(line) || _checkbox.hasMatch(line)) {
         final m = _marker.firstMatch(line)!;
         final title = cleanTitle(line.substring(m.end));
-        if (title.isEmpty) continue;
+        // 기호만 남은 줄("* * *" 같은 구분선)은 항목이 아니다.
+        if (!_content.hasMatch(title)) continue;
         final box = m.group(1);
         items.add(ChecklistItem(title, done: box == 'x' || box == 'X'));
       } else {
@@ -63,12 +64,14 @@ class DescriptionChecklist {
     );
   }
 
-  static final _bold = RegExp(r'(\*\*|__)(.+?)\1');
+  static final _content = RegExp(r'[\p{L}\p{N}]', unicode: true);
+  // `__굵게__` 는 벗기지 않는다 — `__init__.py` 같은 개발 용어를 망가뜨린다.
+  static final _bold = RegExp(r'\*\*(.+?)\*\*');
   static final _code = RegExp(r'`([^`]+)`');
 
-  /// 제목에 남은 마크다운 강조 기호(`**굵게**`, `__굵게__`, `` `코드` ``)를 벗긴다.
+  /// 제목에 남은 마크다운 강조 기호(`**굵게**`, `` `코드` ``)를 벗긴다.
   static String cleanTitle(String raw) => raw
-      .replaceAllMapped(_bold, (m) => m.group(2)!)
+      .replaceAllMapped(_bold, (m) => m.group(1)!)
       .replaceAllMapped(_code, (m) => m.group(1)!)
       .trim();
 

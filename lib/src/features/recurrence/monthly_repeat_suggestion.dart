@@ -8,13 +8,25 @@ import '../../domain/policies/monthly_repeat_policy.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/todo.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../category/categories_controller.dart';
 import '../outline/tree_providers.dart';
 
 /// 할 일 id → "매월 반복으로 만들기" 제안 ([MonthlyRepeatPolicy]).
 final monthlyRepeatSuggestionsProvider =
     Provider<Map<String, MonthlyRepeatSuggestion>>((ref) {
       final all = ref.watch(allTodosProvider).asData?.value ?? const <Todo>[];
-      return MonthlyRepeatPolicy.detect(all);
+      final found = MonthlyRepeatPolicy.detect(all);
+      // 대부분은 여기서 끝난다 — 카테고리 목록은 제안 거리가 있을 때만 본다.
+      if (found.isEmpty) return found;
+      final active = ref.watch(activeCategoriesProvider).asData?.value;
+      if (active == null) return const {};
+      // 보관된 카테고리의 항목엔 제안하지 않는다 — 반복이 다른 카테고리에 생긴다.
+      final ids = {for (final c in active) c.id};
+      return {
+        for (final t in all)
+          if (found[t.id] != null && ids.contains(t.category.id))
+            t.id: found[t.id]!,
+      };
     });
 
 /// "그만 보기" 한 묶음 키 — 기기별.

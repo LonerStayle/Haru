@@ -7,6 +7,7 @@ import '../../domain/policies/stale_backlog_policy.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/undo_snackbar.dart';
+import '../calendar/calendar_providers.dart';
 import '../calendar_view/calendar_drag.dart';
 import '../category/categories_controller.dart';
 import '../outline/tree_providers.dart';
@@ -54,25 +55,39 @@ class _StaleBacklogScreenState extends ConsumerState<StaleBacklogScreen> {
     for (final t in picked) {
       await actions.toggle(t);
     }
-    setState(_selected.clear);
+    if (mounted) setState(_selected.clear);
     showUndoSnackbarOn(
       messenger,
       message: '${picked.length}개를 완료했어요.',
-      onUndo: () => actions.restoreAll(picked),
+      onUndo: () async {
+        for (final t in picked) {
+          await actions.restoreStatus(t);
+        }
+      },
     );
   }
 
   Future<void> _schedule(List<Todo> picked, DateTime day, String label) async {
     final messenger = ScaffoldMessenger.of(context);
     final actions = ref.read(todoActionsProvider);
+    final intend = ref.read(calendarIntentProvider);
     for (final t in picked) {
-      await actions.updatePreservingOrder(applyDateDrop(t, day));
+      final moved = applyDateDrop(t, day);
+      if (moved == t) continue;
+      // 한꺼번에 날짜를 붙이는 정리 동작이다 — 새로 날짜가 생긴 항목을 Google
+      // Calendar 에 N개씩 등록하지 않는다(이미 연결된 항목은 평소처럼 일정도 옮긴다).
+      if (t.calendarEventId == null) intend(false);
+      await actions.updatePreservingOrder(moved);
     }
-    setState(_selected.clear);
+    if (mounted) setState(_selected.clear);
     showUndoSnackbarOn(
       messenger,
       message: '${picked.length}개를 $label(으)로 옮겼어요.',
-      onUndo: () => actions.restoreAll(picked),
+      onUndo: () async {
+        for (final t in picked) {
+          await actions.restoreDates(t);
+        }
+      },
     );
   }
 
@@ -105,7 +120,7 @@ class _StaleBacklogScreenState extends ConsumerState<StaleBacklogScreen> {
     for (final t in picked) {
       snapshot.addAll(await actions.deleteTree(t, all: all));
     }
-    setState(_selected.clear);
+    if (mounted) setState(_selected.clear);
     showUndoSnackbarOn(
       messenger,
       message: '${picked.length}개를 삭제했어요.',
@@ -131,8 +146,12 @@ class _StaleBacklogScreenState extends ConsumerState<StaleBacklogScreen> {
     }
 
     final today = DateTime(now.year, now.month, now.day);
-    // 다음 주 월요일.
-    final nextMonday = today.add(Duration(days: 8 - today.weekday));
+    // 다음 주 월요일 — Duration 덧셈은 서머타임 경계에서 날짜가 밀릴 수 있어 달력 연산.
+    final nextMonday = DateTime(
+      today.year,
+      today.month,
+      today.day + 8 - today.weekday,
+    );
 
     return Scaffold(
       appBar: AppBar(

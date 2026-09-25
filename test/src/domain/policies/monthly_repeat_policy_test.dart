@@ -134,4 +134,18 @@ void main() {
     expect(r.dayOfMonth, 21);
     expect(r.latestDate, DateTime(2026, 10, 21));
   });
+
+  test('오탐 회귀 — 월간·월요일·N년 기간은 월/연 표시가 아니다', () {
+    expect(MonthlyRepeatPolicy.baseTitle('TOP 10 월간 지표'), 'TOP 10 월간 지표');
+    expect(MonthlyRepeatPolicy.baseTitle('3 월요일 회의'), '3 월요일 회의');
+    expect(MonthlyRepeatPolicy.baseTitle('10년 만기 적금'), '10년 만기 적금');
+    expect(MonthlyRepeatPolicy.baseTitle('2026년도 계획'), '2026년도 계획');
+    expect(MonthlyRepeatPolicy.baseTitle('카드값 9월 결제'), '카드값 결제');
+    final monthly = [
+      t('a', '월간 보고 5월', DateTime(2026, 5, 1)),
+      t('b', '월간 보고 6월', DateTime(2026, 6, 1)),
+      t('c', '월간 보고 7월', DateTime(2026, 7, 1)),
+    ];
+    expect(MonthlyRepeatPolicy.detect(monthly)['a']!.title, '월간 보고');
+  });
 }

@@ -82,6 +82,7 @@ class LastUsedCategoryNotifier extends Notifier<String?> {
   static const key = 'add.lastCategory';
 
   bool _recorded = false;
+  bool _disposed = false;
 
   /// 복원이 끝나는 Future — 테스트 대기용.
   late Future<void> restored;
@@ -89,6 +90,8 @@ class LastUsedCategoryNotifier extends Notifier<String?> {
   @override
   String? build() {
     _recorded = false;
+    _disposed = false;
+    ref.onDispose(() => _disposed = true);
     restored = _restore();
     return null;
   }
@@ -96,7 +99,7 @@ class LastUsedCategoryNotifier extends Notifier<String?> {
   Future<void> _restore() async {
     try {
       final ids = await ref.read(uiPrefsStoreProvider).loadIds(key);
-      if (!_recorded && ids.isNotEmpty) state = ids.first;
+      if (!_disposed && !_recorded && ids.isNotEmpty) state = ids.first;
     } catch (_) {
       // 복원 실패 — 사이드바 첫 카테고리로 시작한다.
     }

@@ -15,8 +15,10 @@ class MonthlyRepeatPolicy {
 
   static const minMonths = 3;
 
-  static final _monthToken = RegExp(r'(\d{1,2})\s*월\s*(분)?');
-  static final _yearToken = RegExp(r'\d{2,4}\s*년');
+  // "9월", "9월분", "9 월" — 뒤에 다른 한글이 붙은 "10 월간", "3 월요일" 은 아니다.
+  static final _monthToken = RegExp(r'(?<!\d)(\d{1,2})\s*월(?:\s*분|(?![가-힣]))');
+  // 네 자리 연도만 — "10년 만기" 는 기간이다. "2026년도" 도 건드리지 않는다.
+  static final _yearToken = RegExp(r'(?<!\d)\d{4}\s*년(?![가-힣])');
   static final _slashDate = RegExp(r'\d{1,2}/\d{1,2}');
   static final _spaces = RegExp(r'\s+');
   static final _letter = RegExp(r'[가-힣A-Za-z]');
