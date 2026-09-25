@@ -8,6 +8,11 @@ abstract interface class UiPrefsStore {
   Future<Set<String>> loadIds(String key);
 
   Future<void> saveIds(String key, Set<String> ids);
+
+  /// 순서가 있는 문자열 목록 (최근 검색어 등). 저장한 순서 그대로 돌아온다.
+  Future<List<String>> loadList(String key);
+
+  Future<void> saveList(String key, List<String> values);
 }
 
 /// shared_preferences 기반 기본 구현. 키는 `ui.<key>` 로 저장된다.
@@ -25,6 +30,18 @@ class SharedPrefsUiPrefsStore implements UiPrefsStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('ui.$key', ids.toList()..sort());
   }
+
+  @override
+  Future<List<String>> loadList(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('ui.list.$key') ?? const <String>[];
+  }
+
+  @override
+  Future<void> saveList(String key, List<String> values) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('ui.list.$key', values);
+  }
 }
 
 /// 인메모리 구현 — 테스트용 (앱 재시작 시뮬레이션은 같은 인스턴스를 다시 주입).
@@ -37,6 +54,15 @@ class MemoryUiPrefsStore implements UiPrefsStore {
   @override
   Future<void> saveIds(String key, Set<String> ids) async =>
       data[key] = {...ids};
+
+  final Map<String, List<String>> lists = {};
+
+  @override
+  Future<List<String>> loadList(String key) async => [...?lists[key]];
+
+  @override
+  Future<void> saveList(String key, List<String> values) async =>
+      lists[key] = [...values];
 }
 
 final uiPrefsStoreProvider = Provider<UiPrefsStore>(

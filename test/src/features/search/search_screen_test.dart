@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/ui_prefs.dart';
 import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
+import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/features/search/search_screen.dart';
 
@@ -43,6 +46,11 @@ void main() {
         overrides: [
           allTodosProvider.overrideWith((_) => Stream.value(todos)),
           archivedCategoryIdsProvider.overrideWithValue(archivedCategoryIds),
+          categoriesProvider.overrideWith(
+            (_) => Stream.value(Category.builtinSeeds),
+          ),
+          groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
+          uiPrefsStoreProvider.overrideWithValue(MemoryUiPrefsStore()),
         ],
         child: const MaterialApp(home: SearchScreen()),
       ),

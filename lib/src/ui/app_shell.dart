@@ -26,6 +26,7 @@ import '../features/category/category_actions.dart';
 import '../core/ui_prefs.dart';
 import '../features/outline/outline_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/todo_actions/todo_row_actions.dart';
 import '../features/settings/archive_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
@@ -262,10 +263,32 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (idx >= 0) _select(idx);
   }
 
-  /// 전역 검색 화면 열기 — 사이드바/앱바 버튼과 Cmd+F 가 공유하는 단일 진입점.
-  void _openSearch() {
-    if (!mounted) return;
-    SearchScreen.show(context);
+  /// 검색이 떠 있는 중 — ⌘K 를 연달아 눌러도 한 장만.
+  bool _searchOpen = false;
+
+  /// 전역 검색 열기 — 사이드바/앱바 버튼과 ⌘K·⌘F 가 공유하는 단일 진입점.
+  ///
+  /// 데스크탑 오버레이에서 결과를 열면 그 카테고리 화면으로 가서 오른쪽 인스펙터에
+  /// 띄운다(목록 속 위치와 내용을 함께 보게). ⌘↩ 는 편집 시트.
+  Future<void> _openSearch() async {
+    if (!mounted || _searchOpen) return;
+    _searchOpen = true;
+    try {
+      await SearchScreen.show(
+        context,
+        onReveal: (todo) {
+          ref
+              .read(shellLocationProvider.notifier)
+              .openCategory(todo.category.id);
+          _inspector.open(todo);
+        },
+        onEdit: (todo) {
+          if (mounted) openTodoEdit(context, ref, todo);
+        },
+      );
+    } finally {
+      _searchOpen = false;
+    }
   }
 
   /// FAB / Cmd+N / 트레이 공통 진입점 — **곧바로 새 할 일 시트**를 연다.
@@ -462,6 +485,8 @@ class _AppShellState extends ConsumerState<AppShell> {
             onSelect: _select,
             onSelectGroup: _openGroup,
             onAddTodo: _openAddTodo,
+            onOpenSearch: _openSearch,
+            onOpenSettings: _openSettings,
             onMoveCategoryInto: (dragged, gid, siblings, at) => ref
                 .read(categoriesControllerProvider)
                 .moveCategoryInto(dragged, gid, siblings, at),
@@ -874,6 +899,8 @@ class _Sidebar extends ConsumerStatefulWidget {
     required this.onSelect,
     required this.onSelectGroup,
     required this.onAddTodo,
+    required this.onOpenSearch,
+    required this.onOpenSettings,
     required this.onMoveCategoryInto,
     required this.onReorderGroups,
   });
@@ -893,6 +920,10 @@ class _Sidebar extends ConsumerStatefulWidget {
 
   /// 사이드바 위 "새 할 일" — 데스크탑의 추가 진입점(⌘N 과 같음).
   final VoidCallback onAddTodo;
+
+  /// 검색·설정 — ⌘K·⌘, 와 같은 경로(중복 열림 방지·인스펙터 연결 포함).
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenSettings;
 
   /// 드래그→드롭(⠿/본문)을 다른 카테고리 행 위로 — [dragged] 를 [targetGroupId] 그룹의
   /// [orderedSiblings] 중 [insertIndex] 위치로 이동/순서변경.
@@ -1138,14 +1169,14 @@ class _SidebarState extends ConsumerState<_Sidebar> {
               icon: const Icon(Icons.search, size: 20),
               tooltip: '검색 (⌘F · ⌘K)',
               visualDensity: VisualDensity.compact,
-              onPressed: () => SearchScreen.show(context),
+              onPressed: widget.onOpenSearch,
             ),
             IconButton(
               key: const ValueKey('settings-button'),
               icon: const Icon(Icons.settings_outlined, size: 20),
               tooltip: '설정 (⌘,)',
               visualDensity: VisualDensity.compact,
-              onPressed: () => SettingsSheet.show(context),
+              onPressed: widget.onOpenSettings,
             ),
           ],
         ),
