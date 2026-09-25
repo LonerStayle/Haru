@@ -302,6 +302,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       destinations: _destinations,
       index: _indexOf(location),
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
+      lastUsedId: ref.read(lastUsedCategoryProvider),
     );
 
     _addSheetOpen = true;
@@ -379,6 +380,8 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     // v1.2 — 활성 카테고리 stream 에 따라 destinations 동적 build (보관 카테고리 제외).
     // loading / error 시 fallback 으로 builtin 5종 기준의 default 사용.
+    // ⌘N 기본값(마지막에 쓴 카테고리)을 앱 시작 때 미리 복원해 둔다.
+    ref.watch(lastUsedCategoryProvider);
     final categoriesAsync = ref.watch(activeCategoriesProvider);
     final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
     _destinations = AppDestination.buildAll(categories);
