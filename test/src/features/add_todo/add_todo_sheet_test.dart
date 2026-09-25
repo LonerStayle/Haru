@@ -680,6 +680,15 @@ void main() {
 
   group('v1.1 — bulk paste (멀티라인 → N건 일괄 추가)', () {
     group('splitBulkLines (pure)', () {
+      test('목록·체크박스·강조 기호를 벗긴다 (2026-09-25)', () {
+        expect(AddTodoSheet.splitBulkLines('- **백로그**\n1. 배포\n- [ ] 점검\n* 끝'), [
+          '백로그',
+          '배포',
+          '점검',
+          '끝',
+        ]);
+      });
+
       test('단순 N줄 → trim 후 list', () {
         final lines =
             // ignore: invalid_use_of_visible_for_testing_member

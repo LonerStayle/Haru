@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../domain/policies/description_checklist.dart';
 import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
@@ -98,10 +99,15 @@ class AddTodoSheet extends ConsumerStatefulWidget {
   final Todo? prefillFrom;
 
   /// 멀티라인 paste 시 줄바꿈으로 split + 빈 줄 제거 → 의미 있는 줄.
+  /// 메모·문서에서 복사한 목록의 `- ` `1.` `[ ]` `**굵게**` 같은 기호는 벗긴다 —
+  /// 안 벗기면 하위 항목 제목에 `**백로그**` 가 그대로 남았다.
   /// 단위 테스트가 직접 호출하기 위해 public static 으로 노출.
   @visibleForTesting
-  static List<String> splitBulkLines(String raw) =>
-      raw.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+  static List<String> splitBulkLines(String raw) => raw
+      .split('\n')
+      .map(DescriptionChecklist.stripListLine)
+      .where((l) => l.isNotEmpty)
+      .toList();
 
   /// modal bottom sheet 로 띄우는 헬퍼.
   ///

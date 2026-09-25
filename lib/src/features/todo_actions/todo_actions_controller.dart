@@ -334,6 +334,50 @@ class TodoActionsController {
       }
     }
   }
+
+  /// 설명 속 목록 → 하위 항목 (2026-09-25). [items] 를 입력 순서 그대로 [parent] 의
+  /// 하위로 만들고, 부모 설명은 [remainingDescription] 으로 바꾼다.
+  ///
+  /// 새 하위들은 기존 하위들 **위**에 입력 순서대로 놓인다(일괄 추가와 같은 규칙).
+  /// 되돌리기용으로 만든 하위 목록과 바꾸기 전 부모를 돌려준다 — [undoChecklist] 에 넘긴다.
+  Future<({List<Todo> created, Todo parentBefore})> checklistToChildren(
+    Todo parent, {
+    required List<({String title, bool done})> items,
+    required String? remainingDescription,
+  }) async {
+    final minSibling = await _repo.minSiblingSortOrder(
+      categoryId: parent.category.id,
+      parentId: parent.id,
+    );
+    final min = minSibling ?? 0;
+    final n = items.length;
+    final created = <Todo>[];
+    for (var i = 0; i < n; i++) {
+      var child = Todo.create(
+        title: items[i].title,
+        category: parent.category,
+        dueAt: null,
+        now: _now,
+        parentId: parent.id,
+        sortOrder: min - (n - i),
+      );
+      if (items[i].done) child = child.copyWith(doneAt: _now());
+      await _repo.upsert(child);
+      created.add(child);
+    }
+    await updatePreservingOrder(
+      parent.copyWith(description: remainingDescription),
+    );
+    return (created: created, parentBefore: parent);
+  }
+
+  /// [checklistToChildren] 되돌리기 — 만든 하위를 지우고 부모 설명을 되살린다.
+  Future<void> undoChecklist(List<Todo> created, Todo parentBefore) async {
+    for (final c in created) {
+      await _repo.deleteById(c.id);
+    }
+    await updatePreservingOrder(parentBefore);
+  }
 }
 
 final todoActionsProvider = Provider<TodoActionsController>(
