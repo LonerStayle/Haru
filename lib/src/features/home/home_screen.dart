@@ -19,6 +19,7 @@ import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../add_todo/add_todo_default_category.dart';
 import '../category/categories_controller.dart';
+import '../settings/app_preferences.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
@@ -160,19 +161,24 @@ class HomeScreen extends ConsumerWidget {
           },
           // date-repeat — ⋮ '반복 중지' → 시리즈 마스터 삭제(비파괴적).
           onStopRecurrence: (t) => confirmStopRecurrence(context, ref, t),
-          onAddTodo: () => showNewTodoSheet(
-            context,
-            ref,
-            initialCategory: _defaultCategoryFor(ref, group),
-          ),
+          // 오늘 화면에서 추가하면 오늘 날짜 — 날짜가 없으면 '오늘' 에 안 보인다.
+          onAddTodo: () {
+            final now = ref.read(nowProvider)();
+            showNewTodoSheet(
+              context,
+              ref,
+              initialCategory: _defaultCategoryFor(ref, group),
+              initialDueAt: DateTime(now.year, now.month, now.day),
+            );
+          },
         );
       },
     );
   }
 }
 
-/// 오늘 화면 빈 상태 "새 할 일" 버튼의 기본 카테고리 — ⌘N 과 같은 규칙(마지막에 쓴 카테고리 →
-/// 사이드바 첫 카테고리, 그룹 탭이면 그 그룹 안에서). 로딩 중이면 builtin '일상'.
+/// 오늘 화면 빈 상태 "새 할 일" 버튼의 기본 카테고리 — ⌘N 과 같은 규칙(설정의 기본 카테고리
+/// → 마지막에 쓴 카테고리 → 사이드바 첫 카테고리, 그룹 탭이면 그 그룹 안에서). 로딩 중이면 '일상'.
 Category _defaultCategoryFor(WidgetRef ref, Group? group) {
   final categories =
       ref.read(activeCategoriesProvider).asData?.value ?? const <Category>[];
@@ -183,6 +189,7 @@ Category _defaultCategoryFor(WidgetRef ref, Group? group) {
     destinations: const [],
     index: 0,
     selectedGroupId: group?.id,
+    preferredCategoryId: ref.read(defaultCategoryIdProvider),
     lastUsedId: ref.read(lastUsedCategoryProvider),
   );
 }

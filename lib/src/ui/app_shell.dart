@@ -9,12 +9,15 @@ import '../data/providers.dart';
 import '../data/remote/supabase_realtime_sync.dart';
 import '../domain/category.dart';
 import '../domain/group.dart';
+import '../domain/todo.dart';
 import '../features/add_todo/add_todo_controller.dart';
 import '../features/add_todo/add_todo_default_category.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/calendar/calendar_providers.dart';
 import '../features/category/categories_controller.dart';
 import '../features/category/groups_controller.dart';
+import '../features/calendar_view/calendar_providers.dart'
+    show calendarSelectionProvider;
 import '../features/calendar_view/calendar_screen.dart';
 import '../features/category/category_view.dart';
 import '../features/home/home_screen.dart';
@@ -24,9 +27,13 @@ import '../features/category/category_actions.dart';
 import '../core/ui_prefs.dart';
 import '../features/outline/outline_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/settings/app_preferences.dart';
+import '../features/todo_actions/todo_row_actions.dart';
 import '../features/settings/archive_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
+import '../features/system/window_service.dart';
+import '../features/todo_actions/todo_actions_controller.dart';
 import 'destination.dart';
 import 'inspector.dart';
 import 'shell_state.dart';
@@ -89,9 +96,16 @@ class _AppShellState extends ConsumerState<AppShell> {
   Future<void> _initTray() async {
     if (!AppPlatform.isDesktop) return;
     final tray = TrayService(
-      onAddTodo: () {
+      onOpen: () => const WindowService().showMainWindow(),
+      onAddTodo: () async {
+        await const WindowService().showMainWindow();
         if (mounted) _openAddTodo();
       },
+      onOpenSettings: () async {
+        await const WindowService().showMainWindow();
+        if (mounted) _openSettings();
+      },
+      onToggleTodo: _toggleFromTray,
       onQuit: () {
         if (mounted) _confirmQuit();
       },
@@ -102,6 +116,34 @@ class _AppShellState extends ConsumerState<AppShell> {
       return;
     }
     _tray = tray;
+    _pushTrayState();
+  }
+
+  /// 트레이에서 할 일 완료 — 창을 띄우지 않고 바로 체크. 되돌리려면 앱에서 다시
+  /// 체크를 풀면 된다(트레이엔 되돌리기 스낵바가 없다).
+  Future<void> _toggleFromTray(String id) async {
+    final todo = ref
+        .read(undoneTodayTodosProvider)
+        .where((t) => t.id == id)
+        .firstOrNull;
+    if (todo == null) return;
+    await ref.read(todoActionsProvider).toggle(todo);
+  }
+
+  void _pushTrayState() {
+    final tray = _tray;
+    if (tray == null) return;
+    final undone = ref.read(undoneTodayTodosProvider);
+    tray.update(
+      TrayState(
+        top: [
+          for (final t in undone.take(trayTopLimit))
+            TrayTodo(id: t.id, title: t.title, inProgress: t.isInProgress),
+        ],
+        undoneCount: undone.length,
+        pendingSync: ref.read(outboxCountProvider).value ?? 0,
+      ),
+    );
   }
 
   /// tray menu 의 "종료" — outbox 가 비어 있으면 즉시 종료, pending 이 있으면 confirm dialog.
@@ -160,7 +202,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
       await hotKeyManager.register(
         hotkey,
-        keyDownHandler: (_) {
+        keyDownHandler: (_) async {
+          // 창이 다른 앱 뒤에 있으면 시트가 안 보인다 — 먼저 앞으로.
+          await const WindowService().showMainWindow();
           if (mounted) _openAddTodo();
         },
       );
@@ -260,10 +304,32 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (idx >= 0) _select(idx);
   }
 
-  /// 전역 검색 화면 열기 — 사이드바/앱바 버튼과 Cmd+F 가 공유하는 단일 진입점.
-  void _openSearch() {
-    if (!mounted) return;
-    SearchScreen.show(context);
+  /// 검색이 떠 있는 중 — ⌘K 를 연달아 눌러도 한 장만.
+  bool _searchOpen = false;
+
+  /// 전역 검색 열기 — 사이드바/앱바 버튼과 ⌘K·⌘F 가 공유하는 단일 진입점.
+  ///
+  /// 데스크탑 오버레이에서 결과를 열면 그 카테고리 화면으로 가서 오른쪽 인스펙터에
+  /// 띄운다(목록 속 위치와 내용을 함께 보게). ⌘↩ 는 편집 시트.
+  Future<void> _openSearch() async {
+    if (!mounted || _searchOpen) return;
+    _searchOpen = true;
+    try {
+      await SearchScreen.show(
+        context,
+        onReveal: (todo) {
+          ref
+              .read(shellLocationProvider.notifier)
+              .openCategory(todo.category.id);
+          _inspector.open(todo);
+        },
+        onEdit: (todo) {
+          if (mounted) openTodoEdit(context, ref, todo);
+        },
+      );
+    } finally {
+      _searchOpen = false;
+    }
   }
 
   /// FAB / Cmd+N / 트레이 공통 진입점 — **곧바로 새 할 일 시트**를 연다.
@@ -302,12 +368,28 @@ class _AppShellState extends ConsumerState<AppShell> {
       destinations: _destinations,
       index: _indexOf(location),
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
+      preferredCategoryId: ref.read(defaultCategoryIdProvider),
       lastUsedId: ref.read(lastUsedCategoryProvider),
     );
 
+    // 기본 날짜 — 캘린더 화면이면 거기서 고른 날, 오늘 화면이면 오늘.
+    // '오늘' 은 날짜가 있는 항목만 보여 주므로(v1.5), 오늘 화면에서 날짜 없이 추가하면
+    // 방금 추가한 항목이 곧바로 사라져 보였다(Phase 4 기기 테스트에서 발견).
+    final now = ref.read(nowProvider)();
+    final calendarDay = switch (location.page) {
+      ShellPage.calendar => ref.read(calendarSelectionProvider).selectedDay,
+      ShellPage.today => DateTime(now.year, now.month, now.day),
+      _ => null,
+    };
+
     _addSheetOpen = true;
     try {
-      await showNewTodoSheet(context, ref, initialCategory: initialCategory);
+      await showNewTodoSheet(
+        context,
+        ref,
+        initialCategory: initialCategory,
+        initialDueAt: calendarDay,
+      );
     } finally {
       _addSheetOpen = false;
     }
@@ -364,9 +446,12 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   Widget build(BuildContext context) {
     // 미체크 카운트가 바뀌면 tray title 갱신 (macOS 만 실효).
-    ref.listen<int>(undoneTodayCountProvider, (_, next) {
-      _tray?.updateUndoneCount(next);
-    });
+    // 오늘 남은 할 일·동기화 대기가 바뀌면 트레이 제목·메뉴 갱신 (macOS 만 실효).
+    ref.listen<List<Todo>>(
+      undoneTodayTodosProvider,
+      (_, _) => _pushTrayState(),
+    );
+    ref.listen(outboxCountProvider, (_, _) => _pushTrayState());
 
     // Supabase realtime sync — 인증된 user 가 있을 때만 활성. lifecycle 은 provider 가 관리.
     ref.watch(supabaseRealtimeSyncProvider);
@@ -454,6 +539,8 @@ class _AppShellState extends ConsumerState<AppShell> {
             onSelect: _select,
             onSelectGroup: _openGroup,
             onAddTodo: _openAddTodo,
+            onOpenSearch: _openSearch,
+            onOpenSettings: _openSettings,
             onMoveCategoryInto: (dragged, gid, siblings, at) => ref
                 .read(categoriesControllerProvider)
                 .moveCategoryInto(dragged, gid, siblings, at),
@@ -866,6 +953,8 @@ class _Sidebar extends ConsumerStatefulWidget {
     required this.onSelect,
     required this.onSelectGroup,
     required this.onAddTodo,
+    required this.onOpenSearch,
+    required this.onOpenSettings,
     required this.onMoveCategoryInto,
     required this.onReorderGroups,
   });
@@ -885,6 +974,10 @@ class _Sidebar extends ConsumerStatefulWidget {
 
   /// 사이드바 위 "새 할 일" — 데스크탑의 추가 진입점(⌘N 과 같음).
   final VoidCallback onAddTodo;
+
+  /// 검색·설정 — ⌘K·⌘, 와 같은 경로(중복 열림 방지·인스펙터 연결 포함).
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenSettings;
 
   /// 드래그→드롭(⠿/본문)을 다른 카테고리 행 위로 — [dragged] 를 [targetGroupId] 그룹의
   /// [orderedSiblings] 중 [insertIndex] 위치로 이동/순서변경.
@@ -1130,14 +1223,14 @@ class _SidebarState extends ConsumerState<_Sidebar> {
               icon: const Icon(Icons.search, size: 20),
               tooltip: '검색 (⌘F · ⌘K)',
               visualDensity: VisualDensity.compact,
-              onPressed: () => SearchScreen.show(context),
+              onPressed: widget.onOpenSearch,
             ),
             IconButton(
               key: const ValueKey('settings-button'),
               icon: const Icon(Icons.settings_outlined, size: 20),
               tooltip: '설정 (⌘,)',
               visualDensity: VisualDensity.compact,
-              onPressed: () => SettingsSheet.show(context),
+              onPressed: widget.onOpenSettings,
             ),
           ],
         ),

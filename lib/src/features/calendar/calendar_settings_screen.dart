@@ -11,6 +11,7 @@ import '../category/categories_controller.dart';
 import 'calendar_event.dart';
 import 'calendar_gateway.dart';
 import 'calendar_settings.dart';
+import 'calendar_sync_scheduler.dart' show CalendarSyncNowFailed;
 import 'google_auth_service.dart';
 import 'google_calendar_gateway.dart';
 import 'microsoft_auth_service.dart';
@@ -135,6 +136,10 @@ class _CalendarSettingsScreenState
   /// "지금 동기화" 진행 중.
   bool _syncBusy = false;
 
+  /// 연결 시도 번호 — "취소" 를 누르면 올려서, 늦게 끝난 옛 시도의 결과를 버린다.
+  /// (브라우저 로그인 대기는 중간에 끊을 수 없다 — 결과만 무시한다.)
+  int _connectAttempt = 0;
+
   CalendarProvider get _provider => widget.provider;
 
   @override
@@ -158,6 +163,7 @@ class _CalendarSettingsScreenState
         provider: _provider,
         busy: _connectBusy,
         onConnect: _connect,
+        onCancel: _cancelConnect,
       );
     }
     return _connectedBody(theme, settings);
@@ -168,6 +174,7 @@ class _CalendarSettingsScreenState
   Future<void> _connect() async {
     final auth = ref.read(authForProvider(_provider));
     if (auth == null || _connectBusy) return;
+    final attempt = ++_connectAttempt;
     setState(() => _connectBusy = true);
 
     http.Client? client;
@@ -179,6 +186,12 @@ class _CalendarSettingsScreenState
       client?.close();
     }
 
+    // 사용자가 기다리다 취소했다 — 늦게 온 결과는 버린다. 그사이 브라우저에서 로그인을
+    // 마쳤다면 토큰만 저장되고 화면은 미연결로 남는 어긋남이 생기므로 로그아웃해 맞춘다.
+    if (attempt != _connectAttempt) {
+      if (client != null) await auth.signOut();
+      return;
+    }
     if (!mounted) return;
     if (client == null) {
       setState(() => _connectBusy = false);
@@ -242,6 +255,49 @@ class _CalendarSettingsScreenState
         );
   }
 
+  /// 연결 대기 취소 — 브라우저 창은 사용자가 닫는다.
+  void _cancelConnect() {
+    _connectAttempt++;
+    setState(() => _connectBusy = false);
+  }
+
+  /// 연결 해제 확인 — 대기 중인 변경이 있으면 버려진다고 알린다.
+  Future<void> _confirmDisconnect() async {
+    final pending =
+        ref.read(calendarPendingOpsCountProvider).asData?.value ?? 0;
+    final ok =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            key: const ValueKey('disconnect-confirm'),
+            title: Text('${_provider.label} 연결을 해제할까요?'),
+            content: Text(
+              pending > 0
+                  ? '아직 캘린더에 반영되지 않은 변경이 있어요(대기 $pending건).\n'
+                        '해제하면 이 서비스로 보낼 변경은 버려져요. 할 일 자체는 그대로 남아요.'
+                  : '할 일은 그대로 남고, 캘린더와 주고받기만 멈춰요.\n'
+                        '다시 연결하면 캘린더 선택과 카테고리 연결이 돌아와요.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                key: const ValueKey('disconnect-confirm-ok'),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(ctx).colorScheme.error,
+                ),
+                child: const Text('연결 해제'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (ok && mounted) await _disconnect();
+  }
+
   /// 연결 해제 — [CalendarAuth.signOut] 호출 후 연결 관련 상태만 정리한다.
   /// 쓰기/읽기 캘린더 선택과 카테고리 매핑은 그대로 보존된다 (재연결 시 복원).
   /// 캘린더 이벤트와 todo 의 calendarEventId 링크는 이 화면이 건드리지 않는다.
@@ -284,13 +340,28 @@ class _CalendarSettingsScreenState
     final action = ref.read(calendarSyncNowActionProvider);
     if (action == null || _syncBusy) return;
     setState(() => _syncBusy = true);
+    String message = '동기화했어요';
     try {
       await action();
+    } on CalendarSyncNowFailed catch (e) {
+      message = e.authRequired
+          ? '다시 연결이 필요해요. 위의 "다시 연결" 을 눌러 주세요.'
+          : '동기화하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
     } catch (_) {
-      // 오류 처리는 동기화 서비스 책임 — 여기선 버튼 잠금만 푼다.
+      // 자세한 오류 처리는 동기화 서비스 책임 — 여기선 결과만 알린다.
+      message = '동기화하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
     } finally {
       if (mounted) setState(() => _syncBusy = false);
     }
+    if (!mounted) return;
+    // 예전엔 결과를 알리지 않아 눌렀는지조차 알 수 없었다.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        key: const ValueKey('sync-now-result'),
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   // --- 연결됨 본문 ---------------------------------------------------------
@@ -310,7 +381,16 @@ class _CalendarSettingsScreenState
         vertical: AppTokens.space16,
       ),
       children: [
-        _connectionHeader(theme, scheme),
+        _connectionHeader(
+          theme,
+          scheme,
+          needsReauth: calendarsAsync.maybeWhen(
+            error: (err, _) =>
+                err is CalendarGatewayException &&
+                err.kind == CalendarErrorKind.authRequired,
+            orElse: () => false,
+          ),
+        ),
         const SizedBox(height: AppTokens.space16),
         const Divider(height: AppTokens.hairline),
         const SizedBox(height: AppTokens.space16),
@@ -347,21 +427,26 @@ class _CalendarSettingsScreenState
   ///
   /// 계정 이메일은 표시하지 않는다: [CalendarAuth] 인터페이스가 로그인 계정의
   /// 이메일을 노출하는 메서드를 갖고 있지 않다 (authedClient/signOut 뿐).
-  Widget _connectionHeader(ThemeData theme, ColorScheme scheme) {
+  Widget _connectionHeader(
+    ThemeData theme,
+    ColorScheme scheme, {
+    required bool needsReauth,
+  }) {
     return Row(
       children: [
         Container(
           width: 10,
           height: 10,
-          decoration: const BoxDecoration(
-            color: AppPalette.success,
+          decoration: BoxDecoration(
+            color: needsReauth ? scheme.error : AppPalette.success,
             shape: BoxShape.circle,
           ),
         ),
         const SizedBox(width: AppTokens.space8),
         Expanded(
           child: Text(
-            '연결됨',
+            needsReauth ? '다시 연결이 필요해요' : '연결됨',
+            key: const ValueKey('calendar-connection-status'),
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w700,
             ),
@@ -376,7 +461,7 @@ class _CalendarSettingsScreenState
         else
           TextButton(
             key: const ValueKey('disconnect-button'),
-            onPressed: _disconnect,
+            onPressed: _confirmDisconnect,
             child: const Text('연결 해제'),
           ),
       ],
@@ -591,9 +676,19 @@ class _CalendarSettingsScreenState
   }
 
   Widget _optionsSection(CalendarSettings settings) {
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 아래 두 옵션은 서비스별이 아니라 **모든 캘린더 연동 공통**이다 — Google·
+        // Microsoft 어느 화면에서 바꿔도 같이 바뀐다는 걸 제목으로 밝힌다.
+        Text(
+          '공통 옵션 · 모든 캘린더에 적용',
+          key: const ValueKey('calendar-common-options'),
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         CheckboxListTile(
           key: const ValueKey('import-invited-checkbox'),
           contentPadding: EdgeInsets.zero,
@@ -624,6 +719,16 @@ class _CalendarSettingsScreenState
     );
   }
 
+  /// "오늘 14:05" / "9/24 14:05" — 시각만 있으면 며칠 전 동기화인지 알 수 없었다.
+  String _syncedLabel(DateTime at) {
+    final now = ref.read(nowProvider)();
+    final sameDay =
+        at.year == now.year && at.month == now.month && at.day == now.day;
+    return sameDay
+        ? '오늘 ${KoDate.time(at)}'
+        : '${KoDate.shortDate(at)} ${KoDate.time(at)}';
+  }
+
   Widget _syncFooter(
     ThemeData theme,
     ColorScheme scheme,
@@ -633,7 +738,7 @@ class _CalendarSettingsScreenState
     final lastSyncedAt = settings.viewFor(_provider).lastSyncedAt;
     final lastSyncedLabel = lastSyncedAt == null
         ? '동기화 기록 없음'
-        : '마지막 동기화 ${KoDate.time(lastSyncedAt.toLocal())}';
+        : '마지막 동기화 ${_syncedLabel(lastSyncedAt.toLocal())}';
     final syncAvailable = ref.watch(calendarSyncNowActionProvider) != null;
 
     return Row(
@@ -711,12 +816,14 @@ class _NotConnected extends StatelessWidget {
     required this.provider,
     required this.busy,
     required this.onConnect,
+    required this.onCancel,
   });
 
   final ThemeData theme;
   final CalendarProvider provider;
   final bool busy;
   final VoidCallback onConnect;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -759,6 +866,25 @@ class _NotConnected extends StatelessWidget {
                   : const Icon(Icons.login),
               label: Text('$account 연결'),
             ),
+            // 로그인은 브라우저(폰은 계정 선택 창)에서 이어진다 — 무엇을 기다리는지 알리고
+            // 그만둘 길을 준다.
+            if (busy) ...[
+              const SizedBox(height: AppTokens.space12),
+              Text(
+                AppPlatform.isDesktop
+                    ? '브라우저에서 로그인을 마쳐 주세요'
+                    : '계정 선택 창에서 로그인을 마쳐 주세요',
+                key: const ValueKey('connect-waiting'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurface.withValues(alpha: 0.6),
+                ),
+              ),
+              TextButton(
+                key: const ValueKey('connect-cancel'),
+                onPressed: onCancel,
+                child: const Text('취소'),
+              ),
+            ],
           ],
         ),
       ),

@@ -8,9 +8,10 @@ import '../../core/theme.dart';
 import 'auth_error_message.dart';
 import 'auth_service.dart';
 
-/// 이메일 OTP 6자리 코드 흐름. 두 단계:
+/// 이메일 OTP 코드 흐름. 두 단계:
 ///   1) 이메일 입력 → "코드 받기" → 코드 발송
-///   2) 6자리 코드 입력 → "확인" → 세션 생성
+///   2) 코드 입력 → "확인" → 세션 생성 (코드 길이는 Supabase 설정에 따라 6~10자리라
+///      화면 문구에 자릿수를 쓰지 않는다)
 ///
 /// 매직링크가 아니라 OTP — Supabase Site URL 이 다른 앱과 공유 불가능한 제약을 우회.
 class SignInScreen extends ConsumerStatefulWidget {
@@ -38,9 +39,25 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   /// 도중 중간 fire 되기엔 충분히 길다.
   static const Duration _autoVerifyDelay = Duration(milliseconds: 300);
 
+  /// 코드 다시 받기까지 남은 초 — Supabase 는 1분에 한 번만 보내 준다.
+  int _resendIn = 0;
+  Timer? _resendTimer;
+  static const int _resendCooldown = 60;
+
+  void _startResendCooldown() {
+    _resendTimer?.cancel();
+    setState(() => _resendIn = _resendCooldown);
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return t.cancel();
+      setState(() => _resendIn = _resendIn > 0 ? _resendIn - 1 : 0);
+      if (_resendIn == 0) t.cancel();
+    });
+  }
+
   @override
   void dispose() {
     _autoVerifyTimer?.cancel();
+    _resendTimer?.cancel();
     _emailCtrl.dispose();
     _otpCtrl.dispose();
     super.dispose();
@@ -68,6 +85,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         _busy = false;
         _step = _Step.otp;
       });
+      _startResendCooldown();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -93,6 +111,35 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
       setState(() {
         _busy = false;
         _error = friendlyAuthErrorMessage(e, forVerify: true);
+      });
+    }
+  }
+
+  /// 코드 다시 받기 — 같은 이메일로 새 코드.
+  Future<void> _resend() async {
+    final auth = ref.read(authServiceProvider);
+    if (auth == null || _busy || _resendIn > 0) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await auth.sendEmailOtp(_emailCtrl.text);
+      if (!mounted) return;
+      _otpCtrl.clear();
+      setState(() => _busy = false);
+      _startResendCooldown();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('새 코드를 보냈어요'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = friendlyAuthErrorMessage(e, forVerify: false);
       });
     }
   }
@@ -133,10 +180,21 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(
-                    Icons.check_circle_outline_rounded,
-                    size: 48,
-                    color: theme.colorScheme.primary,
+                  Center(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.asset(
+                        'assets/branding/app_icon_256.png',
+                        key: const ValueKey('sign-in-brand'),
+                        width: 64,
+                        height: 64,
+                        errorBuilder: (_, _, _) => Icon(
+                          Icons.check_circle_outline_rounded,
+                          size: 48,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: AppTokens.space16),
                   Text(
@@ -149,26 +207,17 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                   const SizedBox(height: AppTokens.space8),
                   Text(
                     _step == _Step.email
-                        ? '이메일로 6자리 코드를 보내드릴게요.'
-                        : '메일로 받은 6자리 코드를 입력해 주십시오.',
+                        ? '이메일로 로그인 코드를 보내 드릴게요.'
+                        : '메일로 받은 코드를 입력해 주세요.',
                     style: theme.textTheme.bodyMedium,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: AppTokens.space24),
+                  // 오류는 입력칸 바로 아래(errorText)에 — 무엇이 문제인지 칸과 함께 보이게.
                   if (_step == _Step.email)
                     ..._emailFields(theme)
                   else
                     ..._otpFields(theme),
-                  if (_error != null) ...[
-                    const SizedBox(height: AppTokens.space12),
-                    Text(
-                      _error!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -188,9 +237,11 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
         enabled: !_busy,
         onChanged: (_) => setState(() {}),
         onSubmitted: (_) => _sendCode(),
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: 'you@example.com',
-          prefixIcon: Icon(Icons.email_outlined),
+          prefixIcon: const Icon(Icons.email_outlined),
+          errorText: _error,
+          errorMaxLines: 3,
         ),
       ),
       const SizedBox(height: AppTokens.space12),
@@ -256,7 +307,12 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
           letterSpacing: 6,
           fontWeight: FontWeight.w700,
         ),
-        decoration: const InputDecoration(hintText: '코드 입력', counterText: ''),
+        decoration: InputDecoration(
+          hintText: '코드 입력',
+          counterText: '',
+          errorText: _error,
+          errorMaxLines: 3,
+        ),
       ),
       const SizedBox(height: AppTokens.space12),
       FilledButton(
@@ -279,9 +335,20 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             : const Text('확인'),
       ),
       const SizedBox(height: AppTokens.space8),
-      TextButton(
-        onPressed: _busy ? null : _backToEmail,
-        child: const Text('다른 이메일로 다시'),
+      // 좁은 폭(312)에선 두 버튼이 한 줄에 안 들어간다 — 넘치면 줄바꿈.
+      Wrap(
+        alignment: WrapAlignment.center,
+        children: [
+          TextButton(
+            key: const ValueKey('sign-in-resend'),
+            onPressed: _busy || _resendIn > 0 ? null : _resend,
+            child: Text(_resendIn > 0 ? '코드 다시 받기 ($_resendIn초)' : '코드 다시 받기'),
+          ),
+          TextButton(
+            onPressed: _busy ? null : _backToEmail,
+            child: const Text('다른 이메일로'),
+          ),
+        ],
       ),
     ];
   }

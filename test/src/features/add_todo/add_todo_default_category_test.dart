@@ -244,4 +244,29 @@ void main() {
       expect(store.data[LastUsedCategoryNotifier.key], {'new'});
     });
   });
+
+  group('설정의 기본 카테고리 × 마지막에 쓴 카테고리 (Phase 4 머지)', () {
+    Category r({String? preferred, String? last, String? group}) =>
+        resolveAddTodoDefaultCategory(
+          categories: categories,
+          groups: groups,
+          destinations: destinations,
+          index: todayIndex,
+          selectedGroupId: group,
+          preferredCategoryId: preferred,
+          lastUsedId: last,
+        );
+
+    test('설정에서 고정했으면 그것이 먼저, "자동"(null)이면 마지막에 쓴 것', () {
+      expect(r(preferred: idea.id, last: daily.id), idea);
+      expect(r(last: daily.id), daily);
+      expect(r(), work, reason: '둘 다 없으면 사이드바 첫 카테고리');
+    });
+
+    test('그룹 화면: 그룹 안에 있는 쪽만 — 고정값 → 마지막 → 그룹 첫', () {
+      expect(r(preferred: dev.id, last: work.id, group: 'g1'), dev);
+      expect(r(preferred: idea.id, last: dev.id, group: 'g1'), dev);
+      expect(r(preferred: idea.id, last: daily.id, group: 'g1'), work);
+    });
+  });
 }

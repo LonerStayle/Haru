@@ -62,6 +62,29 @@ class MainFlutterWindow: NSWindow {
       }
     }
 
+    // 메인 창 앞으로 — Dart WindowService 백엔드. 트레이 "하루 열기"·전역 ⌘⇧N 이
+    // 쓴다. 창이 다른 앱 뒤에 있거나 최소화돼 있으면 시트를 띄워도 안 보였다.
+    let windowChannel = FlutterMethodChannel(
+      name: "app.haru/window",
+      binaryMessenger: flutterViewController.engine.binaryMessenger)
+    windowChannel.setMethodCallHandler { [weak self] (call, result) in
+      switch call.method {
+      case "show":
+        guard let window = self else {
+          result(nil)
+          return
+        }
+        if window.isMiniaturized {
+          window.deminiaturize(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
     RegisterGeneratedPlugins(registry: flutterViewController)
 
     super.awakeFromNib()

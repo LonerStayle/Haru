@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
+import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
+import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/features/settings/archive_screen.dart';
 
 /// 보관함 화면 렌더링 검증 — 보관된 그룹/카테고리 목록 + 복원 버튼 + 빈 상태.
@@ -15,12 +17,14 @@ void main() {
     WidgetTester tester, {
     required List<Category> categories,
     required List<Group> groups,
+    List<Todo> todos = const [],
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           categoriesProvider.overrideWith((_) => Stream.value(categories)),
           groupsProvider.overrideWith((_) => Stream.value(groups)),
+          allTodosProvider.overrideWith((_) => Stream.value(todos)),
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -58,7 +62,7 @@ void main() {
     expect(find.text('지난회사'), findsOneWidget);
     expect(find.byKey(const ValueKey('restore-group-g-old')), findsOneWidget);
     // 그룹에 카테고리 1개 포함 표시.
-    expect(find.text('카테고리 1개'), findsOneWidget);
+    expect(find.text('카테고리 1개 · 비어 있음'), findsOneWidget);
 
     // 카테고리 섹션 — standalone 만 (inGroup 은 그룹으로 대표되어 제외).
     expect(

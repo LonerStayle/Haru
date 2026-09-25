@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,8 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
+import '../../core/ui_prefs.dart';
 import '../../data/providers.dart';
 import '../../ui/widgets/click_tolerant_draggable.dart';
+import '../../ui/widgets/undo_snackbar.dart';
 import '../home/today_providers.dart';
 import '../search/search_screen.dart';
 import '../settings/settings_sheet.dart';
@@ -21,12 +26,18 @@ import 'calendar_providers.dart';
 import 'calendar_undated_drawer.dart';
 import 'calendar_week_row.dart';
 
-/// 데스크탑 우측 선택일 패널의 폭.
+/// 데스크탑 우측 선택일 패널의 기본 폭. 경계를 끌어 바꿀 수 있다(저장됨).
 const double _panelWidth = 340;
+
+/// 패널 폭 조절 범위.
+const double _panelMinWidth = 280;
+const double _panelMaxWidth = 560;
+
+const String _panelCollapsedFlag = 'panelCollapsed';
 
 /// 패널을 띄우고도 격자에 남겨야 하는 최소 폭.
 ///
-/// 이보다 좁아지면 패널을 자동으로 접는다 — 안 그러면 340 짜리 패널이 창보다 넓어
+/// 이보다 좁아지면 패널을 자동으로 접는다 — 안 그러면 패널이 창보다 넓어
 /// 가로 오버플로가 난다 (사이드바까지 낀 좁은 창에서 실제로 났다).
 const double _minGridWidth = 280;
 
@@ -43,7 +54,7 @@ enum CalendarSegment {
 ///
 /// v1.5 의 '타임라인' destination 을 흡수했다. 모바일 NavigationBar 가 4슬롯
 /// 고정이라 destination 을 늘리는 대신 교체하고, 기존 버킷 목록은 이 화면의
-/// `[목록]` 세그먼트로 그대로 살렸다 — 자리 문제도 기능 손실도 없다.
+/// `[타임라인]` 세그먼트로 그대로 살렸다 — 자리 문제도 기능 손실도 없다.
 ///
 /// 포커스 달 / 선택일 / 세그먼트는 이 State 에 둔다. 요구사항이 "세션 내에서만
 /// 유지, 영속 저장 없음" 이라 전역 provider 로 뺄 이유가 없고, 위젯 테스트가
@@ -62,19 +73,27 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   late final DateTime _baseMonth;
   late final PageController _pager;
+  late final CalendarSelectionHolder _selection;
 
   late DateTime _focusedMonth;
   late DateTime _selectedDay;
   CalendarSegment _segment = CalendarSegment.grid;
 
-  /// 모바일에서 달력을 접어 목록을 넓게 보는 상태.
-  bool _gridCollapsed = false;
+  /// 모바일 위(달력)·아래(선택일 목록) 분할 상태. 패널 위 손잡이 하나로 바꾼다
+  /// (예전엔 달력 접기·목록 접기·아래 막대, 조작이 세 벌이었다). 세션 안에서만 유지.
+  _MobileSplit _mobileSplit = _MobileSplit.split;
 
-  /// 데스크탑에서 우측 선택일 패널을 접은 상태.
-  ///
-  /// 접으면 격자가 그만큼 넓어진다 — 칸이 넓어야 기간 막대 제목이 잘리지 않는다.
-  /// 모바일의 [_gridCollapsed] 와 같은 성격(세션 내에서만 유지)이라 영속 저장하지 않는다.
-  bool _panelCollapsed = false;
+  /// 데스크탑 패널 폭을 끄는 중의 임시 값 — 끄는 동안 매 프레임 저장하지 않으려고.
+  double? _draggingPanelWidth;
+
+  /// 데스크탑 칸 두 번 클릭 판정 — 첫 클릭은 곧바로 선택(지연 없음), 같은 칸을
+  /// [_doubleClickWindow] 안에 다시 누르면 그 날짜로 새 할 일.
+  DateTime? _lastTapDay;
+  DateTime? _lastTapAt;
+  static const Duration _doubleClickWindow = Duration(milliseconds: 400);
+
+  /// 드래그 중 달력 가장자리에 머물면 달을 넘기는 타이머.
+  Timer? _edgeFlipTimer;
 
   @override
   void initState() {
@@ -84,10 +103,14 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     _focusedMonth = _baseMonth;
     _selectedDay = today;
     _pager = PageController(initialPage: _basePage);
+    _selection = ref.read(calendarSelectionProvider)..selectedDay = today;
   }
 
   @override
   void dispose() {
+    _edgeFlipTimer?.cancel();
+    // 새 캘린더 화면이 이미 자기 값을 썼을 수 있다 — 내 값일 때만 지운다.
+    if (_selection.selectedDay == _selectedDay) _selection.selectedDay = null;
     _pager.dispose();
     super.dispose();
   }
@@ -120,8 +143,13 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   void _shiftMonth(int delta) =>
       _goToMonth(DateTime(_focusedMonth.year, _focusedMonth.month + delta));
 
+  void _setSelected(DateTime date) {
+    _selectedDay = dateOnly(date);
+    if (_segment == CalendarSegment.grid) _selection.selectedDay = _selectedDay;
+  }
+
   void _selectDay(DateTime date) {
-    setState(() => _selectedDay = dateOnly(date));
+    setState(() => _setSelected(date));
     // 넘침 날짜를 탭했으면 그 달로 따라 이동한다 — 안 그러면 선택 표시가
     // 화면 밖 달에 가 있어 무슨 일이 일어났는지 알 수 없다.
     if (date.month != _focusedMonth.month || date.year != _focusedMonth.year) {
@@ -129,16 +157,82 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     }
   }
 
+  /// 칸 탭. 데스크탑에서 같은 칸을 곧바로 한 번 더 누르면 그 날짜로 새 할 일.
+  ///
+  /// InkWell 의 onDoubleTap 을 쓰지 않는 이유: 그걸 달면 한 번 클릭도 두 번째 클릭을
+  /// 기다리느라 약 300ms 늦게 선택된다. 첫 클릭은 즉시 선택하고 두 번째만 따로 본다.
+  void _tapDay(DateTime date) {
+    final day = dateOnly(date);
+    final now = DateTime.now();
+    final isDouble =
+        AppPlatform.isDesktop &&
+        _lastTapDay == day &&
+        _lastTapAt != null &&
+        now.difference(_lastTapAt!) <= _doubleClickWindow;
+    _selectDay(day);
+    if (isDouble) {
+      _lastTapDay = null;
+      _lastTapAt = null;
+      openAddTodoOnDate(context, ref, day);
+      return;
+    }
+    _lastTapDay = day;
+    _lastTapAt = now;
+  }
+
+  /// 데스크탑 칸 우클릭 메뉴 — 커서 자리에 뜬다.
+  Future<void> _showDayMenu(DateTime date, Offset globalPosition) async {
+    _selectDay(date);
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final action = await showMenu<_DayMenuAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          key: const ValueKey('calendar-day-menu-add'),
+          value: _DayMenuAction.add,
+          child: Text('${KoDate.dayWithWeekday(date)}에 추가'),
+        ),
+        const PopupMenuItem(
+          key: ValueKey('calendar-day-menu-today'),
+          value: _DayMenuAction.today,
+          child: Text('오늘로 이동'),
+        ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _DayMenuAction.add:
+        await openAddTodoOnDate(context, ref, date);
+      case _DayMenuAction.today:
+        _goToToday();
+    }
+  }
+
   void _goToToday() {
     final today = dateOnly(ref.read(nowProvider)());
-    setState(() => _selectedDay = today);
+    setState(() => _setSelected(today));
     _goToMonth(today);
   }
 
-  /// 달력 칸에 항목을 떨어뜨렸을 때 — 날짜만 바꾸고 순서는 보존한다.
+  /// 달력 칸에 항목을 떨어뜨렸을 때 — 날짜만 바꾸고 순서는 보존한다. 되돌리기 제공.
   ///
-  /// 고스트(미래 반복 예정)는 옮길 row 자체가 없으므로 먼저 그 회차를 실체화한다.
+  /// 고스트(미래 반복 예정)는 옮길 row 자체가 없으므로 먼저 그 회차를 실체화한다 —
+  /// 반복 전체가 아니라 **그 회차만** 옮겨진다(안내 문구에 밝힌다).
   Future<void> _handleDrop(CalendarDragData data, DateTime date) async {
+    _edgeFlipTimer?.cancel();
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final actions = ref.read(todoActionsProvider);
+    final isOccurrence = switch (data) {
+      UndatedDragData() => false,
+      EntryDragData(:final entry) =>
+        entry.isGhost || (entry is TodoEntry && entry.todo.isInRecurringSeries),
+    };
     final todo = switch (data) {
       UndatedDragData(:final todo) => todo,
       EntryDragData(:final entry) => await resolveEntryTodo(ref, entry),
@@ -147,12 +241,20 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
     final moved = applyDateDrop(todo, date);
     // 같은 날에 떨어뜨렸으면 applyDateDrop 이 원본을 그대로 돌려준다 → 저장 생략.
-    if (!identical(moved, todo)) {
-      await ref.read(todoActionsProvider).updatePreservingOrder(moved);
-    }
+    if (identical(moved, todo)) return;
+    await actions.updatePreservingOrder(moved);
     if (!mounted) return;
     // 옮긴 결과를 바로 보여준다 — 어디로 갔는지 눈으로 확인시키는 게 핵심.
-    setState(() => _selectedDay = dateOnly(date));
+    setState(() => _setSelected(date));
+    if (messenger == null || !messenger.mounted) return;
+    final where = KoDate.dayWithWeekday(dateOnly(date));
+    showUndoSnackbarOn(
+      messenger,
+      message: isOccurrence
+          ? '"${todo.title}" 이 회차만 $where(으)로 옮겼어요'
+          : '"${todo.title}" → $where',
+      onUndo: () => actions.restoreSchedule(todo),
+    );
   }
 
   Widget _dropTarget(DateTime date, CalendarDayCellBuilder build) {
@@ -170,6 +272,19 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     );
   }
 
+  /// 드래그 중 가장자리에 머물면 [delta] 방향으로 달을 넘긴다(머무는 동안 반복).
+  void _startEdgeFlip(int delta) {
+    _edgeFlipTimer?.cancel();
+    _edgeFlipTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
+      if (mounted) _shiftMonth(delta);
+    });
+  }
+
+  void _stopEdgeFlip() {
+    _edgeFlipTimer?.cancel();
+    _edgeFlipTimer = null;
+  }
+
   @override
   Widget build(BuildContext context) {
     // 과거~오늘 반복 회차의 실체화 보장 — '오늘' 화면을 거치지 않고 캘린더로
@@ -178,6 +293,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
     final today = dateOnly(ref.watch(nowProvider)());
     final compact = AppPlatform.isMobile;
+    final panelCollapsed = ref
+        .watch(persistedIdSetProvider(calendarPrefsKey))
+        .contains(_panelCollapsedFlag);
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -208,26 +326,32 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               _CalendarHeader(
                 focusedMonth: _focusedMonth,
                 segment: _segment,
-                gridCollapsed: _gridCollapsed,
                 onPrev: () => _shiftMonth(-1),
                 onNext: () => _shiftMonth(1),
                 onToday: _goToToday,
-                onSegment: (s) => setState(() => _segment = s),
-                onToggleCollapse: compact
-                    ? () => setState(() => _gridCollapsed = !_gridCollapsed)
-                    : null,
-                panelCollapsed: _panelCollapsed,
+                onSegment: (s) => setState(() {
+                  _segment = s;
+                  // 타임라인에서는 선택일이 안 보이니 ⌘N 기본 날짜로 쓰지 않는다.
+                  _selection.selectedDay = s == CalendarSegment.grid
+                      ? _selectedDay
+                      : null;
+                }),
+                panelCollapsed: panelCollapsed,
                 // 우측 패널은 데스크탑에만 있다 — 모바일은 아래위 분할이라 대상이 없다.
                 onTogglePanel: compact
                     ? null
-                    : () => setState(() => _panelCollapsed = !_panelCollapsed),
+                    : () => ref
+                          .read(
+                            persistedIdSetProvider(calendarPrefsKey).notifier,
+                          )
+                          .toggle(_panelCollapsedFlag),
               ),
               Expanded(
                 child: _segment == CalendarSegment.list
                     ? const TimelineScreen(showHeader: false)
                     : compact
                     ? _buildMobileBody(today)
-                    : _buildDesktopBody(today),
+                    : _buildDesktopBody(today, panelCollapsed),
               ),
               // 서랍은 달력 보기에서만. 목록(타임라인)에는 날짜 지정 항목만 나오므로
               // 무날짜 서랍이 붙을 자리가 아니다.
@@ -247,13 +371,22 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
     );
   }
 
-  Widget _buildDesktopBody(DateTime today) {
+  Widget _buildDesktopBody(DateTime today, bool panelCollapsed) {
+    final saved = ref.watch(persistedIdSetProvider(calendarPanelWidthKey));
+    final savedWidth = saved.isEmpty ? null : double.tryParse(saved.first);
     return LayoutBuilder(
       builder: (context, constraints) {
-        // 창이 좁으면 패널(340)이 통째로 안 들어가 가로로 넘친다. 격자가 최소한
+        // 창이 좁으면 패널이 통째로 안 들어가 가로로 넘친다. 격자가 최소한
         // [_minGridWidth] 는 남아야 달력 구실을 하므로, 자리가 없으면 패널을 접는다.
-        final fits = constraints.maxWidth >= _panelWidth + _minGridWidth;
-        final showPanel = !_panelCollapsed && fits;
+        final fits = constraints.maxWidth >= _panelMinWidth + _minGridWidth;
+        final showPanel = !panelCollapsed && fits;
+        final maxWidth = math.min(
+          _panelMaxWidth,
+          constraints.maxWidth - _minGridWidth,
+        );
+        final width = (_draggingPanelWidth ?? savedWidth ?? _panelWidth)
+            .clamp(_panelMinWidth, math.max(_panelMinWidth, maxWidth))
+            .toDouble();
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -263,8 +396,31 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
             // 모바일의 달력 접기와 같은 규약 — 폭이 크게 바뀌는 전환은 중간
             // 프레임이 오히려 어수선하다.
             if (showPanel) ...[
-              const VerticalDivider(width: 1, thickness: AppTokens.hairline),
-              SizedBox(width: _panelWidth, child: _buildPanel()),
+              _PanelResizer(
+                onDrag: (dx) => setState(
+                  // 한 프레임에 이동이 여러 번 와도 빠짐없이 쌓는다(옛 build 폭 기준이면
+                  // 마지막 이동만 반영돼 경계가 커서보다 늦게 따라왔다).
+                  () => _draggingPanelWidth =
+                      ((_draggingPanelWidth ?? width) - dx)
+                          .clamp(
+                            _panelMinWidth,
+                            math.max(_panelMinWidth, maxWidth),
+                          )
+                          .toDouble(),
+                ),
+                onDragEnd: () {
+                  final w = _draggingPanelWidth;
+                  if (w == null) return;
+                  ref
+                      .read(
+                        persistedIdSetProvider(calendarPanelWidthKey).notifier,
+                      )
+                      .replace({w.round().toString()});
+                  setState(() => _draggingPanelWidth = null);
+                },
+                onDragCancel: () => setState(() => _draggingPanelWidth = null),
+              ),
+              SizedBox(width: width, child: _buildPanel()),
             ],
           ],
         );
@@ -274,41 +430,51 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
 
   /// 모바일은 위아래 분할 — 위 달력 / 아래 선택일 목록.
   ///
-  /// 양쪽 다 접을 수 있다(단, 동시에는 아니다):
-  ///  - 달력 접기([_gridCollapsed]) → 목록이 화면 전체. 그날 할 일을 길게 볼 때.
-  ///  - 목록 접기([_panelCollapsed]) → 달력이 화면 전체. 달을 크게 볼 때.
-  ///
-  /// 목록을 접으면 하단에 얇은 막대만 남긴다 — 완전히 없애면 다시 펼 방법이 없다.
+  /// 목록 위 손잡이 하나로 세 상태를 오간다: 위로 끌면 목록이 화면 전체(그날 할 일을
+  /// 길게 볼 때), 아래로 끌면 달력이 화면 전체(달을 크게 볼 때, 하단에 얇은 막대만).
+  /// 손잡이를 누르면 분할 ↔ 달력 크게.
   Widget _buildMobileBody(DateTime today) {
-    if (_panelCollapsed && !_gridCollapsed) {
-      return Column(
-        children: [
-          Expanded(child: _buildPager(today)),
-          _CollapsedDayBar(
-            selectedDay: _selectedDay,
-            onExpand: () => setState(() => _panelCollapsed = false),
+    void setSplit(_MobileSplit s) => setState(() => _mobileSplit = s);
+    switch (_mobileSplit) {
+      case _MobileSplit.gridOnly:
+        return Column(
+          children: [
+            Expanded(child: _buildPager(today)),
+            _CollapsedDayBar(
+              selectedDay: _selectedDay,
+              onExpand: () => setSplit(_MobileSplit.split),
+            ),
+          ],
+        );
+      case _MobileSplit.listOnly:
+        return _buildPanel(
+          handle: _PanelHandle(
+            onTap: () => setSplit(_MobileSplit.split),
+            onDragUp: null,
+            onDragDown: () => setSplit(_MobileSplit.split),
           ),
-        ],
-      );
+        );
+      case _MobileSplit.split:
+        return Column(
+          children: [
+            Expanded(flex: 6, child: _buildPager(today)),
+            Expanded(
+              flex: 5,
+              child: _buildPanel(
+                handle: _PanelHandle(
+                  onTap: () => setSplit(_MobileSplit.gridOnly),
+                  onDragUp: () => setSplit(_MobileSplit.listOnly),
+                  onDragDown: () => setSplit(_MobileSplit.gridOnly),
+                ),
+              ),
+            ),
+          ],
+        );
     }
-    return Column(
-      children: [
-        if (!_gridCollapsed) Expanded(flex: 6, child: _buildPager(today)),
-        Expanded(
-          flex: 5,
-          child: _buildPanel(
-            // 달력이 접힌 상태에서 목록까지 접으면 아무것도 안 남는다 → 그때는 미제공.
-            onToggleCollapse: _gridCollapsed
-                ? null
-                : () => setState(() => _panelCollapsed = true),
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildPager(DateTime today) {
-    return PageView.builder(
+    final pager = PageView.builder(
       key: const ValueKey('calendar-grid-pager'),
       controller: _pager,
       onPageChanged: (page) =>
@@ -326,23 +492,204 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
               month: month,
               today: today,
               selectedDay: _selectedDay,
-              onSelectDay: _selectDay,
+              onSelectDay: _tapDay,
               onLongPressDay: (date) {
                 _selectDay(date);
                 openAddTodoOnDate(context, ref, date);
               },
+              onSecondaryTapDay: AppPlatform.isDesktop ? _showDayMenu : null,
+              // 데스크탑 칩을 끌어 다른 날로 — 모바일 칸은 점이라 끌 대상이 없다
+              // (모바일은 아래 목록에서 길게 눌러 끈다).
+              chipWrapper: AppPlatform.isDesktop
+                  ? (entry, chip) => entry.isDraggable
+                        ? _dragSource(
+                            data: EntryDragData(entry),
+                            title: entry.title,
+                            color: entry.color,
+                            child: chip,
+                          )
+                        : chip
+                  : null,
               dayCellBuilder: _dropTarget,
             ),
           ),
         );
       },
     );
+    // 끄는 중 좌우 가장자리에 머물면 달을 넘긴다 — 다른 달로 옮길 수 있게.
+    return Stack(
+      children: [
+        Positioned.fill(child: pager),
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: _edgeFlipWidth,
+          child: _EdgeFlipTarget(
+            key: const ValueKey('calendar-edge-prev'),
+            onEnter: () => _startEdgeFlip(-1),
+            onLeave: _stopEdgeFlip,
+          ),
+        ),
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          width: _edgeFlipWidth,
+          child: _EdgeFlipTarget(
+            key: const ValueKey('calendar-edge-next'),
+            onEnter: () => _startEdgeFlip(1),
+            onLeave: _stopEdgeFlip,
+          ),
+        ),
+      ],
+    );
   }
 
-  Widget _buildPanel({VoidCallback? onToggleCollapse}) => _DayPanelSection(
-    selectedDay: _selectedDay,
-    onToggleCollapse: onToggleCollapse,
-  );
+  Widget _buildPanel({Widget? handle}) =>
+      _DayPanelSection(selectedDay: _selectedDay, handle: handle);
+}
+
+enum _MobileSplit { split, gridOnly, listOnly }
+
+enum _DayMenuAction { add, today }
+
+/// 끄는 중 가장자리 감지 폭 — 격자 바깥 여백(12) 안쪽에 대부분 걸치게.
+const double _edgeFlipWidth = 18;
+
+/// 드래그 중 달력 가장자리 — 위에 머물면 달을 넘긴다. 드롭은 아래 칸이 받는다.
+///
+/// 드래그가 없을 땐 빈 영역이라 아래 칸의 클릭을 막지 않는다.
+class _EdgeFlipTarget extends StatelessWidget {
+  const _EdgeFlipTarget({
+    super.key,
+    required this.onEnter,
+    required this.onLeave,
+  });
+
+  final VoidCallback onEnter;
+  final VoidCallback onLeave;
+
+  @override
+  Widget build(BuildContext context) {
+    // 드롭은 **거절**한다 — 이 띠는 가장자리 칸(일·토) 위에 조금 걸쳐 있어서, 받아 버리면
+    // 거기 놓은 항목이 날짜는 그대로인 채 달만 넘어갔다. 거절하면 아래 칸이 받는다.
+    return DragTarget<CalendarDragData>(
+      onWillAcceptWithDetails: (_) {
+        onEnter();
+        return false;
+      },
+      onLeave: (_) => onLeave(),
+      builder: (context, _, rejected) => rejected.isEmpty
+          ? const SizedBox.expand()
+          : DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppPalette.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(AppTokens.radiusS),
+              ),
+              child: const SizedBox.expand(),
+            ),
+    );
+  }
+}
+
+/// 데스크탑 격자와 패널 사이 — 끌어서 패널 폭을 바꾼다(저장됨).
+class _PanelResizer extends StatelessWidget {
+  const _PanelResizer({
+    required this.onDrag,
+    required this.onDragEnd,
+    required this.onDragCancel,
+  });
+
+  /// 가로 이동량(오른쪽 +). 패널은 오른쪽에 있으니 호출측이 빼서 쓴다.
+  final void Function(double dx) onDrag;
+  final VoidCallback onDragEnd;
+  final VoidCallback onDragCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        key: const ValueKey('calendar-panel-resizer'),
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+        onHorizontalDragEnd: (_) => onDragEnd(),
+        onHorizontalDragCancel: onDragCancel,
+        child: const SizedBox(
+          width: 7,
+          child: Center(
+            child: VerticalDivider(width: 1, thickness: AppTokens.hairline),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 모바일 선택일 목록 위 손잡이 — 끌어서 달력/목록 크기를 바꾸고, 누르면 목록을 접는다.
+class _PanelHandle extends StatefulWidget {
+  const _PanelHandle({
+    required this.onTap,
+    required this.onDragUp,
+    required this.onDragDown,
+  });
+
+  final VoidCallback onTap;
+  final VoidCallback? onDragUp;
+  final VoidCallback? onDragDown;
+
+  @override
+  State<_PanelHandle> createState() => _PanelHandleState();
+}
+
+class _PanelHandleState extends State<_PanelHandle> {
+  double _dy = 0;
+
+  /// 이만큼 끌거나 빠르게 튕기면 한 단계 넘어간다.
+  static const double _threshold = 36;
+
+  void _end(DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    final up = _dy < -_threshold || v < -300;
+    final down = _dy > _threshold || v > 300;
+    _dy = 0;
+    if (up) widget.onDragUp?.call();
+    if (down) widget.onDragDown?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      button: true,
+      label: '목록 크기 바꾸기',
+      // 화면낭독기는 끌 수 없으니 늘리기/줄이기 동작으로 같은 전환을 준다.
+      onIncrease: widget.onDragUp,
+      onDecrease: widget.onDragDown,
+      child: GestureDetector(
+        key: const ValueKey('calendar-panel-handle'),
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onVerticalDragStart: (_) => _dy = 0,
+        onVerticalDragUpdate: (d) => _dy += d.delta.dy,
+        onVerticalDragEnd: _end,
+        child: SizedBox(
+          height: 20,
+          child: Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: scheme.onSurface.withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// 목록을 접었을 때 하단에 남는 얇은 막대 — 날짜 + 건수 + 펼치기.
@@ -368,34 +715,45 @@ class _CollapsedDayBar extends ConsumerWidget {
       child: InkWell(
         key: const ValueKey('calendar-panel-expand'),
         onTap: onExpand,
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppTokens.space16,
-              vertical: AppTokens.space8,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    KoDate.dayWithWeekday(selectedDay),
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
+        // 위로 밀어 올려도 펼쳐진다 — 목록 위 손잡이와 같은 동작.
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onVerticalDragEnd: (d) {
+            if ((d.primaryVelocity ?? 0) < 0) onExpand();
+          },
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              // 오른쪽 88 — 폰의 떠 있는 + 버튼이 건수·펼치기 표시를 가리지 않게
+              // (기기 테스트에서 발견). 이 막대는 폰에만 있다.
+              padding: const EdgeInsets.fromLTRB(
+                AppTokens.space16,
+                AppTokens.space8,
+                88,
+                AppTokens.space8,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      KoDate.dayWithWeekday(selectedDay),
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  count == 0 ? '없음' : '$count건',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.onSurface.withValues(alpha: 0.6),
-                    fontWeight: FontWeight.w600,
+                  Text(
+                    count == 0 ? '없음' : '$count건',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurface.withValues(alpha: 0.6),
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-                const SizedBox(width: AppTokens.space4),
-                const Icon(Icons.expand_less, size: 18),
-              ],
+                  const SizedBox(width: AppTokens.space4),
+                  const Icon(Icons.expand_less, size: 18),
+                ],
+              ),
             ),
           ),
         ),
@@ -446,12 +804,12 @@ Widget _dragSource({
 /// 구글 이벤트가 도착할 때마다 화면 전체 — PageView 의 달 3개 × 42칸 × DragTarget —
 /// 가 통째로 재빌드돼 눈에 띄게 버벅였다. 이제 버킷 변화는 이 패널만 다시 그린다.
 class _DayPanelSection extends ConsumerWidget {
-  const _DayPanelSection({required this.selectedDay, this.onToggleCollapse});
+  const _DayPanelSection({required this.selectedDay, this.handle});
 
   final DateTime selectedDay;
 
-  /// 모바일에서 이 패널을 접는 콜백 (데스크탑은 헤더의 패널 토글이 담당 → null).
-  final VoidCallback? onToggleCollapse;
+  /// 모바일 목록 위 손잡이 (데스크탑은 헤더의 패널 토글이 담당 → null).
+  final Widget? handle;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -462,7 +820,7 @@ class _DayPanelSection extends ConsumerWidget {
     return CalendarDayPanel(
       date: selectedDay,
       entries: entries,
-      onToggleCollapse: onToggleCollapse,
+      handle: handle,
       entryWrapper: (entry, tile) => entry.isDraggable
           ? _dragSource(
               data: EntryDragData(entry),
@@ -548,6 +906,8 @@ class _MonthPage extends ConsumerWidget {
     required this.onSelectDay,
     required this.onLongPressDay,
     required this.dayCellBuilder,
+    this.onSecondaryTapDay,
+    this.chipWrapper,
   });
 
   final DateTime month;
@@ -556,6 +916,8 @@ class _MonthPage extends ConsumerWidget {
   final void Function(DateTime) onSelectDay;
   final void Function(DateTime) onLongPressDay;
   final Widget Function(DateTime, CalendarDayCellBuilder) dayCellBuilder;
+  final void Function(DateTime date, Offset globalPosition)? onSecondaryTapDay;
+  final Widget Function(CalendarEntry entry, Widget chip)? chipWrapper;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -568,6 +930,8 @@ class _MonthPage extends ConsumerWidget {
       selectedDay: selectedDay,
       onSelectDay: onSelectDay,
       onLongPressDay: onLongPressDay,
+      onSecondaryTapDay: onSecondaryTapDay,
+      chipWrapper: chipWrapper,
       dayCellBuilder: dayCellBuilder,
     );
   }
@@ -577,24 +941,20 @@ class _CalendarHeader extends StatelessWidget {
   const _CalendarHeader({
     required this.focusedMonth,
     required this.segment,
-    required this.gridCollapsed,
     required this.onPrev,
     required this.onNext,
     required this.onToday,
     required this.onSegment,
-    this.onToggleCollapse,
     this.panelCollapsed = false,
     this.onTogglePanel,
   });
 
   final DateTime focusedMonth;
   final CalendarSegment segment;
-  final bool gridCollapsed;
   final VoidCallback onPrev;
   final VoidCallback onNext;
   final VoidCallback onToday;
   final void Function(CalendarSegment) onSegment;
-  final VoidCallback? onToggleCollapse;
 
   /// 데스크탑 우측 선택일 패널이 접혀 있는가.
   final bool panelCollapsed;
@@ -603,16 +963,89 @@ class _CalendarHeader extends StatelessWidget {
   final VoidCallback? onTogglePanel;
 
   /// 이 폭 아래로는 ‹ › 를 접는다. 달 이동은 ←/→ 키와 좌우 스와이프로도 되므로
-  /// 잃는 기능이 없다. (모바일에서 같은 이유로 이미 ‹ › 를 빼고 있다.)
+  /// 잃는 기능이 없다.
   static const double _arrowsMinWidth = 460;
 
-  /// 이 폭 아래로는 구글 일정 토글을 접는다 — 부가 표시라 가장 먼저 양보한다.
+  /// 이 폭 아래로는 구글 일정 칩을 접는다 — 부가 표시라 가장 먼저 양보한다.
   static const double _googleToggleMinWidth = 380;
 
   @override
   Widget build(BuildContext context) {
+    return AppPlatform.isMobile
+        ? _buildMobile(context)
+        : _buildDesktop(context);
+  }
+
+  Widget _title(BuildContext context) {
     final theme = Theme.of(context);
-    final compact = AppPlatform.isMobile;
+    final style =
+        (AppPlatform.isMobile
+                ? theme.textTheme.titleLarge
+                : theme.textTheme.headlineSmall)
+            ?.copyWith(fontWeight: FontWeight.w800);
+    if (segment != CalendarSegment.grid) return Text('타임라인', style: style);
+    return Text(
+      KoDate.monthTitle(focusedMonth),
+      key: const ValueKey('calendar-month-title'),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
+  }
+
+  Widget _todayButton() => TextButton(
+    key: const ValueKey('calendar-today-button'),
+    onPressed: onToday,
+    style: TextButton.styleFrom(
+      visualDensity: VisualDensity.compact,
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
+    ),
+    child: const Text('오늘'),
+  );
+
+  /// 모바일 — 두 줄. [월 제목 · 오늘 · ⋮] / [달력|타임라인 · Google].
+  /// 한 줄에 여섯 개를 몰아넣던 헤더를 나눠 버튼마다 제 폭을 준다.
+  Widget _buildMobile(BuildContext context) {
+    final grid = segment == CalendarSegment.grid;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space12,
+        AppTokens.space4,
+        AppTokens.space4,
+        AppTokens.space4,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Flexible(child: _title(context)),
+              if (grid) ...[
+                const SizedBox(width: AppTokens.space4),
+                _todayButton(),
+              ],
+              const Spacer(),
+              // 모바일은 이 화면에 앱바가 없다 (달력 높이를 위해 뺐다) — 앱바가
+              // 들고 있던 검색·설정을 여기서 이어받는다.
+              const _MobileOverflowMenu(),
+            ],
+          ),
+          const SizedBox(height: AppTokens.space4),
+          Row(
+            children: [
+              _SegmentToggle(segment: segment, onSegment: onSegment),
+              const Spacer(),
+              if (grid) const _GoogleEventsToggle(),
+              const SizedBox(width: AppTokens.space8),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktop(BuildContext context) {
     final showMonthNav = segment == CalendarSegment.grid;
 
     // 헤더는 폭이 줄면 가로로 넘친다 — 제목을 0 으로 줄여도 버튼들만으로 넘치는
@@ -622,38 +1055,25 @@ class _CalendarHeader extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final showArrows = !compact && width >= _arrowsMinWidth;
+        final showArrows = width >= _arrowsMinWidth;
         final showGoogle = width >= _googleToggleMinWidth;
 
         // 좌우 여백도 좁은 창에서는 양보한다 — 버튼을 더 접는 것보다 여백을 줄이는
         // 쪽이 기능을 안 잃는다 (24+24 → 8+8 로 32px 확보).
-        final tight = compact || width < _arrowsMinWidth;
+        final tight = width < _arrowsMinWidth;
         return Padding(
           padding: EdgeInsets.fromLTRB(
             tight ? AppTokens.space8 : AppTokens.space24,
-            compact ? AppTokens.space8 : AppTokens.space20,
+            AppTokens.space20,
             tight ? AppTokens.space8 : AppTokens.space24,
             AppTokens.space8,
           ),
           child: Row(
             children: [
               if (showMonthNav) ...[
-                Flexible(
-                  child: Text(
-                    KoDate.monthTitle(focusedMonth),
-                    key: const ValueKey('calendar-month-title'),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        (compact
-                                ? theme.textTheme.titleLarge
-                                : theme.textTheme.headlineSmall)
-                            ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                // 모바일에는 ‹ › 를 두지 않는다. 폭이 40px 모자라 헤더가 넘치고,
-                // 확정 요구상 모바일의 달 이동 수단은 좌우 스와이프다 (데스크탑은 키/버튼).
-                // 데스크탑도 창이 좁으면 같은 이유로 접는다 ([_arrowsMinWidth]).
+                // 제목이 남는 폭을 넉넉히 가져가게(Spacer 와 반씩 나누면 넓은 창에서도
+                // "2026년…" 으로 잘렸다).
+                Flexible(flex: 4, child: _title(context)),
                 if (showArrows) ...[
                   const SizedBox(width: AppTokens.space4),
                   IconButton(
@@ -678,29 +1098,14 @@ class _CalendarHeader extends StatelessWidget {
                   ),
                 ],
                 const SizedBox(width: AppTokens.space4),
-                TextButton(
-                  key: const ValueKey('calendar-today-button'),
-                  onPressed: onToday,
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppTokens.space8,
-                    ),
-                  ),
-                  child: const Text('오늘'),
-                ),
+                _todayButton(),
               ] else
-                Text(
-                  '타임라인',
-                  style:
-                      (compact
-                              ? theme.textTheme.titleLarge
-                              : theme.textTheme.headlineSmall)
-                          ?.copyWith(fontWeight: FontWeight.w800),
-                ),
+                _title(context),
               const Spacer(),
-              if (showMonthNav && showGoogle) const _GoogleEventsToggle(),
+              if (showMonthNav && showGoogle) ...[
+                const _GoogleEventsToggle(),
+                const SizedBox(width: AppTokens.space8),
+              ],
               if (onTogglePanel != null && showMonthNav)
                 IconButton(
                   key: const ValueKey('calendar-panel-toggle'),
@@ -716,24 +1121,7 @@ class _CalendarHeader extends StatelessWidget {
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
-              if (onToggleCollapse != null && showMonthNav)
-                IconButton(
-                  key: const ValueKey('calendar-collapse-toggle'),
-                  onPressed: onToggleCollapse,
-                  icon: Icon(
-                    gridCollapsed ? Icons.expand_more : Icons.expand_less,
-                  ),
-                  tooltip: gridCollapsed ? '달력 펼치기' : '달력 접기',
-                  visualDensity: VisualDensity.compact,
-                  style: IconButton.styleFrom(
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
               _SegmentToggle(segment: segment, onSegment: onSegment),
-              // 모바일은 이 화면에 앱바가 없다 (달력 높이를 위해 뺐다) — 앱바가
-              // 들고 있던 검색·설정을 여기서 이어받는다. ☰ 는 하단 네비의
-              // '카테고리' 슬롯이 이미 Drawer 를 열므로 옮길 필요가 없다.
-              if (compact) const _MobileOverflowMenu(),
             ],
           ),
         );
@@ -790,29 +1178,73 @@ class _MobileOverflowMenu extends StatelessWidget {
 
 enum _HeaderMenuAction { search, settings }
 
-/// 구글 캘린더 이벤트 표시 on/off.
+/// 구글 캘린더 일정 표시 on/off — "Google" 이름표 칩.
 ///
-/// 연동이 구성돼 있지 않으면 버튼 자체를 숨긴다 — 눌러도 아무 일이 없는 버튼이
-/// 헤더에 남아 있을 이유가 없다.
+/// 예전엔 아이콘 버튼이라 무엇을 켜고 끄는지 알 수 없었다. 연결돼 있을 때만 보인다 —
+/// 연결 전엔 켤 수 있는 일정이 없다.
 class _GoogleEventsToggle extends ConsumerWidget {
   const _GoogleEventsToggle();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 연결된 경우에만 토글을 보인다 — 연결 전엔 켤 수 있는 일정이 없다.
     if (!ref.watch(googleCalendarConnectedProvider)) {
       return const SizedBox.shrink();
     }
     final on = ref.watch(showGoogleEventsProvider);
-    return IconButton(
-      key: const ValueKey('calendar-google-toggle'),
-      onPressed: () => ref.read(showGoogleEventsProvider.notifier).toggle(),
-      icon: Icon(on ? Icons.event_available : Icons.event_busy_outlined),
-      color: on ? GoogleEventEntry.eventColor : null,
-      tooltip: on ? 'Google 일정 숨기기' : 'Google 일정 표시',
-      visualDensity: VisualDensity.compact,
-      style: IconButton.styleFrom(
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    const color = GoogleEventEntry.eventColor;
+    return Tooltip(
+      message: on ? 'Google 일정 숨기기' : 'Google 일정 함께 보기',
+      child: Semantics(
+        toggled: on,
+        button: true,
+        child: InkWell(
+          key: const ValueKey('calendar-google-toggle'),
+          onTap: () => ref.read(showGoogleEventsProvider.notifier).toggle(),
+          borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 32),
+            padding: const EdgeInsets.symmetric(horizontal: AppTokens.space12),
+            decoration: BoxDecoration(
+              color: on ? color.withValues(alpha: 0.12) : null,
+              border: Border.all(
+                color: on
+                    ? color.withValues(alpha: 0.6)
+                    : scheme.outlineVariant,
+                width: 1,
+              ),
+              borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 상태 점 — 켜짐(색) / 꺼짐(빈 원).
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: on ? color : null,
+                    border: on
+                        ? null
+                        : Border.all(
+                            color: scheme.onSurface.withValues(alpha: 0.4),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: AppTokens.space8),
+                Text(
+                  'Google',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurface.withValues(alpha: on ? 0.9 : 0.6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -844,7 +1276,7 @@ class _SegmentToggle extends StatelessWidget {
           ),
           _SegmentButton(
             valueKey: 'calendar-segment-list',
-            label: '목록',
+            label: '타임라인',
             selected: segment == CalendarSegment.list,
             onTap: () => onSegment(CalendarSegment.list),
           ),

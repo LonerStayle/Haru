@@ -175,10 +175,8 @@ void main() {
 
   group('"날짜 없음" 서랍 → 달력 칸', () {
     testWidgets('날짜가 없던 할 일에 그 날짜가 종일로 붙는다', (tester) async {
+      // 데스크탑은 서랍이 기본으로 펼쳐져 있다.
       await mount(tester, [make(id: 'u1', title: '블로그 글 쓰기', dueAt: null)]);
-
-      await tester.tap(find.byKey(const ValueKey('calendar-undated-header')));
-      await tester.pumpAndSettle();
 
       await dragTo(
         tester,

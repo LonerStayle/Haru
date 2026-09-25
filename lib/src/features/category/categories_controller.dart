@@ -115,6 +115,15 @@ class CategoriesController {
   /// 카테고리 복원 — 보관 해제. 원래 그룹/순서 그대로 활성 화면에 되돌아온다.
   Future<void> unarchive(String id) => _setArchived(id, false);
 
+  /// 보관된 그룹 안의 카테고리 하나만 꺼내기 — 그룹은 보관된 채이므로 **미분류**로
+  /// 복원한다(보관된 그룹 밑에 두면 활성 화면 어디에도 안 보인다).
+  Future<void> unarchiveToUngrouped(String id) async {
+    final category = await _repo.getById(id);
+    if (category == null) return;
+    if (!category.archived && category.groupId == null) return;
+    await _repo.upsert(category.copyWith(archived: false, groupId: null));
+  }
+
   Future<void> _setArchived(String id, bool archived) async {
     final category = await _repo.getById(id);
     if (category == null || category.archived == archived) return;
