@@ -42,9 +42,18 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     this.initialAllDay = true,
     this.parentId,
     this.onRequestMove,
+    this.initialRecurrence,
+    this.initialTitle,
   });
 
   final Category initialCategory;
+
+  /// 새 항목을 처음부터 반복으로 연다 — "매월 반복 만들기" 제안(2026-09-25)이 쓴다.
+  /// [initialDueAt] 이 있어야 의미가 있다(반복의 기준일).
+  final RecurrenceFreq? initialRecurrence;
+
+  /// 새 항목 제목 미리 채우기(추가 모드만). 편집·복사 출처가 있으면 그쪽이 우선.
+  final String? initialTitle;
 
   /// Task C — non-null 이면 "하위 추가" 모드. 생성되는 todo 의 parentId 가 이 값으로
   /// 고정되고, category 는 [initialCategory] (= 부모 category) 로 프리셋된다.
@@ -129,6 +138,8 @@ class AddTodoSheet extends ConsumerStatefulWidget {
     void Function(Todo item)? onRequestMove,
     DateTime? initialDueAt,
     bool initialAllDay = true,
+    RecurrenceFreq? initialRecurrence,
+    String? initialTitle,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -153,6 +164,8 @@ class AddTodoSheet extends ConsumerStatefulWidget {
           onRequestMove: onRequestMove,
           initialDueAt: initialDueAt,
           initialAllDay: initialAllDay,
+          initialRecurrence: initialRecurrence,
+          initialTitle: initialTitle,
         ),
       ),
     );
@@ -255,7 +268,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     // prefill 출처 — edit 모드의 initialTodo, 또는 복사 모드의 prefillFrom.
     // 어느 쪽이든 입력값을 그대로 채운다. (단 _isEditMode 는 initialTodo 만으로 결정.)
     final source = widget.initialTodo ?? widget.prefillFrom;
-    _titleCtrl = TextEditingController(text: source?.title ?? '');
+    _titleCtrl = TextEditingController(
+      text: source?.title ?? widget.initialTitle ?? '',
+    );
     _titleBeforePaste = _titleCtrl.text;
     _descriptionCtrl = TextEditingController(text: source?.description ?? '');
     _category = source?.category ?? widget.initialCategory;
@@ -274,7 +289,11 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
     _restoreDateMode(source);
     // 더보기 칸을 이미 쓰는 항목은 펼친 채로 — 숨은 값을 모르고 지나치지 않게.
     // (메모는 본문이 1단에 있으므로 설명만으로는 펼치지 않는다.)
+    if (source == null && _dueAt != null) {
+      _recurrenceFreq = widget.initialRecurrence;
+    }
     _showMore =
+        _recurrenceFreq != null ||
         (_type == TodoType.task && (source?.description ?? '').isNotEmpty) ||
         _dateMode == _DateInputMode.range ||
         (widget.initialTodo?.isInRecurringSeries ?? false);

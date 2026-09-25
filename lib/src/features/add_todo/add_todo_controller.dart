@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/providers.dart';
 import '../../data/todo_repository.dart';
 import '../../domain/category.dart';
+import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../calendar/calendar_service.dart';
@@ -23,6 +24,8 @@ Future<void> showNewTodoSheet(
   required Category initialCategory,
   DateTime? initialDueAt,
   bool initialAllDay = true,
+  String? initialTitle,
+  RecurrenceFreq? initialRecurrence,
 }) async {
   final pending = <AddTodoSubmission>[];
   await AddTodoSheet.show(
@@ -30,6 +33,8 @@ Future<void> showNewTodoSheet(
     initialCategory: initialCategory,
     initialDueAt: initialDueAt,
     initialAllDay: initialAllDay,
+    initialTitle: initialTitle,
+    initialRecurrence: initialRecurrence,
     onSubmit: pending.add,
   );
   if (!context.mounted) return;

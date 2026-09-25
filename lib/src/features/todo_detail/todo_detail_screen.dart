@@ -20,6 +20,7 @@ import '../add_todo/add_todo_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
+import '../recurrence/monthly_repeat_suggestion.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
@@ -279,6 +280,15 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
         ),
       ),
     );
+    // 매달 손으로 만드는 항목이면 "매월 반복 만들기" 제안.
+    final monthly = SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
+      sliver: SliverToBoxAdapter(
+        child: gone
+            ? const SizedBox.shrink()
+            : MonthlyRepeatSuggestionCard(todo: live),
+      ),
+    );
 
     return asyncChildren.when(
       loading: () => const TodoListSkeleton(),
@@ -297,6 +307,7 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
         return CustomScrollView(
           slivers: [
             card,
+            monthly,
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
                 AppTokens.space16,
