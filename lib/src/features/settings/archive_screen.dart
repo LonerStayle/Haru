@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
@@ -193,9 +194,13 @@ class _EmptyArchive extends StatelessWidget {
           ),
           const SizedBox(height: AppTokens.space8),
           Text(
-            '그룹·카테고리를 길게 눌러 "보관"하면 여기 모여요.',
+            // 예전 안내 "길게 눌러" 는 틀렸다 — 길게 누르면 드래그가 시작된다 (UX 감사).
+            AppPlatform.isDesktop
+                ? '사이드바에서 그룹·카테고리를 우클릭해 "보관"하면 여기 모여요.'
+                : '관리 메뉴에서 카테고리의 ⋮ 또는 그룹을 길게 눌러 "보관"하면 여기 모여요.',
+            textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.45),
+              color: scheme.onSurface.withValues(alpha: 0.6),
             ),
           ),
         ],

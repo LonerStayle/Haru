@@ -9,8 +9,16 @@ import 'calendar_layout.dart';
 ///
 /// 12/2 였을 때 막대들이 서로 달라붙어 보인다는 지적이 있었다 — 9pt 글자가 12px 안에
 /// 꽉 차 위아래 여백이 없었던 탓이다. 높이와 간격을 함께 키워 줄을 눈으로 분리한다.
-const double _barHeight = 14;
-const double _barGap = 3;
+///
+/// 모바일은 글자 없는 얇은 색 띠로 그린다. 모바일 주 행은 약 50dp 라 14px 막대를
+/// 넣으면 레인 수가 0 으로 계산돼 여러 날 일정이 격자에서 통째로 사라졌다
+/// (UX 감사 B5). 띠만 있어도 "며칠에 걸친 일정이 있다" 는 신호는 충분하고, 제목은
+/// 아래 선택일 목록이 보여 준다.
+double get _barHeight => AppPlatform.isMobile ? 5 : 14;
+double get _barGap => AppPlatform.isMobile ? 2 : 3;
+
+/// 막대 안에 제목을 쓸지 — 모바일 띠는 너무 얇아 글자를 넣지 않는다.
+bool get _barShowsTitle => !AppPlatform.isMobile;
 
 /// 날짜 숫자와 첫 막대 사이 여백.
 double get _barsTopInset => AppPlatform.isMobile ? 3 : 5;
@@ -28,7 +36,9 @@ int get _laneHardCap => AppPlatform.isMobile ? 2 : 3;
 ///
 /// 이게 없으면 좁은 창에서 막대 3줄이 칸을 통째로 먹어, 그날의 단일 항목이 하나도
 /// 안 보이고 빗금만 뜬다 (기본 창 크기에서 실제로 그랬다).
-const double _minChipRoom = 18;
+///
+/// 모바일 셀은 칩 대신 6px 점 한 줄을 그리므로 필요한 공간이 훨씬 작다.
+double get _minChipRoom => AppPlatform.isMobile ? 8 : 18;
 
 /// 주 행 높이 [rowHeight] 에서 실제로 쓸 수 있는 막대 레인 수.
 ///
@@ -149,7 +159,7 @@ class CalendarWeekRow extends StatelessWidget {
                                 .where((s) => s.lane == lane)
                                 .toList(),
                           ),
-                          const SizedBox(height: _barGap),
+                          SizedBox(height: _barGap),
                         ],
                       ],
                     ),
@@ -250,7 +260,7 @@ class _Bar extends StatelessWidget {
     return Container(
       key: ValueKey('calendar-bar-${e.entryKey}'),
       margin: const EdgeInsets.symmetric(horizontal: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: EdgeInsets.symmetric(horizontal: _barShowsTitle ? 4 : 0),
       alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
         color: outlined
@@ -261,23 +271,25 @@ class _Bar extends StatelessWidget {
             : null,
         borderRadius: radius,
       ),
-      child: Text(
-        // 이어져 온 막대에도 제목을 다시 쓴다. 예전엔 "첫 주에 한 번 쓰고 이후는 색으로
-        // 잇는다" 였는데, 실사용에서 둘째 주부터는 이름 없는 색 막대만 남아 무슨 일인지
-        // 알 수 없었다. 이어짐 표시는 잘린 쪽 모서리를 각지게 그리는 것으로 충분하다.
-        e.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.labelSmall?.copyWith(
-          fontSize: 9,
-          height: 1.1,
-          fontWeight: FontWeight.w700,
-          decoration: e.isDone ? TextDecoration.lineThrough : null,
-          color: outlined
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.75)
-              : Colors.white,
-        ),
-      ),
+      child: !_barShowsTitle
+          ? null
+          : Text(
+              // 이어져 온 막대에도 제목을 다시 쓴다. 예전엔 "첫 주에 한 번 쓰고 이후는 색으로
+              // 잇는다" 였는데, 실사용에서 둘째 주부터는 이름 없는 색 막대만 남아 무슨 일인지
+              // 알 수 없었다. 이어짐 표시는 잘린 쪽 모서리를 각지게 그리는 것으로 충분하다.
+              e.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                height: 1.1,
+                fontWeight: FontWeight.w700,
+                decoration: e.isDone ? TextDecoration.lineThrough : null,
+                color: outlined
+                    ? theme.colorScheme.onSurface.withValues(alpha: 0.75)
+                    : Colors.white,
+              ),
+            ),
     );
   }
 }

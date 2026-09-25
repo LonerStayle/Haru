@@ -32,7 +32,7 @@ onboarded_at: 2026-05-25T23:55:00+09:00
 - 할 일 **추가 / 체크 / 삭제**
 - **카테고리 분류** — 기본 5종 (① 회사 할일 ② 개인개발 할일 ③ 일상 할일 ④ 장기 목표 ⑤ 개인 아이디어) 제공 + **사용자가 자유롭게 추가 / 삭제 가능** (v1.2~). 기본 5종도 삭제 가능하며, 카테고리에 속한 할 일이 남아 있으면 삭제 차단. (※ v1.0~v1.1 은 "5종 고정" 이었으나 v1.2 에서 동적 카테고리로 확장)
 - **오늘 할 일 위젯** (메인 화면에 항상 노출)
-- **Cmd+N 글로벌 단축키** — 어디서든 누르면 즉시 할 일 추가 입력창 호출
+- **⌘⇧N 글로벌 단축키** — 어디서든 누르면 즉시 할 일 추가 입력창 호출. 하루 창 안에서는 **⌘N** 도 동작. (※ 2026-09-24 대표님 결정: 전역 ⌘N 은 다른 앱의 "새 창/새 파일" ⌘N 을 가로채서 전역만 ⌘⇧N 으로 변경)
 
 이월 / 정리 로직 (핵심)
 - 오늘 할 일 중 **체크 안 된 항목** → 다음날로 자동 이월
@@ -84,7 +84,7 @@ factory 디폴트 (Python+uv+FastAPI / React Vite / Android Kotlin / Postgres) �
 | **단일 코드베이스** | **Flutter (Dart)** — macOS `.app` + Android `.apk` 한 코드로 동시 빌드 |
 | 데이터·인증·동기화 | **Supabase** (`supabase_flutter` SDK). 별도 백엔드 서버 없음. |
 | 캘린더 연동 | `googleapis` (Calendar v3) + `google_sign_in` |
-| macOS 글로벌 단축키 (Cmd+N) | `hotkey_manager` |
+| macOS 글로벌 단축키 (⌘⇧N, 앱 안 ⌘N) | `hotkey_manager` + Flutter `Shortcuts` |
 | 시스템 트레이 / 메뉴바 | `tray_manager` |
 | macOS 네이티브 룩 보강 | `macos_ui` (Cupertino 톤) |
 | 상태 관리 | `riverpod` |

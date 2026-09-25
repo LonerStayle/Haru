@@ -39,6 +39,7 @@ void main() {
     WidgetTester tester, {
     List<GoogleEventEntry> events = const [],
     bool available = true,
+    bool? connected,
     List<Todo> todos = const [],
   }) async {
     AppPlatform.debugFormFactorOverride = FormFactor.desktop;
@@ -57,6 +58,10 @@ void main() {
           ),
           groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
           googleCalendarAvailableProvider.overrideWithValue(available),
+          // 오버레이는 "키 있음" 이 아니라 "실제 연결됨" 일 때만 켜진다 (UX 감사 B4).
+          googleCalendarConnectedProvider.overrideWithValue(
+            connected ?? available,
+          ),
           googleEventsProvider.overrideWith((ref, range) async => events),
         ],
         child: MaterialApp(
@@ -180,6 +185,16 @@ void main() {
       );
     });
 
+    testWidgets('키는 있어도 계정 연결 전이면 토글·이벤트 모두 없다', (tester) async {
+      // 연결 전에 오버레이가 켜지면 조회가 로그인 창을 띄웠다 (UX 감사 B4).
+      await mount(tester, events: [meeting()], connected: false);
+      expect(
+        find.byKey(const ValueKey('calendar-google-toggle')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('calendar-chip-gcal:g1')), findsNothing);
+    });
+
     testWidgets('연동이 없으면 이벤트도 안 그린다 (기본 off)', (tester) async {
       await mount(tester, events: [meeting()], available: false);
       expect(find.byKey(const ValueKey('calendar-chip-gcal:g1')), findsNothing);
@@ -216,6 +231,7 @@ void main() {
             ),
             groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
             googleCalendarAvailableProvider.overrideWithValue(true),
+            googleCalendarConnectedProvider.overrideWithValue(true),
             googleEventsProvider.overrideWith(
               (ref, range) async => throw Exception('network down'),
             ),

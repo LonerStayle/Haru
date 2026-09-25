@@ -370,4 +370,83 @@ void main() {
       expect(await repo.getById('series#20260820'), isNotNull);
     });
   });
+
+  test('restoreStatus: 체크 전 상태(진행중·시작 시각)만 되돌리고 그 사이 편집·순서는 보존', () async {
+    final started = DateTime.utc(2026, 5, 27, 8);
+    final before = seed().copyWith(startedAt: started, sortOrder: 4);
+    await repo.upsert(before);
+    await controller.toggle(before); // 완료
+    // 되돌리기 전에 제목을 고쳤다.
+    final done = (await repo.getById('a'))!;
+    await repo.upsert(done.copyWith(title: '회의 (수정)'));
+
+    await controller.restoreStatus(before);
+
+    final row = (await repo.getById('a'))!;
+    expect(row.status, TodoStatus.inProgress);
+    expect(row.startedAt, started, reason: '원래 시작 시각 그대로');
+    expect(row.doneAt, isNull);
+    expect(row.title, '회의 (수정)', reason: '되돌리기는 상태만 — 편집은 살린다');
+    expect(row.sortOrder, 4);
+  });
+
+  group('deleteTree — 하위 포함 삭제 (Phase 2)', () {
+    Todo node(String id, {String? parentId}) => Todo(
+      id: id,
+      title: id,
+      category: Category.work,
+      createdAt: created,
+      updatedAt: created,
+      parentId: parentId,
+    );
+
+    test('부모를 지우면 자손까지 지워지고 스냅샷은 부모 먼저', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      final g = node('g', parentId: 'c');
+      final other = node('o');
+      for (final t in [p, c, g, other]) {
+        await repo.upsert(t);
+      }
+
+      final snapshot = await controller.deleteTree(p);
+
+      expect(snapshot.first.id, 'p');
+      expect(snapshot.map((t) => t.id).toSet(), {'p', 'c', 'g'});
+      expect(await repo.getById('p'), isNull);
+      expect(await repo.getById('c'), isNull);
+      expect(await repo.getById('g'), isNull);
+      expect(await repo.getById('o'), isNotNull, reason: '다른 가지는 그대로');
+    });
+
+    test('되돌리기(restoreAll) — 트리 전체 복원', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      await repo.upsert(p);
+      await repo.upsert(c);
+
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreAll(snapshot);
+
+      expect(await repo.getById('p'), p);
+      expect(await repo.getById('c'), c);
+    });
+
+    test('restoreDeleted — 캘린더 연결은 끊고 되살린다', () async {
+      final p = node('p').copyWith(
+        calendarEventId: 'evt-1',
+        calendarId: 'primary',
+        calendarProvider: 'google',
+      );
+      await repo.upsert(p);
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreDeleted(snapshot);
+
+      final back = await repo.getById('p');
+      expect(back, isNotNull);
+      expect(back!.calendarEventId, isNull);
+      expect(back.calendarId, isNull);
+      expect(back.title, p.title);
+    });
+  });
 }

@@ -126,7 +126,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('어제 못 끝낸 일'), findsOneWidget);
-    expect(find.textContaining('1건이 오늘로 이월'), findsOneWidget);
+    expect(find.textContaining('1건이 오늘로 넘어왔어요'), findsOneWidget);
   });
 
   testWidgets('이월 배너 — light 테마에서 bg alpha 0.08', (tester) async {
@@ -277,5 +277,122 @@ void main() {
         );
       },
     );
+  });
+
+  group('UX Phase 1 — 오늘 화면', () {
+    final now = DateTime(2026, 5, 27, 10);
+
+    testWidgets('끝낸 항목은 섹션 아래 "완료 N개" 로 접히고, 누르면 펼쳐진다', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      controller.add([
+        todo(id: 'a', title: '남은 일', dueAt: DateTime(2026, 5, 27)),
+        todo(
+          id: 'b',
+          title: '끝낸 일',
+          dueAt: DateTime(2026, 5, 27),
+          doneAt: DateTime(2026, 5, 27, 9),
+        ),
+      ]);
+      await tester.pump();
+
+      expect(find.text('남은 일'), findsOneWidget);
+      expect(find.text('끝낸 일'), findsNothing);
+      expect(find.text('완료 1개'), findsOneWidget);
+
+      await tester.tap(find.text('완료 1개'));
+      await tester.pumpAndSettle();
+      expect(find.text('끝낸 일'), findsOneWidget);
+    });
+
+    testWidgets('이월 배너 "이월만 보기" → 넘어온 항목만, "전체 보기" 로 복귀', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      controller.add([
+        todo(
+          id: 'y',
+          title: '어제 일',
+          dueAt: DateTime(2026, 5, 26),
+          createdAt: DateTime.utc(2026, 5, 26),
+        ),
+        todo(id: 't', title: '오늘 일', dueAt: DateTime(2026, 5, 27)),
+      ]);
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('어제 일'), findsOneWidget);
+      expect(find.text('오늘 일'), findsNothing);
+      expect(find.textContaining('이월된 1건만 보는 중'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+    });
+
+    testWidgets('하위만 이월돼도 "이월만 보기" 에 그 부모가 남는다 (빈 화면 방지)', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      final parent = todo(id: 'p', title: '부모 일', dueAt: DateTime(2026, 5, 27));
+      final child = todo(
+        id: 'k',
+        title: '어제 하위',
+        dueAt: DateTime(2026, 5, 26),
+      ).copyWith(parentId: 'p');
+      controller.add([
+        parent,
+        child,
+        todo(id: 't', title: '오늘 일', dueAt: DateTime(2026, 5, 27)),
+      ]);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('부모 일'), findsOneWidget);
+      expect(find.text('오늘 일'), findsNothing);
+    });
+
+    testWidgets('이월이 정리되면 필터가 꺼지고, 다시 생겨도 저절로 켜지지 않는다', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      final carried = todo(
+        id: 'y',
+        title: '어제 일',
+        dueAt: DateTime(2026, 5, 26),
+      );
+      final today = todo(id: 't', title: '오늘 일', dueAt: DateTime(2026, 5, 27));
+      controller.add([carried, today]);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-filter')));
+      await tester.pump();
+      expect(find.text('오늘 일'), findsNothing);
+
+      // 이월 항목 완료 → 필터 해제.
+      controller.add([
+        carried.copyWith(doneAt: DateTime(2026, 5, 27, 9)),
+        today,
+      ]);
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+
+      // 되돌리기로 이월이 다시 생겨도 필터는 꺼진 채.
+      controller.add([carried, today]);
+      await tester.pump();
+      expect(find.text('오늘 일'), findsOneWidget);
+      expect(find.textContaining('만 보는 중'), findsNothing);
+    });
+
+    testWidgets('이월 배너 닫기 → 오늘은 안 보인다, 항목은 그대로', (tester) async {
+      final controller = await mountWith(tester, fixedNow: now);
+      controller.add([
+        todo(
+          id: 'y',
+          title: '어제 일',
+          dueAt: DateTime(2026, 5, 26),
+          createdAt: DateTime.utc(2026, 5, 26),
+        ),
+      ]);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('carryover-banner-dismiss')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('carryover-banner')), findsNothing);
+      expect(find.text('어제 일'), findsOneWidget);
+    });
   });
 }

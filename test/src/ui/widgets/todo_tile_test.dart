@@ -252,7 +252,7 @@ void main() {
       );
     });
 
-    testWidgets('trailing 버튼 터치 타겟은 36dp', (tester) async {
+    testWidgets('폰 — 체크 하나(36dp)만, 진행중·⋮ 버튼은 없다 (Phase 1)', (tester) async {
       AppPlatform.debugFormFactorOverride = FormFactor.mobile;
       await mountNarrow(tester, make());
 
@@ -260,14 +260,9 @@ void main() {
         tester.getSize(find.byKey(const ValueKey('todo-tile-check'))),
         const Size(36, 36),
       );
-      expect(
-        tester.getSize(find.byKey(const ValueKey('todo-tile-progress'))),
-        const Size(36, 36),
-      );
-      expect(
-        tester.getSize(find.byKey(const ValueKey('todo-tile-menu-a'))),
-        const Size(36, 36),
-      );
+      // 진행중·이동·복사·삭제는 길게 눌렀다 떼면 나오는 메뉴 시트로.
+      expect(find.byKey(const ValueKey('todo-tile-progress')), findsNothing);
+      expect(find.byKey(const ValueKey('todo-tile-menu-a')), findsNothing);
     });
 
     testWidgets('드릴 배지는 trailing 이 아니라 제목 아래 메타 줄', (tester) async {
@@ -283,16 +278,16 @@ void main() {
       );
     });
 
-    testWidgets('데스크탑도 폭이 넉넉하면 제목 줄 제한 없이 현행 유지', (tester) async {
+    testWidgets('데스크탑 넓은 폭 — 제목 2줄 제한, 체크는 compact 40dp', (tester) async {
       AppPlatform.debugFormFactorOverride = FormFactor.desktop;
       await mountNarrow(tester, make(title: longTitle), width: 600);
 
       final title = tester.widget<Text>(find.text(longTitle));
-      expect(title.maxLines, isNull);
-      expect(title.overflow, isNull);
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
       expect(
         tester.getSize(find.byKey(const ValueKey('todo-tile-check'))),
-        const Size(48, 48),
+        const Size(40, 40),
       );
     });
 

@@ -127,7 +127,9 @@ void main() {
     expect(find.text('하위 1'), findsOneWidget);
   });
 
-  testWidgets('leaf(자식 없음) 탭 → onEdit 호출 (onDrillDown 아님)', (tester) async {
+  testWidgets('leaf(자식 없음) 탭도 → onDrillDown (탭 = 항상 상세, Phase 2)', (
+    tester,
+  ) async {
     final leaf = make(id: 'l', title: '단일');
     Todo? drilled;
     Todo? edited;
@@ -142,8 +144,8 @@ void main() {
     await tester.tap(find.text('단일'));
     await tester.pump();
 
-    expect(edited?.id, 'l');
-    expect(drilled, isNull);
+    expect(drilled?.id, 'l');
+    expect(edited, isNull);
     expect(find.byKey(const ValueKey('todo-tile-drill-l')), findsNothing);
   });
 
@@ -422,7 +424,7 @@ void main() {
     const hintKey = ValueKey('drill-reorder-hint-draggable');
     const sortBlockedKey = ValueKey('drill-reorder-hint-sortBlocked');
     const filterBlockedKey = ValueKey('drill-reorder-hint-filterBlocked');
-    const hintText = '길게 눌러 순서를 바꿀 수 있어요';
+    const hintText = '길게 눌러 끌면 순서 변경 · 우클릭하면 메뉴';
     const sortBlockedText = '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요';
     const filterBlockedText = '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요';
 

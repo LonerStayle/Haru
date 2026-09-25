@@ -128,3 +128,27 @@ final dedupedTodayProvider = Provider<DedupedToday>((ref) {
     orElse: () => const DedupedToday(visible: [], hiddenCountBySeries: {}),
   );
 });
+
+/// 이월 배너를 "닫기" 한 날(로컬 자정) — 화면별(전역 오늘 = '', 그룹 탭 = 그룹 id).
+/// 그날은 다시 띄우지 않고, 다음 날 새 이월이 생기면 다시 보인다. 세션 동안만
+/// 기억한다 — 앱을 다시 켜면 한 번 더 알려 주는 게 낫다(놓친 이월을 알리는 배너).
+final carryoverBannerDismissedProvider =
+    NotifierProvider<CarryoverBannerDismissed, Map<String, DateTime>>(
+      CarryoverBannerDismissed.new,
+    );
+
+class CarryoverBannerDismissed extends Notifier<Map<String, DateTime>> {
+  @override
+  Map<String, DateTime> build() => const {};
+
+  void dismiss(String scope, DateTime now) =>
+      state = {...state, scope: DateTime(now.year, now.month, now.day)};
+
+  bool isDismissedOn(String scope, DateTime now) {
+    final d = state[scope];
+    return d != null &&
+        d.year == now.year &&
+        d.month == now.month &&
+        d.day == now.day;
+  }
+}

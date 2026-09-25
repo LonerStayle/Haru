@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
 import 'package:solo_todo/src/ui/widgets/dismissible_todo_tile.dart';
 
 void main() {
+  // 스와이프 삭제는 모바일 전용이다 (데스크탑은 흔들린 클릭을 빼앗아 꺼 둠 —
+  // desktop_click_jitter_test.dart 참고). 이 파일은 모바일 동작을 검증한다.
+  setUp(() => AppPlatform.debugFormFactorOverride = FormFactor.mobile);
+  tearDown(() => AppPlatform.debugFormFactorOverride = null);
+
   Todo make({String id = 'a'}) => Todo(
     id: id,
     title: 'x',
@@ -75,5 +81,11 @@ void main() {
     final result = await fn!(DismissDirection.endToStart);
     expect(called, isTrue);
     expect(result, isFalse);
+  });
+
+  testWidgets('데스크탑 — 스와이프 삭제 없음 (Dismissible 미사용)', (tester) async {
+    AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+    await mount(tester);
+    expect(find.byType(Dismissible), findsNothing);
   });
 }

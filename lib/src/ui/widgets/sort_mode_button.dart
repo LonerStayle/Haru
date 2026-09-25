@@ -5,8 +5,10 @@ import '../../domain/policies/todo_sort_policy.dart';
 
 /// 정렬 토글의 공통 문구 — 버튼(라벨형)과 AppBar(아이콘형)가 같은 말을 쓰도록 한 곳에 둔다.
 const String _sortLabel = '일정순';
-String _sortTooltip(TodoSortMode mode) =>
-    mode == TodoSortMode.dueDate ? '내가 정한 순서로 보기' : '일정이 빠른 순으로 보기';
+// 정렬은 전역 설정 — 한 곳에서 켜면 모든 카테고리·하위 목록에 같이 적용된다.
+String _sortTooltip(TodoSortMode mode) => mode == TodoSortMode.dueDate
+    ? '내가 정한 순서로 보기 (모든 목록에 적용)'
+    : '일정이 빠른 순으로 보기 (모든 목록에 적용)';
 
 /// 목록 정렬 토글 버튼 (라벨형) — 카테고리 화면 헤더용.
 ///

@@ -7,13 +7,13 @@ import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/todo_tile.dart';
-import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/todo_row_actions.dart';
+import '../todo_actions/toggle_with_undo.dart';
 import 'todo_search.dart';
 
 /// 할 일·메모 전역 검색 화면.
@@ -162,43 +162,20 @@ class _Results extends ConsumerWidget {
             todo: todo,
             breadcrumb: hit.breadcrumb,
             snippet: hit.snippet,
-            onToggle: () => ref.read(todoActionsProvider).toggle(todo),
+            onToggle: () =>
+                toggleWithUndo(context, ref.read(todoActionsProvider), todo),
             // 메모는 체크 개념이 없어 진행중 토글도 두지 않는다.
             onToggleInProgress: todo.type == TodoType.note
                 ? null
                 : () => ref.read(todoActionsProvider).toggleInProgress(todo),
-            onTap: () => _edit(context, ref, todo),
-            onEditItem: () => _edit(context, ref, todo),
+            onTap: () => openTodoDetail(context, todo),
+            onEditItem: () => openTodoEdit(context, ref, todo),
             onMove: () => showMoveTodoSheet(context, ref, item: todo),
             onCopy: () => showCopyTodoSheet(context, ref, original: todo),
-            onDelete: () => _delete(context, ref, todo),
+            onDelete: () => deleteTodoWithUndo(context, ref, todo),
           ),
         );
       },
-    );
-  }
-
-  Future<void> _edit(BuildContext context, WidgetRef ref, Todo todo) {
-    return AddTodoSheet.show(
-      context,
-      initialCategory: todo.category,
-      initialTodo: todo,
-      onSubmit: (_) {},
-      onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
-      onStatusChanged: (updated) =>
-          ref.read(todoActionsProvider).updatePreservingOrder(updated),
-      onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
-    );
-  }
-
-  Future<void> _delete(BuildContext context, WidgetRef ref, Todo todo) async {
-    final actions = ref.read(todoActionsProvider);
-    await actions.delete(todo);
-    if (!context.mounted) return;
-    showUndoSnackbar(
-      context,
-      message: '"${todo.title}" 삭제됨',
-      onUndo: () => actions.restore(todo),
     );
   }
 }

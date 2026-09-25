@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform.dart';
 import '../../core/theme.dart';
+import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../auth/auth_providers.dart';
 import '../calendar/calendar_event.dart';
 import '../calendar/calendar_settings.dart';
 import '../calendar/calendar_settings_screen.dart';
@@ -144,6 +146,9 @@ class _SettingsSheetState extends State<SettingsSheet> {
               _calendarTile(theme, scheme),
               _microsoftCalendarTile(theme, scheme),
               const Divider(height: AppTokens.hairline),
+              // 로그인 계정 + 로그아웃 — 로그인 상태일 때만 보인다 (UX 감사 B9:
+              // 로그아웃 기능은 있었지만 누를 곳이 없었다).
+              const _AccountTile(),
               _infoTile(theme, scheme),
               const SizedBox(height: AppTokens.space8),
             ],
@@ -431,5 +436,109 @@ class _SettingsSheetState extends State<SettingsSheet> {
         ],
       ),
     );
+  }
+}
+
+/// 로그인한 계정 이메일 + 로그아웃 버튼. Supabase 미사용(로컬 전용)이거나 로그아웃
+/// 상태면 아무것도 그리지 않는다.
+class _AccountTile extends ConsumerWidget {
+  const _AccountTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider);
+    if (user == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final email = user.email ?? '로그인됨';
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space16,
+            vertical: AppTokens.space8,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(AppTokens.radiusM),
+                ),
+                child: Icon(
+                  Icons.account_circle_outlined,
+                  color: scheme.onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('계정', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 2),
+                    Text(
+                      email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                key: const ValueKey('sign-out-button'),
+                onPressed: () => _confirmSignOut(context, ref),
+                style: TextButton.styleFrom(foregroundColor: scheme.error),
+                child: const Text('로그아웃'),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: AppTokens.hairline),
+      ],
+    );
+  }
+
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final pending = ref.read(outboxCountProvider).value ?? 0;
+    final ok =
+        await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('로그아웃할까요?'),
+            content: Text(
+              pending > 0
+                  ? '아직 서버에 올라가지 않은 변경 $pending건은 이 기기에서 사라져요.\n'
+                        '다시 로그인하면 서버에 있는 할 일은 그대로 돌아와요.'
+                  : '이 기기의 할 일 목록을 지우고 로그인 화면으로 돌아가요.\n'
+                        '다시 로그인하면 서버에 있는 할 일이 그대로 돌아와요.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(ctx).colorScheme.error,
+                ),
+                child: const Text('로그아웃'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!ok || !context.mounted) return;
+    // 설정 시트를 먼저 닫는다 — 로그아웃되면 _AuthGate 가 AppShell 을 SignInScreen 으로
+    // 바꾸므로, 시트가 열린 채면 사라진 화면 위에 떠 있게 된다.
+    // ref 는 시트가 닫히며 dispose 되므로 컨트롤러를 먼저 잡아 둔다.
+    final signOut = ref.read(signOutControllerProvider);
+    Navigator.of(context).pop();
+    await signOut.signOutAndClear();
   }
 }

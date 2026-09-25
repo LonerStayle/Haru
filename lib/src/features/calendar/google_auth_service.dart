@@ -99,7 +99,7 @@ bool storedScopesCoverRequired(
 //  PKCE 플로우 하나로 통일했다.)
 // ---------------------------------------------------------------------------
 
-class MobileCalendarAuth implements CalendarAuth {
+class MobileCalendarAuth implements CalendarAuth, SilentCalendarAuth {
   MobileCalendarAuth(this._clientId);
 
   /// Android 활성화 게이트용. 실제 매칭은 SHA-1 + 패키지명으로 이뤄지므로 값 자체는
@@ -146,6 +146,24 @@ class MobileCalendarAuth implements CalendarAuth {
     return HeaderClient(headers);
   }
 
+  /// 저장된 세션 + 이미 부여된 scope 로만 client 를 만든다. 로그인·동의 창을 띄워야
+  /// 하는 상황이면 null.
+  @override
+  Future<http.Client?> silentClient() async {
+    try {
+      await _ensureInit();
+      final account = await _tryRestore();
+      if (account == null) return null;
+      final headers = await account.authorizationClient.authorizationHeaders(
+        _scopes,
+      );
+      return headers == null ? null : HeaderClient(headers);
+    } catch (e) {
+      debugPrint('[haru] Google 무프롬프트 인증 실패: $e');
+      return null;
+    }
+  }
+
   @override
   Future<void> signOut() async {
     try {
@@ -161,7 +179,7 @@ class MobileCalendarAuth implements CalendarAuth {
 // macOS — googleapis_auth 데스크톱 OAuth 플로우 (키체인/서명 불필요)
 // ---------------------------------------------------------------------------
 
-class DesktopCalendarAuth implements CalendarAuth {
+class DesktopCalendarAuth implements CalendarAuth, SilentCalendarAuth {
   DesktopCalendarAuth({required this.clientId, required this.clientSecret});
 
   /// "Desktop app" 타입 OAuth 클라이언트 (client_secret 동반). localhost 리다이렉트를
@@ -212,6 +230,36 @@ class DesktopCalendarAuth implements CalendarAuth {
       return client;
     } catch (e) {
       debugPrint('[solo_todo] Calendar OAuth 동의 실패/취소: $e');
+      return null;
+    }
+  }
+
+  /// 저장된 refresh token 으로만 client 를 만든다. 브라우저 동의가 필요하면 null.
+  ///
+  /// [authedClient] 와 달리 실패해도 저장 토큰을 지우지 않는다 — 보기 전용 호출이
+  /// 연결 상태를 바꾸면 안 된다 (네트워크 순단으로 토큰이 날아가는 사고 방지).
+  @override
+  Future<http.Client?> silentClient() async {
+    final stored = await _loadStoredToken();
+    if (stored == null || !storedScopesCoverRequired(stored.scopes, _scopes)) {
+      return null;
+    }
+    final base = http.Client();
+    try {
+      final stale = gauth.AccessCredentials(
+        gauth.AccessToken(
+          'Bearer',
+          'expired',
+          DateTime.now().toUtc().subtract(const Duration(hours: 1)),
+        ),
+        stored.refreshToken,
+        _scopes,
+      );
+      final fresh = await gauth.refreshCredentials(_id, stale, base);
+      return gauth.autoRefreshingClient(_id, fresh, base);
+    } catch (e) {
+      debugPrint('[haru] Calendar 무프롬프트 갱신 실패: $e');
+      base.close();
       return null;
     }
   }

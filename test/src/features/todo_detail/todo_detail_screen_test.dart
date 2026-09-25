@@ -8,7 +8,9 @@ import 'package:solo_todo/src/data/local/local_todo_repository.dart';
 import 'package:solo_todo/src/data/providers.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
+import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/features/settings/sort_mode_controller.dart';
 import 'package:solo_todo/src/features/todo_detail/todo_detail_screen.dart';
@@ -104,6 +106,9 @@ void main() {
     SortModePreference? sortStore,
   }) async {
     final repoOverride = LocalTodoRepository(db.todosDao);
+    // 부모 카드가 위를 차지하므로 하위 목록까지 한 화면에 들어오게 넉넉히.
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -118,6 +123,7 @@ void main() {
           childrenOfProvider(
             parent.id,
           ).overrideWith((_) => Stream.value(children)),
+          groupsProvider.overrideWith((_) => Stream.value(const <Group>[])),
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -129,13 +135,21 @@ void main() {
     await tester.pump(Duration.zero);
   }
 
-  testWidgets('AppBar 에 parent 제목 + 직속 자식 리스트 표시', (tester) async {
+  testWidgets('AppBar·부모 카드에 제목 + 직속 자식 리스트 표시', (tester) async {
     final parent = make(id: 'p', title: '회사 프로젝트');
     final child = make(id: 'c1', title: '설계', parentId: 'p');
 
     await mount(tester, parent, children: [child]);
 
-    expect(find.text('회사 프로젝트'), findsOneWidget); // AppBar title
+    // AppBar 제목 + 부모 카드 제목.
+    expect(find.text('회사 프로젝트'), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('detail-parent-card')),
+        matching: find.text('회사 프로젝트'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('설계'), findsOneWidget); // 직속 자식
   });
 
@@ -352,7 +366,7 @@ void main() {
   // 롱프레스 → 실제 드래그 → 저장까지 한 줄로 이어지는지, 그리고 그 저장이
   // **형제 범위에만** 닿는지(다른 가지는 그대로) 를 실기기와 같은 제스처로 고정한다.
   group('하위 형제 드래그 재정렬', () {
-    const hintText = '길게 눌러 순서를 바꿀 수 있어요';
+    const hintText = '길게 눌러 끌면 순서 변경 · 우클릭하면 메뉴';
     const sortBlockedText = '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요';
     const filterBlockedText = '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요';
 

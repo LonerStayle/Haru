@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
 
@@ -116,22 +117,38 @@ class TodoStatusFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final chips = [
+      for (final filter in TodoStatusFilter.values)
+        // 메모가 없는 카테고리에서는 메모 칩 자체를 숨긴다.
+        if (filter != TodoStatusFilter.note || counts.note > 0)
+          _FilterChip(
+            filter: filter,
+            count: counts.countOf(filter),
+            selected: filter == selected,
+            base: _baseColor(filter, scheme),
+            strong: _strongColor(filter, scheme),
+            onTap: () => onSelected(filter),
+          ),
+    ];
+    // 폰은 한 줄 가로 스크롤 — 두 줄로 넘치면 목록이 그만큼 밀린다.
+    if (AppPlatform.isMobile) {
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        primary: false,
+        child: Row(
+          children: [
+            for (var i = 0; i < chips.length; i++) ...[
+              if (i > 0) const SizedBox(width: AppTokens.space8),
+              chips[i],
+            ],
+          ],
+        ),
+      );
+    }
     return Wrap(
       spacing: AppTokens.space8,
       runSpacing: AppTokens.space8,
-      children: [
-        for (final filter in TodoStatusFilter.values)
-          // 메모가 없는 카테고리에서는 메모 칩 자체를 숨긴다.
-          if (filter != TodoStatusFilter.note || counts.note > 0)
-            _FilterChip(
-              filter: filter,
-              count: counts.countOf(filter),
-              selected: filter == selected,
-              base: _baseColor(filter, scheme),
-              strong: _strongColor(filter, scheme),
-              onTap: () => onSelected(filter),
-            ),
-      ],
+      children: chips,
     );
   }
 

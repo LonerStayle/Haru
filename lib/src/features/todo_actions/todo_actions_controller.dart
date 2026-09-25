@@ -41,6 +41,49 @@ class TodoActionsController {
   /// id 기준 삭제. 호출자가 [restore] 로 되돌릴 수 있도록 원본은 호출자가 보관.
   Future<void> delete(Todo todo) => _repo.deleteById(todo.id);
 
+  /// 항목과 그 **모든 하위 항목**을 지운다. 되돌리기용 스냅샷(본인 먼저)을 돌려준다.
+  ///
+  /// [delete] 는 한 줄만 지워 하위 항목이 부모 없는 채 남았다(어느 목록에도 안 보이지만
+  /// 카테고리 건수엔 잡히는 유령). 목록의 삭제는 이쪽을 쓴다. 되돌리기 = [restoreAll].
+  ///
+  /// [all] 이 있으면 그 목록으로 자손을 찾는다(화면이 이미 들고 있는 전체 목록).
+  Future<List<Todo>> deleteTree(Todo todo, {List<Todo>? all}) async {
+    final everything = all ?? await _repo.watchAll().first;
+    var root = todo;
+    for (final t in everything) {
+      if (t.id == todo.id) {
+        root = t;
+        break;
+      }
+    }
+    final snapshot = [root, ...MovePolicy.descendants(todo.id, everything)];
+    // 부모부터 지운다 — 목록에서 그 줄이 첫 갱신에 바로 사라진다(밀어서 지운 행이
+    // 자식 삭제마다 다시 그려지면 Dismissible 이 "이미 지운 행" 오류를 낸다).
+    for (final t in snapshot) {
+      await _repo.deleteById(t.id);
+    }
+    return snapshot;
+  }
+
+  /// 삭제 되돌리기 — [restoreAll] 과 같되 **캘린더 연결은 끊고** 되살린다.
+  ///
+  /// 삭제할 때 연결된 캘린더 일정도 지우기로 예약됐으므로, 옛 일정 id 를 그대로 두면
+  /// 이후 수정이 없는 일정으로 간다. 연결을 비워 두면 저장 규칙(기본 캘린더 등록 설정)에
+  /// 따라 새 일정으로 다시 만들어진다.
+  Future<void> restoreDeleted(List<Todo> snapshot) async {
+    for (final t in snapshot) {
+      await _repo.upsert(
+        t.calendarEventId == null
+            ? t
+            : t.copyWith(
+                calendarEventId: null,
+                calendarId: null,
+                calendarProvider: null,
+              ),
+      );
+    }
+  }
+
   /// [delete] 로 지워진 Todo 를 그대로 복원 (id 동일, updatedAt 보존).
   /// Undo SnackBar 의 "되돌리기" 액션이 호출한다.
   Future<void> restore(Todo todo) => _repo.upsert(todo);
@@ -111,6 +154,17 @@ class TodoActionsController {
     );
     await _repo.upsert(synced);
     return synced;
+  }
+
+  /// 체크 되돌리기 — [before] 의 3-상태(doneAt / startedAt)만 **지금 저장된 행**에
+  /// 되돌려 쓴다. 되돌리기 전에 제목 등을 고쳤어도 그 편집은 살리고, 진행중이던
+  /// 항목은 원래 시작 시각 그대로 돌아간다. 순서는 [updatePreservingOrder] 가 보존.
+  Future<void> restoreStatus(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(doneAt: before.doneAt, startedAt: before.startedAt),
+    );
   }
 
   /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.

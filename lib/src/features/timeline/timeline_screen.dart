@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/date_format.dart';
 import '../../core/theme.dart';
 import '../../domain/group.dart';
 import '../../domain/todo.dart';
 import '../../data/providers.dart';
 import '../../ui/widgets/empty_state.dart';
-import '../../ui/widgets/in_progress_triangle.dart';
-import '../add_todo/add_todo_sheet.dart';
+import '../../ui/widgets/todo_tile.dart';
+import '../add_todo/add_todo_controller.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/todo_row_actions.dart';
+import '../todo_actions/toggle_with_undo.dart';
 
 /// 타임라인 — **날짜(dueAt)가 지정된 미완료 task** 를 전역에서 날짜 버킷으로 모아 본다.
 ///
@@ -53,19 +54,6 @@ class TimelineScreen extends ConsumerWidget {
           ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
 
     final buckets = _bucketize(dated, now);
-
-    void edit(Todo t) {
-      AddTodoSheet.show(
-        context,
-        initialCategory: t.category,
-        initialTodo: t,
-        onSubmit: (_) {},
-        onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
-        onStatusChanged: (updated) =>
-            ref.read(todoActionsProvider).updatePreservingOrder(updated),
-        onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
-      );
-    }
 
     return CustomScrollView(
       slivers: [
@@ -113,21 +101,37 @@ class TimelineScreen extends ConsumerWidget {
                   horizontal: AppTokens.space24,
                 ),
                 sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate((context, i) {
+                  // builder 의 context 는 쓰지 않는다 — 완료·삭제하면 그 줄이 목록에서
+                  // 빠져 죽는다. 스낵바·시트는 화면 context 로.
+                  delegate: SliverChildBuilderDelegate((_, i) {
                     final t = bucket.items[i];
+                    final groupLabel = t.category.groupId == null
+                        ? null
+                        : groupLabelOf[t.category.groupId];
                     return Padding(
                       key: ValueKey('timeline-tile-${t.id}'),
                       padding: const EdgeInsets.only(bottom: AppTokens.space8),
-                      child: _TimelineTile(
+                      // 다른 목록과 같은 한 줄(체크 하나 + hover/길게 누르기 메뉴).
+                      // 카테고리가 섞여 있으니 소속을 제목 위 한 줄로 보인다.
+                      child: TodoTile(
                         todo: t,
-                        groupLabel: t.category.groupId == null
-                            ? null
-                            : groupLabelOf[t.category.groupId],
-                        overdue: bucket.kind == _BucketKind.overdue,
-                        onToggle: () => ref.read(todoActionsProvider).toggle(t),
+                        breadcrumb: groupLabel == null
+                            ? t.category.label
+                            : '$groupLabel › ${t.category.label}',
+                        isCarriedOver: bucket.kind == _BucketKind.overdue,
+                        onToggle: () => toggleWithUndo(
+                          context,
+                          ref.read(todoActionsProvider),
+                          t,
+                        ),
                         onToggleInProgress: () =>
                             ref.read(todoActionsProvider).toggleInProgress(t),
-                        onTap: () => edit(t),
+                        onTap: () => openTodoDetail(context, t),
+                        onEditItem: () => openTodoEdit(context, ref, t),
+                        onMove: () => showMoveTodoSheet(context, ref, item: t),
+                        onCopy: () =>
+                            showCopyTodoSheet(context, ref, original: t),
+                        onDelete: () => deleteTodoWithUndo(context, ref, t),
                       ),
                     );
                   }, childCount: bucket.items.length),
@@ -253,131 +257,6 @@ class _BucketHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// 타임라인 한 줄 — 체크 + 제목 + 카테고리·그룹 + 날짜 라벨.
-class _TimelineTile extends StatelessWidget {
-  const _TimelineTile({
-    required this.todo,
-    required this.groupLabel,
-    required this.overdue,
-    required this.onToggle,
-    required this.onToggleInProgress,
-    required this.onTap,
-  });
-
-  final Todo todo;
-  final String? groupLabel;
-  final bool overdue;
-  final VoidCallback onToggle;
-  final VoidCallback onToggleInProgress;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final color = todo.category.color;
-    final dateLabel = TodoDateLabel.format(todo);
-
-    return Card(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppTokens.space12,
-            vertical: AppTokens.space12,
-          ),
-          child: Row(
-            children: [
-              // 진행중(세모) 버튼 — 완료 체크 원 왼쪽.
-              InkWell(
-                key: ValueKey('timeline-progress-${todo.id}'),
-                onTap: onToggleInProgress,
-                customBorder: const CircleBorder(),
-                child: Padding(
-                  padding: const EdgeInsets.all(AppTokens.space4),
-                  child: InProgressTriangle(
-                    active: todo.isInProgress,
-                    color: color,
-                    size: 20,
-                  ),
-                ),
-              ),
-              // 원형 체크 — 탭 시 완료(목록에서 사라짐).
-              InkWell(
-                key: ValueKey('timeline-check-${todo.id}'),
-                onTap: onToggle,
-                customBorder: const CircleBorder(),
-                child: Padding(
-                  padding: const EdgeInsets.all(AppTokens.space4),
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: todo.isInProgress
-                          ? color.withValues(alpha: 0.12)
-                          : null,
-                      border: Border.all(color: scheme.outline, width: 2),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppTokens.space12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      todo.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: AppTokens.space4),
-                    Row(
-                      children: [
-                        Icon(todo.category.icon, size: 13, color: color),
-                        const SizedBox(width: AppTokens.space4),
-                        Flexible(
-                          child: Text(
-                            groupLabel == null
-                                ? todo.category.label
-                                : '$groupLabel - ${todo.category.label}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurface.withValues(alpha: 0.65),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              if (dateLabel != null) ...[
-                const SizedBox(width: AppTokens.space8),
-                Text(
-                  dateLabel,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: overdue
-                        ? const Color(0xFFEF4444)
-                        : scheme.onSurface.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

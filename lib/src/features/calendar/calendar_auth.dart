@@ -16,6 +16,15 @@ abstract class CalendarAuth {
   Future<void> signOut();
 }
 
+/// 사용자에게 **아무 창도 띄우지 않고** 인증 client 를 얻을 수 있는 구현체.
+///
+/// 캘린더 화면의 일정 오버레이처럼 "보기만 하는" 호출은 이걸 쓴다. [CalendarAuth.authedClient]
+/// 는 저장 토큰이 없거나 만료되면 브라우저/로그인 창을 여는데, 화면을 열었을 뿐인데 로그인
+/// 창이 튀어나오면 안 되기 때문이다 (UX 감사 B4). 창이 필요하면 null 을 돌려준다.
+abstract interface class SilentCalendarAuth {
+  Future<http.Client?> silentClient();
+}
+
 /// 고정 헤더만 주입하는 얇은 [http.Client].
 ///
 /// google_sign_in 의 인가 헤더와 Microsoft 의 bearer 토큰이 같은 모양을 필요로 해

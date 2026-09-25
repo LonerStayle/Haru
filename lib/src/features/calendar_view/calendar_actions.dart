@@ -57,16 +57,12 @@ Future<void> openAddTodoOnDate(
   WidgetRef ref,
   DateTime date,
 ) async {
-  AddTodoSubmission? submitted;
-  await AddTodoSheet.show(
+  await showNewTodoSheet(
     context,
+    ref,
     initialCategory: defaultCalendarCategory(ref),
     initialDueAt: dateOnly(date),
-    onSubmit: (s) => submitted = s,
   );
-  if (submitted != null) {
-    await ref.read(addTodoControllerProvider).add(submitted!);
-  }
 }
 
 /// 캘린더에는 "지금 보고 있는 카테고리" 라는 맥락이 없다. 활성 카테고리의 첫 번째를

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
@@ -10,21 +11,42 @@ import 'groups_controller.dart';
 
 const _uuid = Uuid();
 
-/// 새 카테고리 추가 다이얼로그.
+/// 카테고리 추가/수정 다이얼로그.
 ///
 /// label TextField + 16 색 palette + Material Icons picker (builtin 5종 + 일상 모음).
-/// 확인 시 [CategoriesController.add] 호출. id 는 `cat-<uuid>` 로 부여 (builtin 의
-/// 'work' / 'personal_dev' 등과 충돌 회피).
+/// 확인 시 [CategoriesController.add] 호출 (upsert). 신규 id 는 `cat-<uuid>` 로 부여
+/// (builtin 의 'work' / 'personal_dev' 등과 충돌 회피).
+///
+/// [existing] 이 있으면 **수정 모드** — 같은 id 로 이름·색·아이콘·그룹만 갱신하고
+/// sortOrder / isBuiltin / archived 는 보존한다. todos 는 카테고리를 id 로만 참조하므로
+/// (todos_dao 의 categories join) 수정 내용이 모든 할 일에 즉시 반영된다.
 class AddCategoryDialog extends ConsumerStatefulWidget {
-  const AddCategoryDialog({super.key});
+  const AddCategoryDialog({super.key, this.existing, this.initialGroupId});
 
-  /// 다이얼로그 표시 + 결과 반환 (true = 추가됨, false/null = 취소).
-  static Future<bool?> show(BuildContext context) {
+  /// non-null 이면 수정 모드.
+  final Category? existing;
+
+  /// 신규 추가 시 미리 선택할 그룹 (예: 그룹 화면에서 추가). 수정 모드에선 무시.
+  final String? initialGroupId;
+
+  /// 추가 다이얼로그 표시 + 결과 반환 (true = 추가됨, false/null = 취소).
+  static Future<bool?> show(BuildContext context, {String? initialGroupId}) {
     return showDialog<bool>(
       context: context,
-      builder: (_) => const AddCategoryDialog(),
+      builder: (_) => AddCategoryDialog(initialGroupId: initialGroupId),
     );
   }
+
+  /// 수정 다이얼로그 표시 — [category] 값 프리필 (true = 저장됨).
+  static Future<bool?> showEdit(BuildContext context, Category category) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AddCategoryDialog(existing: category),
+    );
+  }
+
+  /// 신규 카테고리의 기본 아이콘 — builtin '회사 할일' 과 겹치지 않게 checklist.
+  static const int defaultIcon = 0xe15b;
 
   /// 사용자가 고를 16 색 palette. 일관성을 위해 builtin 5종 색은 포함하지 않음.
   @visibleForTesting
@@ -105,12 +127,24 @@ class AddCategoryDialog extends ConsumerStatefulWidget {
 }
 
 class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
-  final _labelCtrl = TextEditingController();
-  int _selectedColor = AddCategoryDialog.colorPalette.first;
-  int _selectedIcon = AddCategoryDialog.iconPalette.first;
-  // null = '미분류'. 사용자가 그룹 dropdown 에서 선택하면 해당 Group.id.
+  late final TextEditingController _labelCtrl;
+  late int _selectedColor;
+  late int _selectedIcon;
+  // null = '미분류'. 사용자가 그룹 picker 에서 선택하면 해당 Group.id.
   String? _selectedGroupId;
   bool _submitted = false;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _labelCtrl = TextEditingController(text: e?.label ?? '');
+    _selectedColor = e?.colorValue ?? AddCategoryDialog.colorPalette.first;
+    _selectedIcon = e?.iconCodePoint ?? AddCategoryDialog.defaultIcon;
+    _selectedGroupId = e != null ? e.groupId : widget.initialGroupId;
+  }
 
   @override
   void dispose() {
@@ -118,24 +152,64 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
     super.dispose();
   }
 
-  bool get _canSubmit => _labelCtrl.text.trim().isNotEmpty && !_submitted;
+  /// 같은 이름(대소문자·앞뒤 공백 무시)의 다른 카테고리가 있는지. 보관된 것도 포함 —
+  /// 복원하면 같은 이름 두 개가 나란히 보이게 되므로.
+  bool get _isDuplicate => _duplicate != null;
+
+  /// 이름이 겹치는 다른 카테고리 (보관 포함) — 없으면 null.
+  dynamic get _duplicate {
+    final label = _labelCtrl.text.trim().toLowerCase();
+    if (label.isEmpty) return null;
+    final all = ref.read(categoriesProvider).asData?.value ?? const [];
+    for (final c in all) {
+      if (c.id != widget.existing?.id &&
+          c.label.trim().toLowerCase() == label) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /// 중복 안내 — 보관된 것과 겹치면 어디 있는지 알려 준다(목록에 안 보이므로).
+  String? get _duplicateMessage {
+    final d = _duplicate;
+    if (d == null) return null;
+    return d.archived == true ? '보관함에 같은 이름의 카테고리가 있어요' : '같은 이름의 카테고리가 이미 있어요';
+  }
+
+  bool get _canSubmit =>
+      _labelCtrl.text.trim().isNotEmpty && !_isDuplicate && !_submitted;
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
     setState(() => _submitted = true);
     final controller = ref.read(categoriesControllerProvider);
+    // 신규는 맨 뒤로 — 전체 최대 sortOrder + 1 (최소 100: builtin 뒤).
+    final all = ref.read(categoriesProvider).asData?.value ?? const [];
+    var nextOrder = 100;
+    for (final c in all) {
+      if (c.sortOrder + 1 > nextOrder) nextOrder = c.sortOrder + 1;
+    }
 
-    // 사용자 카테고리는 sortOrder 100 + 임의 (= 항상 builtin 뒤). 정렬 미세조정은 v1.3.
-    final newCategory = Category(
-      id: 'cat-${_uuid.v4()}',
-      label: _labelCtrl.text.trim(),
-      iconCodePoint: _selectedIcon,
-      colorValue: _selectedColor,
-      sortOrder: 100,
-      isBuiltin: false,
-      groupId: _selectedGroupId,
-    );
-    await controller.add(newCategory);
+    // 수정 모드: 같은 id 로 표시 속성만 갱신 (sortOrder/isBuiltin/archived 보존).
+    // 신규: 맨 뒤(nextOrder).
+    final category =
+        widget.existing?.copyWith(
+          label: _labelCtrl.text.trim(),
+          iconCodePoint: _selectedIcon,
+          colorValue: _selectedColor,
+          groupId: _selectedGroupId,
+        ) ??
+        Category(
+          id: 'cat-${_uuid.v4()}',
+          label: _labelCtrl.text.trim(),
+          iconCodePoint: _selectedIcon,
+          colorValue: _selectedColor,
+          sortOrder: nextOrder,
+          isBuiltin: false,
+          groupId: _selectedGroupId,
+        );
+    await controller.add(category);
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -143,8 +217,10 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 중복 이름 검사·다음 순서 계산이 읽는 전체 목록 — 구독해 둬야 값이 채워진다.
+    ref.watch(categoriesProvider);
     return AlertDialog(
-      title: const Text('새 카테고리'),
+      title: Text(_isEdit ? '카테고리 수정' : '새 카테고리'),
       content: SizedBox(
         width: 400,
         child: SingleChildScrollView(
@@ -156,11 +232,14 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 controller: _labelCtrl,
                 autofocus: true,
                 maxLength: 30,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '이름',
                   hintText: '예: 독서, 운동',
+                  errorText: _duplicateMessage,
                 ),
                 onChanged: (_) => setState(() {}),
+                // 데스크탑 키보드 흐름 — Enter 로 바로 저장.
+                onSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: AppTokens.space16),
               Text('색', style: theme.textTheme.titleSmall),
@@ -206,7 +285,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
         ),
         FilledButton(
           onPressed: _canSubmit ? _submit : null,
-          child: const Text('추가'),
+          child: Text(_isEdit ? '저장' : '추가'),
         ),
       ],
     );
@@ -234,8 +313,9 @@ class _ColorPalette extends StatelessWidget {
           GestureDetector(
             onTap: () => onSelect(c),
             child: Container(
-              width: 32,
-              height: 32,
+              // 폰은 손가락 크기(44dp), 데스크탑은 마우스라 조금 작게.
+              width: AppPlatform.isMobile ? 44 : 36,
+              height: AppPlatform.isMobile ? 44 : 36,
               decoration: BoxDecoration(
                 color: Color(c),
                 shape: BoxShape.circle,
@@ -246,6 +326,10 @@ class _ColorPalette extends StatelessWidget {
                   width: 2.5,
                 ),
               ),
+              // 선택 표시를 테두리 색에만 기대지 않도록 체크 글리프 병행 (색각 이상 대응).
+              child: c == selected
+                  ? const Icon(Icons.check, size: 18, color: Colors.white)
+                  : null,
             ),
           ),
       ],

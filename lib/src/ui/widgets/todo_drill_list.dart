@@ -69,11 +69,11 @@ class TodoDrillListSliver extends StatefulWidget {
   /// 전체 todo (자식 개수 판단용). [items] 의 각 항목에 대해 parentId 매칭으로 childCount 계산.
   final List<Todo> allTodos;
 
-  /// 자식이 있는 폴더 항목 탭 → 상세 화면(드릴다운).
-  final void Function(Todo folder) onDrillDown;
+  /// 항목 탭 → 상세 화면 (하위 유무와 무관).
+  final void Function(Todo todo) onDrillDown;
 
-  /// 자식이 없는 leaf 항목 탭 → 편집 시트.
-  final void Function(Todo leaf) onEdit;
+  /// 메뉴 "편집" → 편집 시트.
+  final void Function(Todo todo) onEdit;
 
   final void Function(Todo) onToggle;
 
@@ -193,9 +193,8 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
             ? null
             : () => widget.onToggleInProgress!(todo),
         onDelete: () => widget.onDelete(todo),
-        // 자식 있으면 드릴, 없으면 편집.
-        onTap: () =>
-            hasChildren ? widget.onDrillDown(todo) : widget.onEdit(todo),
+        // 탭 = 항상 상세 (하위 유무와 무관 — Phase 2 "탭 동작 통일"). 편집은 메뉴.
+        onTap: () => widget.onDrillDown(todo),
         // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관하게 ＋하위 추가 노출.
         onAddChild: () => widget.onAddChild(todo),
         // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.
@@ -337,7 +336,11 @@ class _ReorderHintRow extends StatelessWidget {
   final _ReorderHintKind kind;
 
   String get _text => switch (kind) {
-    _ReorderHintKind.draggable => '길게 눌러 순서를 바꿀 수 있어요',
+    // 길게 누르기는 "끌면 순서 / 떼면 메뉴" (UX Phase 1). 데스크탑 메뉴는 우클릭.
+    _ReorderHintKind.draggable =>
+      AppPlatform.isMobile
+          ? '길게 눌러 끌면 순서 변경 · 그냥 떼면 메뉴'
+          : '길게 눌러 끌면 순서 변경 · 우클릭하면 메뉴',
     _ReorderHintKind.sortBlocked => '일정순 보기에서는 순서를 바꿀 수 없어요 · 수동 정렬에서 변경하세요',
     _ReorderHintKind.filterBlocked => '상태별 보기에서는 순서를 바꿀 수 없어요 · “전체”에서 변경하세요',
   };
