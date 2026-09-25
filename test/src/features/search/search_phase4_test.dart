@@ -280,6 +280,14 @@ void main() {
       expect(find.text('4건'), findsOneWidget);
     });
 
+    testWidgets('Esc 로 닫힌다 (입력칸에 포커스가 있어도)', (tester) async {
+      await mount(tester, todos: todos);
+      await type(tester, '회의');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('search-overlay')), findsNothing);
+    });
+
     testWidgets('오버레이 바깥을 누르면 닫힌다', (tester) async {
       await mount(tester, todos: todos);
       await tester.tapAt(const Offset(20, 880));

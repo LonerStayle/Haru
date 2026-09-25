@@ -74,6 +74,10 @@ class SearchScreen extends ConsumerStatefulWidget {
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
 }
 
+class _CloseSearchIntent extends Intent {
+  const _CloseSearchIntent();
+}
+
 /// 카테고리 필터 "모든 카테고리" 센티널.
 const String _allCategories = '__all__';
 
@@ -244,13 +248,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
 
     return Shortcuts(
-      // Esc 로 닫기 — 다른 시트/오버레이와 같은 관례.
+      // Esc 로 닫기 — 다른 시트/오버레이와 같은 관례. 기본 DismissIntent 를 쓰면
+      // 입력칸에서 가장 가까운 Scaffold(오버레이 스낵바 자리)의 서랍 닫기 동작이 먼저
+      // 잡아 아무 일도 안 일어났다(기기 E2E 에서 발견) — 검색 전용 의도로 보낸다.
       shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+        SingleActivator(LogicalKeyboardKey.escape): _CloseSearchIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          DismissIntent: CallbackAction<DismissIntent>(
+          _CloseSearchIntent: CallbackAction<_CloseSearchIntent>(
             onInvoke: (_) {
               Navigator.of(context).maybePop();
               return null;
@@ -392,7 +398,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       vertical: AppTokens.space8,
                     ),
                     child: Text(
-                      '↑↓ 고르기 · ↩ 열기 · ⌘↩ 편집 · Esc 닫기',
+                      '↑↓ 고르기 · Enter 열기 · ⌘Enter 편집 · Esc 닫기',
                       key: const ValueKey('search-key-hints'),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: scheme.onSurface.withValues(alpha: 0.55),

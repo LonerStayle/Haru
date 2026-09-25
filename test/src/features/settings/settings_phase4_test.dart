@@ -179,6 +179,15 @@ void main() {
       expect(find.text('⌘⇧N'), findsOneWidget);
     });
 
+    testWidgets('데스크탑 설정 대화상자에서 보관함으로 들어간다', (tester) async {
+      await open(tester);
+      await scrollTo(tester, find.byKey(const ValueKey('archive-entry')));
+      await tester.tap(find.byKey(const ValueKey('archive-entry')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.byType(ArchiveScreen), findsOneWidget);
+    });
+
     testWidgets('반복 일정 진입점이 설정에 있다', (tester) async {
       await open(tester);
       await scrollTo(tester, find.byKey(const ValueKey('settings-recurrence')));

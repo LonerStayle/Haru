@@ -352,6 +352,34 @@ void main() {
     });
   });
 
+  testWidgets('낮은 데스크탑 창에서 칩이 안 들어가면 점으로라도 보인다', (tester) async {
+    await mount(
+      tester,
+      size: const Size(900, 470),
+      seed: [
+        for (var i = 0; i < 3; i++)
+          make(id: 'e$i', title: '일$i', dueAt: DateTime(2026, 8, 12)),
+      ],
+    );
+    expect(find.byKey(const ValueKey('calendar-dot-todo:e0')), findsOneWidget);
+  });
+
+  testWidgets('월 제목이 넓은 창에서 잘리지 않는다', (tester) async {
+    await mount(tester, size: const Size(1000, 800));
+    final title = tester.widget<Text>(
+      find.byKey(const ValueKey('calendar-month-title')),
+    );
+    final painter = TextPainter(
+      text: TextSpan(text: title.data, style: title.style),
+      textDirection: TextDirection.ltr,
+      maxLines: 1,
+    )..layout();
+    expect(
+      tester.getSize(find.byKey(const ValueKey('calendar-month-title'))).width,
+      greaterThanOrEqualTo(painter.width - 1),
+    );
+  });
+
   testWidgets('폰 칸에서 넘친 점은 "+N" 으로 개수를 보인다', (tester) async {
     await mount(
       tester,

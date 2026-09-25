@@ -41,6 +41,9 @@ const double _chipRowHeight = calendarChipHeight + 2;
 /// "외 N건" 한 줄의 높이.
 const double _moreRowHeight = 15;
 
+/// 점 한 줄(칩 대신)을 그릴 최소 높이.
+const double _dotRowMinHeight = 7;
+
 /// 남은 높이 [available] 에 실제로 세울 수 있는 칩 수.
 ///
 /// 예전에는 칩 수를 3으로 고정했는데, 기간 막대가 깔린 칸은 그만큼 높이가 줄어드는데도
@@ -189,6 +192,20 @@ class CalendarDayCell extends StatelessWidget {
                               capacity = _chipCapacityFor(
                                 available,
                                 needsMoreRow: true,
+                              );
+                            }
+
+                            // 창이 낮아 칩이 한 줄도 안 들어가면 폰처럼 점으로 — 아무것도
+                            // 안 그리면 할 일이 있는 날인지조차 알 수 없었다(작은 창).
+                            if (capacity == 0 &&
+                                total > 0 &&
+                                available >= _dotRowMinHeight) {
+                              final dots = singleDayEntries
+                                  .take(calendarCellItemCap)
+                                  .toList();
+                              return _DotRow(
+                                entries: dots,
+                                overflow: total - dots.length,
                               );
                             }
 

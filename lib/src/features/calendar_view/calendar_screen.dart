@@ -1067,7 +1067,9 @@ class _CalendarHeader extends StatelessWidget {
           child: Row(
             children: [
               if (showMonthNav) ...[
-                Flexible(child: _title(context)),
+                // 제목이 남는 폭을 넉넉히 가져가게(Spacer 와 반씩 나누면 넓은 창에서도
+                // "2026년…" 으로 잘렸다).
+                Flexible(flex: 4, child: _title(context)),
                 if (showArrows) ...[
                   const SizedBox(width: AppTokens.space4),
                   IconButton(

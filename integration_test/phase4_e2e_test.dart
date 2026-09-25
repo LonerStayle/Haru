@@ -294,6 +294,10 @@ void main() {
         matching: find.byType(Scrollable),
       ),
     );
+    // 스크롤이 막 끝난 항목은 목록 끝에 반쯤 가려져 있을 수 있다 — 가운데를 누르면
+    // 대화상자 바깥(배경)을 눌러 닫혀 버린다. 완전히 보이게 맞춘 뒤 누른다.
+    await tester.ensureVisible(find.byKey(const ValueKey('archive-entry')));
+    await settle(4);
     await tester.tap(find.byKey(const ValueKey('archive-entry')));
     await settle(12);
     expect(find.text('보관함'), findsWidgets);
