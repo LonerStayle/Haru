@@ -7,14 +7,13 @@ import '../../domain/todo.dart';
 import '../../data/providers.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/todo_tile.dart';
-import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/todo_row_actions.dart';
 import '../todo_actions/toggle_with_undo.dart';
 
 /// 타임라인 — **날짜(dueAt)가 지정된 미완료 task** 를 전역에서 날짜 버킷으로 모아 본다.
@@ -55,19 +54,6 @@ class TimelineScreen extends ConsumerWidget {
           ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
 
     final buckets = _bucketize(dated, now);
-
-    void edit(Todo t) {
-      AddTodoSheet.show(
-        context,
-        initialCategory: t.category,
-        initialTodo: t,
-        onSubmit: (_) {},
-        onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
-        onStatusChanged: (updated) =>
-            ref.read(todoActionsProvider).updatePreservingOrder(updated),
-        onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
-      );
-    }
 
     return CustomScrollView(
       slivers: [
@@ -140,21 +126,12 @@ class TimelineScreen extends ConsumerWidget {
                         ),
                         onToggleInProgress: () =>
                             ref.read(todoActionsProvider).toggleInProgress(t),
-                        onTap: () => edit(t),
-                        onEditItem: () => edit(t),
+                        onTap: () => openTodoDetail(context, t),
+                        onEditItem: () => openTodoEdit(context, ref, t),
                         onMove: () => showMoveTodoSheet(context, ref, item: t),
                         onCopy: () =>
                             showCopyTodoSheet(context, ref, original: t),
-                        onDelete: () async {
-                          final actions = ref.read(todoActionsProvider);
-                          await actions.delete(t);
-                          if (!context.mounted) return;
-                          showUndoSnackbar(
-                            context,
-                            message: '"${t.title}" 삭제됨',
-                            onUndo: () => actions.restore(t),
-                          );
-                        },
+                        onDelete: () => deleteTodoWithUndo(context, ref, t),
                       ),
                     );
                   }, childCount: bucket.items.length),

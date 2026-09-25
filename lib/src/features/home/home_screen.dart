@@ -17,7 +17,6 @@ import '../../ui/widgets/today_progress_summary.dart';
 import '../../ui/widgets/todo_category_sections.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
@@ -26,25 +25,20 @@ import '../recurrence/recurrence_actions.dart';
 import '../recurrence/recurrence_manage_screen.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_actions/toggle_with_undo.dart';
-import '../todo_detail/todo_detail_screen.dart';
+import '../../ui/widgets/group_scope_chips.dart';
+import '../todo_actions/todo_row_actions.dart';
 import 'today_providers.dart';
 
-/// 오늘 화면 — 헤더 + 이월 배너 + visible todos 리스트.
+/// 오늘 화면 — 헤더 + 그룹 필터 칩 + 이월 배너 + visible todos 리스트.
 ///
-/// [group] 이 non-null 이면 그 그룹에 속한 카테고리의 오늘 할 일만 보여 준다 (A안 —
-/// 그룹별 '오늘' 탭). null 이면 전역 오늘. [showHeader] 가 false 면 큰 '오늘' 헤더를
-/// 숨긴다 (그룹 화면 탭으로 임베드될 때 — 탭 라벨이 제목을 대신한다).
+/// 그룹 필터([groupScopeProvider], 전체보기와 공유)가 켜져 있으면 그 그룹에 속한
+/// 카테고리의 오늘 할 일만 보여 준다. (예전 그룹 화면의 '오늘' 탭을 대신한다.)
 class HomeScreen extends ConsumerWidget {
-  const HomeScreen({super.key, this.group, this.showHeader = true});
-
-  /// non-null = 이 그룹 카테고리만 필터. null = 전역.
-  final Group? group;
-
-  /// 큰 '오늘' 헤더 표시 여부.
-  final bool showHeader;
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final group = ref.watch(scopedGroupProvider);
     // 보관 카테고리 제외된 오늘 목록 (visibleTodayTodosProvider). 원본 stream 은
     // 순수 유지하고 파생 필터만 적용 — 보관/복원 시 즉시 반영.
     final asyncTodos = ref.watch(visibleTodayTodosProvider);
@@ -66,7 +60,7 @@ class HomeScreen extends ConsumerWidget {
           ref.watch(activeCategoriesProvider).asData?.value ??
           const <Category>[];
       groupCategoryIds = categories
-          .where((c) => c.groupId == group!.id)
+          .where((c) => c.groupId == group.id)
           .map((c) => c.id)
           .toSet();
     }
@@ -105,8 +99,9 @@ class HomeScreen extends ConsumerWidget {
           allTodos: allTodos,
           groups: groups,
           hiddenCountBySeries: hiddenCountBySeries,
-          // 그룹 탭(group != null) 안에서는 그룹 라벨이 중복이라 숨긴다.
+          // 그룹 필터 중에는 그룹 라벨이 중복이라 숨긴다.
           showGroupLabel: group == null,
+          showScopeChips: groups.isNotEmpty,
           doneCount: doneCount,
           inProgressCount: inProgressCount,
           totalCount: totalCount,
@@ -117,44 +112,16 @@ class HomeScreen extends ConsumerWidget {
           ),
           onDismissCarryoverBanner: () =>
               bannerNotifier.dismiss(group?.id ?? '', now),
-          showHeader: showHeader,
           now: now,
           onToggle: (t) =>
               toggleWithUndo(context, ref.read(todoActionsProvider), t),
           onToggleInProgress: (t) =>
               ref.read(todoActionsProvider).toggleInProgress(t),
-          onDelete: (t) async {
-            final actions = ref.read(todoActionsProvider);
-            await actions.delete(t);
-            if (!context.mounted) return;
-            showUndoSnackbar(
-              context,
-              message: '"${t.title}" 삭제됨',
-              onUndo: () => actions.restore(t),
-            );
-          },
-          // 기능 M — leaf tap → AddTodoSheet edit 모드 진입.
-          onEdit: (t) async {
-            await AddTodoSheet.show(
-              context,
-              initialCategory: t.category,
-              initialTodo: t,
-              onSubmit: (_) {}, // edit 모드에선 호출 안 됨.
-              onUpdate: (updated) =>
-                  ref.read(todoActionsProvider).update(updated),
-              onStatusChanged: (updated) {
-                ref.read(todoActionsProvider).updatePreservingOrder(updated);
-              },
-              onRequestMove: (item) =>
-                  showMoveTodoSheet(context, ref, item: item),
-            );
-          },
-          // 기능 M — 하위 있는 root tap → 상세 화면(드릴다운) push.
-          onDrillDown: (folder) => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => TodoDetailScreen(parent: folder),
-            ),
-          ),
+          onDelete: (t) => deleteTodoWithUndo(context, ref, t),
+          // 메뉴 "편집" → 편집 시트.
+          onEdit: (t) => openTodoEdit(context, ref, t),
+          // 탭 → 상세 (하위 유무와 무관).
+          onDrillDown: (t) => openTodoDetail(context, t),
           // Task C — ＋ 하위 추가.
           onAddChild: (parent) =>
               showAddChildSheet(context, ref, parent: parent),
@@ -226,7 +193,7 @@ class _Loaded extends StatefulWidget {
     required this.carryoverCount,
     required this.carryoverBannerDismissed,
     required this.onDismissCarryoverBanner,
-    required this.showHeader,
+    required this.showScopeChips,
     required this.now,
     required this.onToggle,
     required this.onToggleInProgress,
@@ -266,8 +233,8 @@ class _Loaded extends StatefulWidget {
   final bool carryoverBannerDismissed;
   final VoidCallback onDismissCarryoverBanner;
 
-  /// 큰 '오늘' 헤더 표시 여부 (그룹 탭 임베드 시 false).
-  final bool showHeader;
+  /// 그룹 필터 칩 줄 표시 여부 (그룹이 하나라도 있을 때).
+  final bool showScopeChips;
   final DateTime now;
   final void Function(Todo) onToggle;
   final void Function(Todo) onToggleInProgress;
@@ -357,25 +324,32 @@ class _LoadedState extends State<_Loaded> {
         (carryoverOnly || !widget.carryoverBannerDismissed);
     return CustomScrollView(
       slivers: [
-        if (widget.showHeader)
-          SliverPadding(
-            padding: AppPlatform.isMobile
-                ? const EdgeInsets.fromLTRB(
-                    AppTokens.space24,
-                    AppTokens.space12,
-                    AppTokens.space24,
-                    AppTokens.space8,
-                  )
-                : const EdgeInsets.fromLTRB(
-                    AppTokens.space24,
-                    AppTokens.space32,
-                    AppTokens.space24,
-                    AppTokens.space12,
-                  ),
-            sliver: SliverToBoxAdapter(child: _Header(now: widget.now)),
-          )
-        else
-          const SliverToBoxAdapter(child: SizedBox(height: AppTokens.space16)),
+        SliverPadding(
+          padding: AppPlatform.isMobile
+              ? const EdgeInsets.fromLTRB(
+                  AppTokens.space24,
+                  AppTokens.space12,
+                  AppTokens.space24,
+                  AppTokens.space8,
+                )
+              : const EdgeInsets.fromLTRB(
+                  AppTokens.space24,
+                  AppTokens.space32,
+                  AppTokens.space24,
+                  AppTokens.space12,
+                ),
+          sliver: SliverToBoxAdapter(child: _Header(now: widget.now)),
+        ),
+        // 그룹 필터 — 전체보기와 공유. 그룹이 없으면 줄 자체가 없다.
+        if (widget.showScopeChips)
+          const SliverPadding(
+            padding: EdgeInsets.only(bottom: AppTokens.space12),
+            sliver: SliverToBoxAdapter(
+              child: GroupScopeChips(
+                padding: EdgeInsets.symmetric(horizontal: AppTokens.space24),
+              ),
+            ),
+          ),
         // 상단 진척 요약 — 오늘 task 가 1개 이상일 때만.
         if (widget.totalCount > 0)
           SliverPadding(

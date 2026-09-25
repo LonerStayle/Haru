@@ -86,7 +86,7 @@ void main() {
     await pump(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
     await tester.pump();
-    expect(find.text('카테고리별 할 일과 메모를 한눈에'), findsOneWidget);
+    expect(find.text('그룹 · 카테고리별 할 일과 메모를 한눈에'), findsOneWidget);
   });
 
   testWidgets('앱 안 ⌘N → 곧바로 새 할 일 시트 (선택 시트 없이)', (tester) async {

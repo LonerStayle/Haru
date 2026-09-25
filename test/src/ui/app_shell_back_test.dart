@@ -13,8 +13,9 @@ import 'package:solo_todo/src/features/calendar_view/calendar_screen.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/category_providers.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
-import 'package:solo_todo/src/features/group/group_screen.dart';
+import 'package:solo_todo/src/features/category/category_view.dart';
 import 'package:solo_todo/src/features/home/home_screen.dart';
+import 'package:solo_todo/src/features/manage/category_list_screen.dart';
 import 'package:solo_todo/src/features/home/today_providers.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
 import 'package:solo_todo/src/ui/app_shell.dart';
@@ -93,19 +94,24 @@ void main() {
     return calls;
   }
 
-  testWidgets('Drawer 열림 → 시스템 back → Drawer 닫힘 (앱 종료 X)', (tester) async {
-    final exits = spyAppExit(tester);
+  testWidgets('카테고리 칸 → 카테고리 목록 화면 (Drawer 아님)', (tester) async {
     await pump(tester);
 
-    await tester.tap(find.byKey(const ValueKey('manage-drawer-button')));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('카테고리'),
+      ),
+    );
     await tester.pumpAndSettle();
-    final scaffold = tester.firstState<ScaffoldState>(find.byType(Scaffold));
-    expect(scaffold.isDrawerOpen, isTrue, reason: 'back 전에 Drawer 가 열려 있어야 함');
 
-    await systemBack(tester);
-
-    expect(scaffold.isDrawerOpen, isFalse, reason: 'back → Drawer 가 닫혀야 함');
-    expect(exits, isEmpty, reason: 'Drawer 닫힘이 back 을 소비 → 앱 종료 호출 없어야 함');
+    expect(find.byType(CategoryListScreen), findsOneWidget);
+    expect(find.byType(Drawer), findsNothing);
+    expect(
+      find.byKey(const ValueKey('manage-drawer-button')),
+      findsNothing,
+      reason: '☰ Drawer 는 없어졌다 — 4번째 칸이 목록 화면',
+    );
   });
 
   testWidgets('비-오늘 탭 → 시스템 back → 오늘 복귀 (앱 종료 X)', (tester) async {
@@ -125,31 +131,27 @@ void main() {
     expect(exits, isEmpty, reason: '탭 복귀가 back 을 소비 → 앱 종료 호출 없어야 함');
   });
 
-  testWidgets('그룹 화면 → 시스템 back → 원래 탭 복귀 (앱 종료 X)', (tester) async {
-    const g = Group(id: 'grp-test', label: '테스트그룹', colorValue: 0xFF2A66FF);
+  testWidgets('카테고리 화면 → back → 카테고리 목록 → back → 오늘', (tester) async {
     final exits = spyAppExit(tester);
-    await pump(tester, groups: [g]);
+    await pump(tester);
 
-    // Drawer 열고 그룹 진입.
-    await tester.tap(find.byKey(const ValueKey('manage-drawer-button')));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('카테고리'),
+      ),
+    );
     await tester.pumpAndSettle();
-    // Drawer 하단에 카테고리/그룹 추가 버튼이 고정되면서 작은 테스트 화면에선 그룹 행이
-    // 스크롤 아래로 밀릴 수 있다 — 보이게 스크롤한 뒤 탭한다.
-    await tester.ensureVisible(find.text('테스트그룹'));
+    await tester.tap(find.text(Category.builtinSeeds.first.label));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('테스트그룹'));
-    await tester.pumpAndSettle();
-    expect(find.byType(GroupScreen), findsOneWidget, reason: '그룹 화면 진입');
+    expect(find.byType(CategoryView), findsOneWidget, reason: '카테고리 화면 진입');
 
     await systemBack(tester);
+    expect(find.byType(CategoryListScreen), findsOneWidget, reason: '목록으로');
 
-    expect(
-      find.byType(GroupScreen),
-      findsNothing,
-      reason: 'back → 그룹 나가고 탭 복귀',
-    );
-    expect(find.byType(HomeScreen), findsOneWidget);
-    expect(exits, isEmpty, reason: '그룹 나가기가 back 을 소비 → 앱 종료 호출 없어야 함');
+    await systemBack(tester);
+    expect(find.byType(HomeScreen), findsOneWidget, reason: '오늘로');
+    expect(exits, isEmpty);
   });
 
   testWidgets('오늘 탭(루트) → 시스템 back → 앱 종료 호출', (tester) async {

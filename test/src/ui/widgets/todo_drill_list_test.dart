@@ -127,7 +127,9 @@ void main() {
     expect(find.text('하위 1'), findsOneWidget);
   });
 
-  testWidgets('leaf(자식 없음) 탭 → onEdit 호출 (onDrillDown 아님)', (tester) async {
+  testWidgets('leaf(자식 없음) 탭도 → onDrillDown (탭 = 항상 상세, Phase 2)', (
+    tester,
+  ) async {
     final leaf = make(id: 'l', title: '단일');
     Todo? drilled;
     Todo? edited;
@@ -142,8 +144,8 @@ void main() {
     await tester.tap(find.text('단일'));
     await tester.pump();
 
-    expect(edited?.id, 'l');
-    expect(drilled, isNull);
+    expect(drilled?.id, 'l');
+    expect(edited, isNull);
     expect(find.byKey(const ValueKey('todo-tile-drill-l')), findsNothing);
   });
 

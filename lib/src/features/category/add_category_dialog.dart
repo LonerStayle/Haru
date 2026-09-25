@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
@@ -151,15 +152,34 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
     super.dispose();
   }
 
-  bool get _canSubmit => _labelCtrl.text.trim().isNotEmpty && !_submitted;
+  /// 같은 이름(대소문자·앞뒤 공백 무시)의 다른 카테고리가 있는지. 보관된 것도 포함 —
+  /// 복원하면 같은 이름 두 개가 나란히 보이게 되므로.
+  bool get _isDuplicate {
+    final label = _labelCtrl.text.trim().toLowerCase();
+    if (label.isEmpty) return false;
+    final all = ref.read(categoriesProvider).asData?.value ?? const [];
+    return all.any(
+      (c) =>
+          c.id != widget.existing?.id && c.label.trim().toLowerCase() == label,
+    );
+  }
+
+  bool get _canSubmit =>
+      _labelCtrl.text.trim().isNotEmpty && !_isDuplicate && !_submitted;
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
     setState(() => _submitted = true);
     final controller = ref.read(categoriesControllerProvider);
+    // 신규는 맨 뒤로 — 전체 최대 sortOrder + 1 (최소 100: builtin 뒤).
+    final all = ref.read(categoriesProvider).asData?.value ?? const [];
+    var nextOrder = 100;
+    for (final c in all) {
+      if (c.sortOrder + 1 > nextOrder) nextOrder = c.sortOrder + 1;
+    }
 
     // 수정 모드: 같은 id 로 표시 속성만 갱신 (sortOrder/isBuiltin/archived 보존).
-    // 신규: sortOrder 100 (= 항상 builtin 뒤).
+    // 신규: 맨 뒤(nextOrder).
     final category =
         widget.existing?.copyWith(
           label: _labelCtrl.text.trim(),
@@ -172,7 +192,7 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
           label: _labelCtrl.text.trim(),
           iconCodePoint: _selectedIcon,
           colorValue: _selectedColor,
-          sortOrder: 100,
+          sortOrder: nextOrder,
           isBuiltin: false,
           groupId: _selectedGroupId,
         );
@@ -184,6 +204,8 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 중복 이름 검사·다음 순서 계산이 읽는 전체 목록 — 구독해 둬야 값이 채워진다.
+    ref.watch(categoriesProvider);
     return AlertDialog(
       title: Text(_isEdit ? '카테고리 수정' : '새 카테고리'),
       content: SizedBox(
@@ -197,9 +219,10 @@ class _AddCategoryDialogState extends ConsumerState<AddCategoryDialog> {
                 controller: _labelCtrl,
                 autofocus: true,
                 maxLength: 30,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '이름',
                   hintText: '예: 독서, 운동',
+                  errorText: _isDuplicate ? '같은 이름의 카테고리가 이미 있어요' : null,
                 ),
                 onChanged: (_) => setState(() {}),
                 // 데스크탑 키보드 흐름 — Enter 로 바로 저장.
@@ -277,8 +300,9 @@ class _ColorPalette extends StatelessWidget {
           GestureDetector(
             onTap: () => onSelect(c),
             child: Container(
-              width: 36,
-              height: 36,
+              // 폰은 손가락 크기(44dp), 데스크탑은 마우스라 조금 작게.
+              width: AppPlatform.isMobile ? 44 : 36,
+              height: AppPlatform.isMobile ? 44 : 36,
               decoration: BoxDecoration(
                 color: Color(c),
                 shape: BoxShape.circle,

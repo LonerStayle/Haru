@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/group.dart';
 import 'groups_controller.dart';
@@ -77,12 +78,30 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
     super.dispose();
   }
 
-  bool get _canSubmit => _labelCtrl.text.trim().isNotEmpty && !_submitted;
+  /// 같은 이름(대소문자·앞뒤 공백 무시)의 다른 그룹이 있는지 (보관 포함).
+  bool get _isDuplicate {
+    final label = _labelCtrl.text.trim().toLowerCase();
+    if (label.isEmpty) return false;
+    final all = ref.read(groupsProvider).asData?.value ?? const [];
+    return all.any(
+      (g) =>
+          g.id != widget.existing?.id && g.label.trim().toLowerCase() == label,
+    );
+  }
+
+  bool get _canSubmit =>
+      _labelCtrl.text.trim().isNotEmpty && !_isDuplicate && !_submitted;
 
   Future<void> _submit() async {
     if (!_canSubmit) return;
     setState(() => _submitted = true);
     final controller = ref.read(groupsControllerProvider);
+    // 신규는 맨 뒤로 — 전체 최대 sortOrder + 1.
+    final all = ref.read(groupsProvider).asData?.value ?? const [];
+    var nextOrder = 100;
+    for (final g in all) {
+      if (g.sortOrder + 1 > nextOrder) nextOrder = g.sortOrder + 1;
+    }
 
     // 수정 모드면 같은 id 로 label/color 만 갱신 (sortOrder/isBuiltin 보존).
     // 신규면 새 id 발급. add() 는 upsert 라 둘 다 동일 경로.
@@ -95,7 +114,7 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
           id: 'grp-${_uuid.v4()}',
           label: _labelCtrl.text.trim(),
           colorValue: _selectedColor,
-          sortOrder: 100,
+          sortOrder: nextOrder,
           isBuiltin: false,
         );
     await controller.add(group);
@@ -106,6 +125,8 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 중복 이름 검사·다음 순서 계산이 읽는 전체 목록 — 구독해 둬야 값이 채워진다.
+    ref.watch(groupsProvider);
     return AlertDialog(
       title: Text(_isEdit ? '그룹 수정' : '새 그룹'),
       content: SizedBox(
@@ -119,11 +140,14 @@ class _AddGroupDialogState extends ConsumerState<AddGroupDialog> {
                 controller: _labelCtrl,
                 autofocus: true,
                 maxLength: 30,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: '이름',
                   hintText: '예: 회사, 사이드프로젝트',
+                  errorText: _isDuplicate ? '같은 이름의 그룹이 이미 있어요' : null,
                 ),
                 onChanged: (_) => setState(() {}),
+                // 카테고리 다이얼로그와 같이 Enter 로 바로 저장.
+                onSubmitted: (_) => _submit(),
               ),
               const SizedBox(height: AppTokens.space16),
               Text('색', style: theme.textTheme.titleSmall),
@@ -172,8 +196,8 @@ class _ColorPalette extends StatelessWidget {
           GestureDetector(
             onTap: () => onSelect(c),
             child: Container(
-              width: 32,
-              height: 32,
+              width: AppPlatform.isMobile ? 44 : 36,
+              height: AppPlatform.isMobile ? 44 : 36,
               decoration: BoxDecoration(
                 color: Color(c),
                 shape: BoxShape.circle,
@@ -184,6 +208,10 @@ class _ColorPalette extends StatelessWidget {
                   width: 2.5,
                 ),
               ),
+              // 선택 표시를 테두리 색에만 기대지 않도록 체크 글리프 병행 (색각 이상 대응).
+              child: c == selected
+                  ? const Icon(Icons.check, size: 18, color: Colors.white)
+                  : null,
             ),
           ),
       ],

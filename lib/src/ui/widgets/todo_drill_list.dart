@@ -69,11 +69,11 @@ class TodoDrillListSliver extends StatefulWidget {
   /// 전체 todo (자식 개수 판단용). [items] 의 각 항목에 대해 parentId 매칭으로 childCount 계산.
   final List<Todo> allTodos;
 
-  /// 자식이 있는 폴더 항목 탭 → 상세 화면(드릴다운).
-  final void Function(Todo folder) onDrillDown;
+  /// 항목 탭 → 상세 화면 (하위 유무와 무관).
+  final void Function(Todo todo) onDrillDown;
 
-  /// 자식이 없는 leaf 항목 탭 → 편집 시트.
-  final void Function(Todo leaf) onEdit;
+  /// 메뉴 "편집" → 편집 시트.
+  final void Function(Todo todo) onEdit;
 
   final void Function(Todo) onToggle;
 
@@ -193,9 +193,8 @@ class _TodoDrillListSliverState extends State<TodoDrillListSliver> {
             ? null
             : () => widget.onToggleInProgress!(todo),
         onDelete: () => widget.onDelete(todo),
-        // 자식 있으면 드릴, 없으면 편집.
-        onTap: () =>
-            hasChildren ? widget.onDrillDown(todo) : widget.onEdit(todo),
+        // 탭 = 항상 상세 (하위 유무와 무관 — Phase 2 "탭 동작 통일"). 편집은 메뉴.
+        onTap: () => widget.onDrillDown(todo),
         // §14 — note 도 자식(헤딩) 보유 가능 → 타입 무관하게 ＋하위 추가 노출.
         onAddChild: () => widget.onAddChild(todo),
         // 더보기(⋮) 메뉴 — 이동 / 복사 / 편집(이 항목 자체) / 삭제.

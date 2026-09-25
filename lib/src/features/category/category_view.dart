@@ -11,14 +11,14 @@ import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/sort_mode_button.dart';
 import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/todo_status_filter.dart';
-import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
 import '../todo_actions/toggle_with_undo.dart';
-import '../todo_detail/todo_detail_screen.dart';
+import '../recurrence/recurrence_actions.dart';
+import '../todo_actions/todo_row_actions.dart';
+import 'category_actions.dart';
 import 'category_providers.dart';
 
 /// 카테고리 destination 선택 시 보여줄 화면. 헤더 + 미체크/완료 통계 + 리스트.
@@ -51,35 +51,10 @@ class CategoryView extends ConsumerWidget {
             toggleWithUndo(context, ref.read(todoActionsProvider), t),
         onToggleInProgress: (t) =>
             ref.read(todoActionsProvider).toggleInProgress(t),
-        onDelete: (t) async {
-          final actions = ref.read(todoActionsProvider);
-          await actions.delete(t);
-          if (!context.mounted) return;
-          showUndoSnackbar(
-            context,
-            message: '"${t.title}" 삭제됨',
-            onUndo: () => actions.restore(t),
-          );
-        },
-        onEdit: (t) async {
-          await AddTodoSheet.show(
-            context,
-            initialCategory: t.category,
-            initialTodo: t,
-            onSubmit: (_) {},
-            onUpdate: (updated) =>
-                ref.read(todoActionsProvider).update(updated),
-            onStatusChanged: (updated) =>
-                ref.read(todoActionsProvider).updatePreservingOrder(updated),
-            onRequestMove: (item) =>
-                showMoveTodoSheet(context, ref, item: item),
-          );
-        },
-        onDrillDown: (folder) => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => TodoDetailScreen(parent: folder),
-          ),
-        ),
+        onDelete: (t) => deleteTodoWithUndo(context, ref, t),
+        onEdit: (t) => openTodoEdit(context, ref, t),
+        onDrillDown: (t) => openTodoDetail(context, t),
+        onStopRecurrence: (t) => confirmStopRecurrence(context, ref, t),
         onAddChild: (parent) => showAddChildSheet(context, ref, parent: parent),
         onMove: (t) => showMoveTodoSheet(context, ref, item: t),
         onCopy: (t) => showCopyTodoSheet(context, ref, original: t),
@@ -107,6 +82,7 @@ class _Loaded extends StatefulWidget {
     required this.onCopy,
     required this.onReorderSiblings,
     required this.onAddTodo,
+    required this.onStopRecurrence,
   });
 
   final Category category;
@@ -132,6 +108,7 @@ class _Loaded extends StatefulWidget {
   final void Function(Todo) onCopy;
   final void Function(List<Todo> siblings, int oldIndex, int newIndex)
   onReorderSiblings;
+  final void Function(Todo) onStopRecurrence;
 
   @override
   State<_Loaded> createState() => _LoadedState();
@@ -216,6 +193,7 @@ class _LoadedState extends State<_Loaded> {
               onMove: widget.onMove,
               onCopy: widget.onCopy,
               onReorderSiblings: widget.onReorderSiblings,
+              onStopRecurrence: widget.onStopRecurrence,
               sortMode: widget.sortMode,
             ),
           ),
@@ -257,6 +235,23 @@ class _Header extends StatelessWidget {
       onSelected: onFilterChanged,
       accent: category.color,
     );
+    // ⋮ — 카테고리 관리 (수정 · 그룹 이동 · 보관 · 삭제). 사이드바·목록과 같은 메뉴.
+    final menuButton = Builder(
+      builder: (ctx) => IconButton(
+        key: const ValueKey('category-header-menu'),
+        tooltip: '카테고리 메뉴',
+        icon: const Icon(Icons.more_vert),
+        onPressed: () {
+          Offset? at;
+          if (AppPlatform.isDesktop) {
+            final box = ctx.findRenderObject()! as RenderBox;
+            at = box.localToGlobal(box.size.bottomLeft(Offset.zero));
+          }
+          CategoryActions.of(ctx).showCategoryMenu(category, position: at);
+        },
+      ),
+    );
+    final tasks = counts.undone + counts.inProgress + counts.done;
     // 모바일은 앱바가 카테고리 이름을 이미 보여 준다 → 큰 아이콘·제목 줄을 빼고
     // 필터 칩 + 정렬 버튼 한 줄만 둔다 (제목 중복 제거, UX 감사).
     if (AppPlatform.isMobile) {
@@ -266,6 +261,7 @@ class _Header extends StatelessWidget {
           Expanded(child: showFilters ? filterBar : const SizedBox.shrink()),
           const SizedBox(width: AppTokens.space8),
           sortButton,
+          menuButton,
         ],
       );
     }
@@ -285,17 +281,32 @@ class _Header extends StatelessWidget {
             ),
             const SizedBox(width: AppTokens.space12),
             Expanded(
-              child: Text(
-                category.label,
-                style: theme.textTheme.displayMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-                overflow: TextOverflow.ellipsis,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    category.label,
+                    style: theme.textTheme.displayMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  // 진척 한 줄 — 할 일이 있을 때만.
+                  if (tasks > 0)
+                    Text(
+                      '완료 ${counts.done}/$tasks · 남은 ${tasks - counts.done}개',
+                      key: const ValueKey('category-header-progress'),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(width: AppTokens.space8),
             // 정렬 토글 — 이 카테고리 목록과 그 하위 체크리스트를 일정순으로 본다.
             sortButton,
+            menuButton,
           ],
         ),
         // 상태별 보기 — 카운트 배지이자 필터 버튼. 누르면 그 상태만 목록에 남는다.

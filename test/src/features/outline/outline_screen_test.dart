@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
+import 'package:solo_todo/src/core/ui_prefs.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
@@ -12,7 +13,10 @@ import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
 import 'package:solo_todo/src/features/outline/outline_screen.dart';
 import 'package:solo_todo/src/features/outline/tree_providers.dart';
+import 'package:solo_todo/src/features/todo_detail/todo_detail_screen.dart';
+import 'package:solo_todo/src/ui/shell_state.dart';
 
+/// 전체보기 (UX 개선 Phase 2) — 탭 없는 단일 계층 브라우저.
 void main() {
   Todo make({
     required String id,
@@ -21,55 +25,57 @@ void main() {
     String? parentId,
     TodoType type = TodoType.task,
     DateTime? doneAt,
-    String? description,
   }) => Todo(
     id: id,
     title: title,
-    description: description,
     category: category,
-    dueAt: null,
     doneAt: doneAt,
     createdAt: DateTime.utc(2026, 5, 27, 9),
     updatedAt: DateTime.utc(2026, 5, 27, 9),
-    calendarEventId: null,
     parentId: parentId,
     type: type,
   );
 
-  /// OutlineScreen 을 in-memory override 로 mount.
-  ///
-  /// [rootsByCategory] : 각 카테고리의 root todos (task + note 섞임 가능).
-  /// [childrenByParent] : 각 parentId → 자식 list.
-  /// [allTodos] : computeSubtreeProgress walk + 메모 탭 note 필터의 출처.
-  ///
-  /// 파생 provider (taskRootsOf / childTasksOf / notesOfCategory) 는 base provider
-  /// 의 stream override 를 그대로 받아 in-memory 필터링하므로 별도 override 불필요.
+  late MemoryUiPrefsStore prefs;
+  late ProviderContainer container;
+
+  setUp(() => prefs = MemoryUiPrefsStore());
+  tearDown(() => AppPlatform.debugFormFactorOverride = null);
+
   Future<void> mount(
     WidgetTester tester, {
-    required Map<Category, List<Todo>> rootsByCategory,
-    Map<String, List<Todo>> childrenByParent = const {},
     required List<Todo> allTodos,
+    Map<String, List<Todo>> childrenByParent = const {},
     List<Category>? categories,
     List<Group> groups = const [],
   }) async {
-    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-
+    // 카테고리별 최상위 = parentId 없는 항목.
+    List<Todo> rootsOf(Category c) => [
+      for (final t in allTodos)
+        if (t.parentId == null && t.category.id == c.id) t,
+    ];
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          uiPrefsStoreProvider.overrideWithValue(prefs),
           allTodosProvider.overrideWith((_) => Stream.value(allTodos)),
           rootsOfCategoryProvider.overrideWith(
-            (_, cat) => Stream.value(rootsByCategory[cat] ?? const <Todo>[]),
+            (_, cat) => Stream.value(rootsOf(cat)),
           ),
           childrenOfProvider.overrideWith(
-            (_, parentId) =>
-                Stream.value(childrenByParent[parentId] ?? const <Todo>[]),
+            (_, parentId) => Stream.value(
+              childrenByParent[parentId] ??
+                  [
+                    for (final t in allTodos)
+                      if (t.parentId == parentId) t,
+                  ],
+            ),
           ),
           categoriesProvider.overrideWith(
             (_) => Stream.value(categories ?? Category.builtinSeeds),
           ),
-          // 작업 3 (L) — 그룹 계층. 기본은 빈 목록(= 그룹 헤더 없는 평면).
           groupsProvider.overrideWith((_) => Stream.value(groups)),
         ],
         child: MaterialApp(
@@ -78,651 +84,253 @@ void main() {
         ),
       ),
     );
-    // stream emit 흐름 확보 — 손자까지 watch 가 도착하려면 depth 만큼 frame 필요.
     for (var i = 0; i < 5; i++) {
       await tester.pump();
     }
+    container = ProviderScope.containerOf(
+      tester.element(find.byType(OutlineScreen)),
+    );
   }
 
-  /// 메모 탭으로 전환 (default 는 체크리스트 탭). 탭 전환 애니메이션 + stream emit
-  /// 완료까지 settle.
-  Future<void> openNotesTab(WidgetTester tester) async {
-    await tester.tap(find.widgetWithText(Tab, '메모'));
-    await tester.pumpAndSettle();
-  }
+  group('구성', () {
+    testWidgets('탭이 없다 — 체크리스트/메모 탭 대신 상태 칩 한 줄', (tester) async {
+      final t = make(id: 't', title: '할 일');
+      final n = make(id: 'n', title: '메모 하나', type: TodoType.note);
+      await mount(tester, allTodos: [t, n]);
 
-  group('탭 구조', () {
-    testWidgets('빈 트리 — 체크리스트 없는 카테고리는 모두 숨김 + 안내 노출', (tester) async {
-      await mount(tester, rootsByCategory: const {}, allTodos: const []);
-
-      expect(find.text('전체보기'), findsOneWidget);
-      expect(find.text('체크리스트'), findsOneWidget);
-      expect(find.text('메모'), findsOneWidget);
-      // task root 가 없는 카테고리 헤더는 더 이상 노출되지 않는다 (메모만/빈 카테고리 숨김).
-      for (final c in Category.values) {
-        expect(find.text(c.label), findsNothing);
-      }
-      // 대신 빈 안내가 노출.
-      expect(find.text('체크리스트가 없어요'), findsOneWidget);
-      expect(find.textContaining(RegExp(r'^\d+/\d+$')), findsNothing);
+      expect(find.byType(TabBar), findsNothing);
+      expect(find.byKey(const ValueKey('status-filter-all')), findsOneWidget);
+      expect(find.byKey(const ValueKey('status-filter-note')), findsOneWidget);
+      // 트리 모드에서는 할 일과 메모가 함께 보인다.
+      expect(find.text('할 일'), findsOneWidget);
+      expect(find.text('메모 하나'), findsOneWidget);
     });
-  });
 
-  group('체크리스트 탭 (task 트리)', () {
-    testWidgets('카테고리에 task root 2건 (1 done) → 헤더 1/2 + 완료는 접기 행 아래로', (
-      tester,
-    ) async {
-      final root1 = make(id: 'r1', title: '캔버스 첨부 오류');
-      final root2Done = make(
-        id: 'r2',
-        title: '오타 수정',
-        doneAt: DateTime(2026, 5, 27, 10),
-      );
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [root1, root2Done],
-        },
-        allTodos: [root1, root2Done],
-      );
+    testWidgets('할 일이 없는 카테고리도 흐리게 보인다 ("비어 있음")', (tester) async {
+      await mount(tester, allTodos: const []);
+      for (final c in Category.builtinSeeds) {
+        expect(find.text(c.label), findsOneWidget);
+      }
+      expect(find.text('비어 있음'), findsNWidgets(Category.builtinSeeds.length));
+      // 할 일이 하나도 없으면 상태 칩 줄은 감춘다.
+      expect(find.byKey(const ValueKey('status-filter-all')), findsNothing);
+    });
 
-      // 진척 배지는 완료 포함 그대로 (allTodos 기반).
+    testWidgets('카테고리가 하나도 없으면 안내', (tester) async {
+      await mount(tester, allTodos: const [], categories: const []);
+      expect(find.text('카테고리가 없어요'), findsOneWidget);
+    });
+
+    testWidgets('진척 배지 + 완료는 "완료 N개" 접기 아래', (tester) async {
+      final a = make(id: 'a', title: '캔버스 첨부 오류');
+      final d = make(id: 'd', title: '오타 수정', doneAt: DateTime(2026, 5, 27));
+      await mount(tester, allTodos: [a, d]);
+
       expect(find.text('1/2'), findsOneWidget);
-      // 미완료 root 는 노출.
       expect(find.text('캔버스 첨부 오류'), findsOneWidget);
-      // 완료 root 는 기본 접힘 — "완료 1개" 행 아래로 숨는다.
       expect(find.text('오타 수정'), findsNothing);
-      expect(find.text('완료 1개'), findsOneWidget);
-
-      // 완료 접기 행 탭 → 완료 root 노출.
       await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
       await tester.pump();
       expect(find.text('오타 수정'), findsOneWidget);
     });
 
-    testWidgets('완료 root 가 없으면 "완료 N개" 접기 행이 없다', (tester) async {
-      final root1 = make(id: 'r1', title: '미완료 A');
-      final root2 = make(id: 'r2', title: '미완료 B');
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [root1, root2],
-        },
-        allTodos: [root1, root2],
-      );
-
-      expect(find.text('미완료 A'), findsOneWidget);
-      expect(find.text('미완료 B'), findsOneWidget);
-      // 완료가 하나도 없으면 접기 행 미표시.
-      expect(
-        find.byKey(const ValueKey('outline-done-toggle-work')),
-        findsNothing,
-      );
-    });
-
-    testWidgets('완료 접기 행 왕복 — 펼쳤다 다시 접으면 완료가 숨는다', (tester) async {
-      final active = make(id: 'a', title: '진행중');
-      final done = make(
-        id: 'd',
-        title: '끝난 일',
-        doneAt: DateTime(2026, 5, 27, 10),
-      );
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [active, done],
-        },
-        allTodos: [active, done],
-      );
-
-      final toggle = find.byKey(const ValueKey('outline-done-toggle-work'));
-      // 기본 접힘.
-      expect(find.text('끝난 일'), findsNothing);
-      // 펼침.
-      await tester.tap(toggle);
-      await tester.pump();
-      expect(find.text('끝난 일'), findsOneWidget);
-      // 다시 접힘.
-      await tester.tap(toggle);
-      await tester.pump();
-      expect(find.text('끝난 일'), findsNothing);
-      // 진행중 root 는 항상 노출.
-      expect(find.text('진행중'), findsOneWidget);
-    });
-
-    testWidgets('체크 circle — 미완료 ring 카테고리색(0.55), 완료 채움 (TodoTile 일관)', (
-      tester,
-    ) async {
-      final undone = make(id: 'u', title: '미완료', category: Category.work);
-      final done = make(
-        id: 'd',
-        title: '완료',
-        category: Category.work,
-        doneAt: DateTime(2026, 5, 27, 10),
-      );
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [undone, done],
-        },
-        allTodos: [undone, done],
-      );
-
-      // 완료 root 는 기본 접힘 — 체크 circle 비교 위해 완료 섹션을 펼친다.
-      await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
-      await tester.pump();
-
-      Icon checkIcon(String id) => tester.widget<Icon>(
-        find.descendant(
-          of: find.byKey(ValueKey('outline-check-$id')),
-          matching: find.byType(Icon),
-        ),
-      );
-
-      // 미완료 — 카테고리색 0.55 ring (TodoStatusCheck ○).
-      final u = checkIcon('u');
-      expect(u.icon, Icons.radio_button_unchecked);
-      expect(u.color, Category.work.color.withValues(alpha: 0.55));
-      // 완료 — 카테고리색 채움 (●).
-      final d = checkIcon('d');
-      expect(d.icon, Icons.check_circle_rounded);
-      expect(d.color, Category.work.color);
-    });
-
-    testWidgets('펼침 → 접힘 토글 — 카테고리 row tap 시 자식 root 들 사라짐', (tester) async {
-      final root = make(id: 'r', title: '회사 root');
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [root],
-        },
-        allTodos: [root],
-      );
-
-      expect(find.text('회사 root'), findsOneWidget);
-
-      await tester.tap(find.byKey(const ValueKey('outline-category-work')));
-      await tester.pump();
-      expect(find.text('회사 root'), findsNothing);
-
-      await tester.tap(find.byKey(const ValueKey('outline-category-work')));
-      await tester.pump();
-      expect(find.text('회사 root'), findsOneWidget);
-    });
-
-    testWidgets('folder 노드 — 자식 인라인 비노출 / [done/total] 누적 / 탭 시 상세로 드릴다운', (
-      tester,
-    ) async {
-      final nexus = make(id: 'nexus', title: '넥서스');
-      final child1 = make(id: 'c1', title: '캔버스 첨부 오류', parentId: 'nexus');
-      final child2Done = make(
-        id: 'c2',
-        title: 'narrative 에러',
-        parentId: 'nexus',
-        doneAt: DateTime(2026, 5, 27, 10),
-      );
-
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [nexus],
-        },
-        childrenByParent: {
-          'nexus': [child1, child2Done],
-        },
-        allTodos: [nexus, child1, child2Done],
-      );
-
+    testWidgets('하위 항목은 인라인으로 펼치지 않고 개수 배지만', (tester) async {
+      final p = make(id: 'p', title: '넥서스');
+      final c1 = make(id: 'c1', title: '자식 1', parentId: 'p');
+      await mount(tester, allTodos: [p, c1]);
       expect(find.text('넥서스'), findsOneWidget);
-      // 자식은 인라인으로 펼쳐지지 않는다 (상세 화면에서만 노출).
-      expect(find.text('캔버스 첨부 오류'), findsNothing);
-      expect(find.text('narrative 에러'), findsNothing);
-
-      // 진척률은 subtree 누적으로 그대로 계산 (인라인 노출과 무관).
-      expect(find.text('1/3'), findsAtLeastNWidgets(1), reason: '카테고리 누적 진척률');
-      expect(find.text('1/2'), findsAtLeastNWidgets(1));
-
-      // 노드 탭 → 상세 화면 진입. 자식 체크리스트는 거기서 드릴다운으로 노출.
-      await tester.tap(find.byKey(const ValueKey('outline-node-nexus')));
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('detail-toggle')),
-        findsOneWidget,
-        reason: '상세 화면 진입',
-      );
-      expect(find.text('캔버스 첨부 오류'), findsOneWidget);
-      // child2 는 완료라 상세 화면(드릴 리스트)에서도 기본 접힘.
-      expect(find.text('narrative 에러'), findsNothing);
-      expect(find.text('완료 1개'), findsOneWidget);
-      // 상세 화면 완료 접기 행 펼치면 노출.
-      await tester.tap(find.byKey(const ValueKey('drill-done-toggle')));
-      await tester.pump();
-      expect(find.text('narrative 에러'), findsOneWidget);
+      expect(find.text('자식 1'), findsNothing);
+      expect(find.byKey(const ValueKey('todo-tile-drill-p')), findsOneWidget);
     });
+  });
 
-    testWidgets('note root 는 체크리스트 탭에서 제외 — task 만 진척률 1/1', (tester) async {
-      final task = make(
-        id: 't',
-        title: '체크할 일',
-        doneAt: DateTime(2026, 5, 27, 10),
-      );
-      final note1 = make(id: 'n1', title: '메모1', type: TodoType.note);
-      final note2 = make(id: 'n2', title: '메모2', type: TodoType.note);
-
+  group('카테고리 머리', () {
+    testWidgets('본문 탭 → 그 카테고리 화면으로 (셸 위치 변경)', (tester) async {
       await mount(
         tester,
-        rootsByCategory: {
-          Category.work: [task, note1, note2],
-        },
-        allTodos: [task, note1, note2],
+        allTodos: [make(id: 'a', title: 'A')],
       );
-
-      // 체크리스트 탭(default) 에는 note 가 보이지 않는다. task 는 완료라 기본 접힘.
-      expect(find.text('메모1'), findsNothing);
-      expect(find.text('메모2'), findsNothing);
-      // 진척 배지 1/1 은 헤더라 접힘과 무관하게 노출.
-      expect(find.text('1/1'), findsOneWidget);
-      expect(find.text('완료 1개'), findsOneWidget);
-      // 완료 섹션 펼치면 task 노출 (note 는 여전히 제외).
-      await tester.tap(find.byKey(const ValueKey('outline-done-toggle-work')));
+      await tester.tap(find.byKey(const ValueKey('outline-category-work')));
       await tester.pump();
-      expect(find.text('체크할 일'), findsOneWidget);
-      expect(find.text('메모1'), findsNothing);
-      expect(find.text('메모2'), findsNothing);
+      expect(
+        container.read(shellLocationProvider),
+        const ShellLocation.category('work'),
+      );
     });
 
-    testWidgets('note 자식은 진척률 카운트에서 제외 (task 자식만) — 자식은 인라인 비노출', (
-      tester,
-    ) async {
-      final parent = make(id: 'p', title: '부모 할 일');
-      final childTask = make(id: 'c1', title: '자식 할 일', parentId: 'p');
-      final childNote = make(
-        id: 'c2',
-        title: '자식 메모',
+    testWidgets('⌄ = 접기, 접힘은 저장된다', (tester) async {
+      await mount(
+        tester,
+        allTodos: [make(id: 'a', title: '회사 일')],
+      );
+      expect(find.text('회사 일'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('outline-collapse-work')));
+      await tester.pump();
+      expect(find.text('회사 일'), findsNothing);
+      expect(prefs.data[OutlineScreen.collapsedKey], contains('cat:work'));
+
+      await tester.tap(find.byKey(const ValueKey('outline-collapse-work')));
+      await tester.pump();
+      expect(find.text('회사 일'), findsOneWidget);
+    });
+
+    testWidgets('저장된 접힘 상태로 시작한다 (앱 재시작)', (tester) async {
+      prefs.data[OutlineScreen.collapsedKey] = {'cat:work'};
+      await mount(
+        tester,
+        allTodos: [make(id: 'a', title: '회사 일')],
+      );
+      expect(find.text('회사 일'), findsNothing);
+    });
+
+    testWidgets('모두 접기 ↔ 모두 펼치기', (tester) async {
+      final w = make(id: 'w', title: '회사 일');
+      final d = make(id: 'd', title: '일상 일', category: Category.daily);
+      await mount(tester, allTodos: [w, d]);
+
+      await tester.tap(find.byKey(const ValueKey('outline-toggle-all')));
+      await tester.pump();
+      expect(find.text('회사 일'), findsNothing);
+      expect(find.text('일상 일'), findsNothing);
+      expect(find.text('모두 펼치기'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('outline-toggle-all')));
+      await tester.pump();
+      expect(find.text('회사 일'), findsOneWidget);
+      expect(find.text('일상 일'), findsOneWidget);
+    });
+  });
+
+  group('상태 칩', () {
+    testWidgets('메모 칩 → 메모만 카테고리별로', (tester) async {
+      final t = make(id: 't', title: '할 일');
+      final n = make(id: 'n', title: '메모 하나', type: TodoType.note);
+      await mount(tester, allTodos: [t, n]);
+
+      await tester.tap(find.byKey(const ValueKey('status-filter-note')));
+      await tester.pump();
+      expect(find.text('메모 하나'), findsOneWidget);
+      expect(find.text('할 일'), findsNothing);
+    });
+
+    testWidgets('완료 칩 → 깊은 곳의 완료도 경로와 함께', (tester) async {
+      final p = make(id: 'p', title: '넥서스');
+      final c = make(
+        id: 'c',
+        title: '끝난 자식',
         parentId: 'p',
-        type: TodoType.note,
+        doneAt: DateTime(2026, 5, 27),
       );
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [parent],
-        },
-        childrenByParent: {
-          'p': [childTask, childNote],
-        },
-        allTodos: [parent, childTask, childNote],
-      );
+      await mount(tester, allTodos: [p, c]);
 
-      expect(find.text('부모 할 일'), findsOneWidget);
-      // 자식(task/note)은 인라인으로 펼쳐지지 않는다 (상세 화면에서만).
-      expect(find.text('자식 할 일'), findsNothing);
-      expect(find.text('자식 메모'), findsNothing);
-      // 진척률은 task 자식만 카운트 (note 제외) → 부모 + task 자식 = 0/2.
-      expect(find.text('0/2'), findsAtLeastNWidgets(1));
-      // 부모 task 체크 토글은 그대로 존재 & 동작.
-      expect(find.byKey(const ValueKey('outline-check-p')), findsOneWidget);
-      final parentCheck = tester.widget<InkWell>(
-        find.byKey(const ValueKey('outline-check-p')),
-      );
-      expect(parentCheck.onTap, isNotNull);
-    });
-
-    testWidgets('자식 없는 leaf 노드 — chevron 없음 + 탭 시 편집 바텀시트', (tester) async {
-      final leaf = make(id: 'leaf', title: '단독 task');
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [leaf],
-        },
-        allTodos: [leaf],
-      );
-
-      final node = tester.widget<InkWell>(
-        find.byKey(const ValueKey('outline-node-leaf')),
-      );
-      expect(node.onTap, isNotNull, reason: 'leaf 도 탭하면 편집 시트가 열림');
-      // 상세 드릴다운 chevron 은 leaf 에 노출되지 않는다 (자식 없음).
+      await tester.tap(find.byKey(const ValueKey('status-filter-done')));
+      await tester.pump();
+      expect(find.text('끝난 자식'), findsOneWidget);
+      expect(find.text('넥서스'), findsOneWidget, reason: '경로(breadcrumb)');
       expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('outline-node-leaf')),
-          matching: find.byIcon(Icons.chevron_right_rounded),
-        ),
-        findsNothing,
+        find.byKey(const ValueKey('todo-tile-breadcrumb')),
+        findsOneWidget,
       );
-
-      // 탭 → 편집 바텀시트(AddTodoSheet) 노출.
-      await tester.tap(find.byKey(const ValueKey('outline-node-leaf')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
     });
   });
 
-  group('메모 탭 (note 평탄 목록)', () {
-    testWidgets('메모 탭에는 note 만, task 는 안 보임', (tester) async {
-      final task = make(id: 't', title: '체크할 일');
-      final note1 = make(
-        id: 'n1',
-        title: '메모1',
-        type: TodoType.note,
-        description: '메모 본문',
-      );
-      final note2 = make(id: 'n2', title: '메모2', type: TodoType.note);
+  group('그룹', () {
+    const ga = Group(id: 'ga', label: '업무', colorValue: 0xFF3366FF);
+    final cats = [
+      Category.work.copyWith(groupId: 'ga'),
+      Category.personalDev.copyWith(groupId: 'ga'),
+      Category.daily,
+    ];
 
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [task, note1, note2],
-        },
-        allTodos: [task, note1, note2],
-      );
-
-      await openNotesTab(tester);
-
-      // note 카드 노출.
-      expect(find.byKey(const ValueKey('outline-note-n1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('outline-note-n2')), findsOneWidget);
-      expect(find.text('메모1'), findsOneWidget);
-      expect(find.text('메모2'), findsOneWidget);
-      expect(find.text('메모 본문'), findsOneWidget);
-      // task 는 메모 탭에 없음.
-      expect(find.text('체크할 일'), findsNothing);
-      // 메모는 체크 토글 없음.
-      expect(find.byKey(const ValueKey('outline-check-t')), findsNothing);
+    testWidgets('미분류는 그룹 아래', (tester) async {
+      await mount(tester, allTodos: const [], categories: cats, groups: [ga]);
+      final groupY = tester
+          .getTopLeft(find.byKey(const ValueKey('outline-group-ga')))
+          .dy;
+      final ungroupedY = tester
+          .getTopLeft(find.byKey(const ValueKey('outline-ungrouped-label')))
+          .dy;
+      expect(ungroupedY, greaterThan(groupY));
     });
 
-    testWidgets('메모 카드 탭 → 편집/상세 시트(AddTodoSheet) 노출', (tester) async {
-      final note = make(
-        id: 'n1',
-        title: '메모1',
-        type: TodoType.note,
-        description: '메모 본문',
-      );
+    testWidgets('그룹 머리 탭 = 접기', (tester) async {
       await mount(
         tester,
-        rootsByCategory: {
-          Category.work: [note],
-        },
-        allTodos: [note],
+        allTodos: [make(id: 'a', title: '회사 일')],
+        categories: cats,
+        groups: [ga],
       );
-
-      await openNotesTab(tester);
-
-      // 탭 → 편집/상세 바텀시트(AddTodoSheet) 노출 (체크리스트 leaf 와 동일 패턴).
-      await tester.tap(find.byKey(const ValueKey('outline-note-n1')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('add-todo-title')), findsOneWidget);
-    });
-
-    testWidgets('_NoteCard 가 NoteVisual 토큰으로 통일 (틴트+accent, non-italic)', (
-      tester,
-    ) async {
-      final note = make(
-        id: 'n1',
-        title: '메모1',
-        category: Category.idea,
-        type: TodoType.note,
-      );
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.idea: [note],
-        },
-        allTodos: [note],
-      );
-      await openNotesTab(tester);
-
-      final box = tester.widget<Container>(
-        find.byKey(const ValueKey('outline-note-n1')),
-      );
-      final deco = box.decoration! as BoxDecoration;
-      // 틴트 배경 = NoteVisual (라이트).
-      expect(deco.color, NoteVisual.tint(Category.idea, Brightness.light));
-      // 좌측 accent 보더 = NoteVisual 두께/색.
-      final left = (deco.border! as Border).left;
-      expect(left.width, NoteVisual.accentWidth);
-      expect(left.color, NoteVisual.accent(Category.idea));
-      // 제목 italic 제거 (TodoTile note 와 일관).
-      final title = tester.widget<Text>(find.text('메모1'));
-      expect(title.style?.fontStyle, isNot(FontStyle.italic));
-    });
-
-    testWidgets('note 가 트리 깊이와 무관하게 평탄 나열 (자식 note 포함)', (tester) async {
-      // task root > note 자식 — 메모 탭은 트리 무관하게 카테고리의 모든 note 를 나열.
-      final root = make(id: 'r', title: '루트 task');
-      final childNote = make(
-        id: 'cn',
-        title: '깊은 메모',
-        parentId: 'r',
-        type: TodoType.note,
-      );
-
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [root],
-        },
-        childrenByParent: {
-          'r': [childNote],
-        },
-        allTodos: [root, childNote],
-      );
-
-      await openNotesTab(tester);
-
-      expect(find.byKey(const ValueKey('outline-note-cn')), findsOneWidget);
-      expect(find.text('깊은 메모'), findsOneWidget);
-    });
-
-    testWidgets('note 없는 카테고리 섹션은 hide — note 있는 카테고리만 노출', (tester) async {
-      final note = make(
-        id: 'n',
-        title: '개인 메모',
-        category: Category.personalDev,
-        type: TodoType.note,
-      );
-
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.personalDev: [note],
-        },
-        allTodos: [note],
-      );
-
-      await openNotesTab(tester);
-
-      // note 있는 카테고리(개인개발) 섹션만, 나머지 카테고리 섹션은 hide.
-      // (체크리스트 탭은 keepAlive 로 offstage 잔존하므로 라벨 텍스트가 아니라
-      //  메모 탭 전용 섹션 키로 확인.)
-      expect(
-        find.byKey(ValueKey('outline-note-section-${Category.personalDev.id}')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(ValueKey('outline-note-section-${Category.work.id}')),
-        findsNothing,
-      );
-      expect(find.text('개인 메모'), findsOneWidget);
-    });
-  });
-
-  group('작업 3 (L) — 그룹 계층', () {
-    const groupA = Group(
-      id: 'ga',
-      label: '업무 큰분류',
-      colorValue: 0xFF2A66FF,
-      sortOrder: 0,
-    );
-    const catInGroup = Category(
-      id: 'work',
-      label: '회사 할일',
-      iconCodePoint: 0xef0a,
-      colorValue: 0xFF2A66FF,
-      sortOrder: 0,
-      isBuiltin: true,
-      groupId: 'ga',
-    );
-    const catUngrouped = Category(
-      id: 'daily',
-      label: '일상',
-      iconCodePoint: 0xf107,
-      colorValue: 0xFF10B981,
-      sortOrder: 2,
-      isBuiltin: true,
-    );
-
-    testWidgets('그룹 헤더 + 미분류 섹션 노출 + 그룹 안 카테고리', (tester) async {
-      final root = make(id: 'r', title: '그룹 안 할 일', category: catInGroup);
-      final ungroupedRoot = make(
-        id: 'ur',
-        title: '일상 할 일',
-        category: catUngrouped,
-      );
-      await mount(
-        tester,
-        categories: const [catInGroup, catUngrouped],
-        groups: const [groupA],
-        rootsByCategory: {
-          catInGroup: [root],
-          catUngrouped: [ungroupedRoot],
-        },
-        allTodos: [root, ungroupedRoot],
-      );
-
-      // 그룹 헤더 + 미분류 라벨 동시 노출.
-      expect(find.byKey(const ValueKey('outline-group-ga')), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('outline-ungrouped-label')),
-        findsOneWidget,
-      );
-      expect(find.text('업무 큰분류'), findsOneWidget);
-      // 그룹 안 카테고리 + 그 root.
-      expect(find.text('회사 할일'), findsOneWidget);
-      expect(find.text('그룹 안 할 일'), findsOneWidget);
-      // 미분류 카테고리 (체크리스트 보유 → 노출).
-      expect(find.text('일상'), findsOneWidget);
-      expect(find.text('일상 할 일'), findsOneWidget);
-    });
-
-    testWidgets('그룹 헤더 접으면 그 그룹의 카테고리/할 일이 사라짐', (tester) async {
-      final root = make(id: 'r', title: '그룹 안 할 일', category: catInGroup);
-      final ungroupedRoot = make(
-        id: 'ur',
-        title: '일상 할 일',
-        category: catUngrouped,
-      );
-      await mount(
-        tester,
-        categories: const [catInGroup, catUngrouped],
-        groups: const [groupA],
-        rootsByCategory: {
-          catInGroup: [root],
-          catUngrouped: [ungroupedRoot],
-        },
-        allTodos: [root, ungroupedRoot],
-      );
-
-      expect(find.text('회사 할일'), findsOneWidget);
+      expect(find.text('회사 일'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('outline-group-ga')));
       await tester.pump();
-
-      // 그룹 헤더는 남고 그 안 카테고리는 사라짐. 미분류는 유지.
-      expect(find.byKey(const ValueKey('outline-group-ga')), findsOneWidget);
-      expect(find.text('회사 할일'), findsNothing);
-      expect(find.text('그룹 안 할 일'), findsNothing);
-      expect(find.text('일상'), findsOneWidget);
+      expect(find.text('회사 일'), findsNothing);
+      expect(
+        find.text(Category.daily.label),
+        findsOneWidget,
+        reason: '미분류는 그대로',
+      );
     });
 
-    testWidgets('그룹이 없으면 그룹 헤더/미분류 라벨 없이 평면 (기존 모양)', (tester) async {
-      // 각 builtin 카테고리에 task root 1건씩 — 체크리스트 보유 카테고리만 노출되므로
-      // 평면 모양을 검증하려면 모두 task 를 가져야 한다.
-      final roots = <Category, List<Todo>>{
-        for (final c in Category.values)
-          c: [make(id: 'root-${c.id}', title: '${c.label} 할 일', category: c)],
-      };
-      await mount(
-        tester,
-        rootsByCategory: roots,
-        allTodos: [for (final list in roots.values) ...list],
-      );
+    testWidgets('그룹 칩 → 그 그룹 카테고리만, 그룹 머리 없이', (tester) async {
+      await mount(tester, allTodos: const [], categories: cats, groups: [ga]);
+      await tester.tap(find.byKey(const ValueKey('group-scope-ga')));
+      await tester.pump();
 
-      expect(
-        find.byKey(const ValueKey('outline-ungrouped-label')),
-        findsNothing,
-      );
-      for (final c in Category.values) {
-        expect(find.text(c.label), findsOneWidget);
-      }
+      expect(container.read(groupScopeProvider), 'ga');
+      expect(find.byKey(const ValueKey('outline-group-ga')), findsNothing);
+      expect(find.text(Category.work.label), findsOneWidget);
+      expect(find.text(Category.daily.label), findsNothing);
+
+      // 전체 칩 → 복귀.
+      await tester.tap(find.byKey(const ValueKey('group-scope-all')));
+      await tester.pump();
+      expect(find.text(Category.daily.label), findsOneWidget);
+    });
+
+    testWidgets('그룹이 없으면 그룹 칩 줄도 없다', (tester) async {
+      await mount(tester, allTodos: const []);
+      expect(find.byKey(const ValueKey('group-scope-chips')), findsNothing);
     });
   });
 
-  group('§14 — note 헤딩(task 자손 보유) 체크리스트 통합', () {
-    testWidgets('note 헤딩이 체크리스트 탭에 섹션으로 노출 (글리프 + task 자식)', (tester) async {
-      final heading = make(id: 'h', title: '코기토 인프라', type: TodoType.note);
-      final taskChild = make(id: 'tc', title: '서버 세팅', parentId: 'h');
+  group('행', () {
+    testWidgets('탭 = 상세 (하위가 없어도)', (tester) async {
       await mount(
         tester,
-        rootsByCategory: {
-          Category.work: [heading],
-        },
-        childrenByParent: {
-          'h': [taskChild],
-        },
-        allTodos: [heading, taskChild],
+        allTodos: [make(id: 'leaf', title: '잎')],
       );
+      await tester.tap(find.text('잎'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TodoDetailScreen), findsOneWidget);
+    });
 
-      // 체크리스트 탭(default) — note 헤딩 노드 + 메모 글리프(체크박스 아님).
-      expect(find.byKey(const ValueKey('outline-node-h')), findsOneWidget);
+    testWidgets('메모는 체크 대신 메모 글리프', (tester) async {
+      await mount(
+        tester,
+        allTodos: [make(id: 'n', title: '메모', type: TodoType.note)],
+      );
       expect(
-        find.byKey(const ValueKey('outline-note-glyph-h')),
+        find.descendant(
+          of: find.byKey(const ValueKey('outline-node-n')),
+          matching: find.byKey(const ValueKey('todo-tile-note-leading')),
+        ),
         findsOneWidget,
       );
-      expect(find.byKey(const ValueKey('outline-check-h')), findsNothing);
-      expect(find.text('코기토 인프라'), findsOneWidget);
-      // task 자식은 인라인 비노출 — 헤딩 탭 시 상세 화면에서 드릴다운으로 노출.
-      expect(find.text('서버 세팅'), findsNothing);
-      expect(find.byKey(const ValueKey('outline-check-tc')), findsNothing);
-
-      await tester.tap(find.byKey(const ValueKey('outline-node-h')));
-      await tester.pumpAndSettle();
-      expect(find.text('서버 세팅'), findsOneWidget, reason: '상세 화면 드릴다운');
-    });
-
-    testWidgets('note 헤딩은 메모 탭에서 제외 (task 자손 보유 → 체크리스트로)', (tester) async {
-      final heading = make(id: 'h', title: '코기토 인프라', type: TodoType.note);
-      final taskChild = make(id: 'tc', title: '서버 세팅', parentId: 'h');
-      final pureMemo = make(id: 'm', title: '순수 메모', type: TodoType.note);
-      await mount(
-        tester,
-        rootsByCategory: {
-          Category.work: [heading, pureMemo],
-        },
-        childrenByParent: {
-          'h': [taskChild],
-        },
-        allTodos: [heading, taskChild, pureMemo],
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('outline-node-n')),
+          matching: find.byKey(const ValueKey('todo-tile-check')),
+        ),
+        findsNothing,
       );
-
-      await openNotesTab(tester);
-
-      // 순수 메모만 메모 탭에. 헤딩(task 자손 보유)은 제외.
-      expect(find.byKey(const ValueKey('outline-note-m')), findsOneWidget);
-      expect(find.byKey(const ValueKey('outline-note-h')), findsNothing);
     });
-  });
 
-  group('UX Phase 1 — 행 메뉴 (진행중 전환 수단)', () {
-    tearDown(() => AppPlatform.debugFormFactorOverride = null);
-
-    testWidgets('폰: 길게 누르면 메뉴 시트 — 진행중으로 / 편집 / 삭제', (tester) async {
+    testWidgets('폰: 길게 누르면 메뉴 시트', (tester) async {
       AppPlatform.debugFormFactorOverride = FormFactor.mobile;
-      final r = make(id: 'r', title: '보고서');
       await mount(
         tester,
-        rootsByCategory: {
-          Category.work: [r],
-        },
-        allTodos: [r],
+        allTodos: [make(id: 'r', title: '보고서')],
       );
       await tester.longPress(find.text('보고서'));
       await tester.pumpAndSettle();
@@ -737,13 +345,9 @@ void main() {
 
     testWidgets('데스크탑: 우클릭 메뉴', (tester) async {
       AppPlatform.debugFormFactorOverride = FormFactor.desktop;
-      final r = make(id: 'r', title: '보고서');
       await mount(
         tester,
-        rootsByCategory: {
-          Category.work: [r],
-        },
-        allTodos: [r],
+        allTodos: [make(id: 'r', title: '보고서')],
       );
       await tester.tap(
         find.text('보고서'),

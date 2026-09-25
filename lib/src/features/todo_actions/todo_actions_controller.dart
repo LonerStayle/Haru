@@ -41,6 +41,29 @@ class TodoActionsController {
   /// id 기준 삭제. 호출자가 [restore] 로 되돌릴 수 있도록 원본은 호출자가 보관.
   Future<void> delete(Todo todo) => _repo.deleteById(todo.id);
 
+  /// 항목과 그 **모든 하위 항목**을 지운다. 되돌리기용 스냅샷(본인 먼저)을 돌려준다.
+  ///
+  /// [delete] 는 한 줄만 지워 하위 항목이 부모 없는 채 남았다(어느 목록에도 안 보이지만
+  /// 카테고리 건수엔 잡히는 유령). 목록의 삭제는 이쪽을 쓴다. 되돌리기 = [restoreAll].
+  ///
+  /// [all] 이 있으면 그 목록으로 자손을 찾는다(화면이 이미 들고 있는 전체 목록).
+  Future<List<Todo>> deleteTree(Todo todo, {List<Todo>? all}) async {
+    final everything = all ?? await _repo.watchAll().first;
+    var root = todo;
+    for (final t in everything) {
+      if (t.id == todo.id) {
+        root = t;
+        break;
+      }
+    }
+    final snapshot = [root, ...MovePolicy.descendants(todo.id, everything)];
+    // 자식부터 지운다 — 도중에 멈춰도 부모 없는 자식이 남지 않게.
+    for (final t in snapshot.reversed) {
+      await _repo.deleteById(t.id);
+    }
+    return snapshot;
+  }
+
   /// [delete] 로 지워진 Todo 를 그대로 복원 (id 동일, updatedAt 보존).
   /// Undo SnackBar 의 "되돌리기" 액션이 호출한다.
   Future<void> restore(Todo todo) => _repo.upsert(todo);

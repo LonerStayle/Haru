@@ -389,4 +389,47 @@ void main() {
     expect(row.title, '회의 (수정)', reason: '되돌리기는 상태만 — 편집은 살린다');
     expect(row.sortOrder, 4);
   });
+
+  group('deleteTree — 하위 포함 삭제 (Phase 2)', () {
+    Todo node(String id, {String? parentId}) => Todo(
+      id: id,
+      title: id,
+      category: Category.work,
+      createdAt: created,
+      updatedAt: created,
+      parentId: parentId,
+    );
+
+    test('부모를 지우면 자손까지 지워지고 스냅샷은 부모 먼저', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      final g = node('g', parentId: 'c');
+      final other = node('o');
+      for (final t in [p, c, g, other]) {
+        await repo.upsert(t);
+      }
+
+      final snapshot = await controller.deleteTree(p);
+
+      expect(snapshot.first.id, 'p');
+      expect(snapshot.map((t) => t.id).toSet(), {'p', 'c', 'g'});
+      expect(await repo.getById('p'), isNull);
+      expect(await repo.getById('c'), isNull);
+      expect(await repo.getById('g'), isNull);
+      expect(await repo.getById('o'), isNotNull, reason: '다른 가지는 그대로');
+    });
+
+    test('되돌리기(restoreAll) — 트리 전체 복원', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      await repo.upsert(p);
+      await repo.upsert(c);
+
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreAll(snapshot);
+
+      expect(await repo.getById('p'), p);
+      expect(await repo.getById('c'), c);
+    });
+  });
 }
