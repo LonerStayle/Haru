@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/day_boundary_provider.dart';
@@ -254,13 +255,61 @@ final calendarBucketsProvider = Provider.family
             : const <GoogleEventEntry>[];
         return entries.whenData(
           (list) => bucketByDate(
-            entries: [...list, ...google],
+            entries: [...list, ...hideLinkedGoogleEvents(google, list)],
             rangeStart: range.start,
             rangeEnd: range.end,
           ),
         );
       },
     );
+
+/// 구글 오버레이에서 **이미 할 일로 보이는 일정**을 뺀다 — 같은 일이 카테고리 색 칩과
+/// 회색 구글 칩으로 두 번 보이던 문제(2026-09-25 대표님 제보).
+///
+/// 할 일에 연결된 일정(앱에서 등록했거나 캘린더에서 가져온 것)은 `calendarEventId` 로 안다.
+/// - 같은 id 의 일정 → 숨김.
+/// - 반복 일정의 회차(`recurringEventId`) → 앱 반복(마스터·회차)에 연결된 원본이면 모든
+///   회차를 숨긴다(앱이 고스트로 미래 회차를 그린다). 단발 할 일이 원본에 연결된 경우
+///   (예: 매년 생일을 한 번 가져옴)는 **그 날짜 회차만** 숨긴다 — 다른 해는 그대로 보인다.
+@visibleForTesting
+List<GoogleEventEntry> hideLinkedGoogleEvents(
+  List<GoogleEventEntry> events,
+  List<CalendarEntry> local,
+) {
+  if (events.isEmpty) return events;
+  final linked = <String>{};
+  final series = <String>{};
+  final singleDates = <String, Set<DateTime>>{};
+  for (final e in local) {
+    switch (e) {
+      case TodoEntry(:final todo):
+        final id = todo.calendarEventId;
+        if (id == null) continue;
+        linked.add(id);
+        if (todo.seriesId != null) {
+          series.add(id);
+        } else {
+          (singleDates[id] ??= {}).add(e.startDate);
+        }
+      case RecurringGhostEntry(:final master):
+        final id = master.calendarEventId;
+        if (id != null) series.add(id);
+      default:
+        break;
+    }
+  }
+  if (linked.isEmpty && series.isEmpty) return events;
+  return [
+    for (final g in events)
+      if (!linked.contains(g.id) &&
+          !series.contains(g.id) &&
+          !(g.recurringEventId != null &&
+              (series.contains(g.recurringEventId) ||
+                  (singleDates[g.recurringEventId]?.contains(g.startDate) ??
+                      false))))
+        g,
+  ];
+}
 
 /// "날짜 없음" 서랍 목록.
 final calendarUndatedTodosProvider = Provider<AsyncValue<List<Todo>>>((ref) {

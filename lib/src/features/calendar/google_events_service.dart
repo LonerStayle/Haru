@@ -83,6 +83,7 @@ class GoogleEventsService {
 
     return GoogleEventEntry(
       id: id,
+      recurringEventId: event.recurringEventId,
       title: (event.summary ?? '').trim().isEmpty
           ? '(제목 없음)'
           : event.summary!.trim(),

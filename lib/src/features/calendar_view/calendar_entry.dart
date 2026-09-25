@@ -195,6 +195,7 @@ class RecurringGhostEntry extends CalendarEntry {
 class GoogleEventEntry extends CalendarEntry {
   GoogleEventEntry({
     required this.id,
+    this.recurringEventId,
     required this.title,
     required DateTime start,
     required DateTime end,
@@ -209,6 +210,10 @@ class GoogleEventEntry extends CalendarEntry {
   static const Color eventColor = Color(0xFF6B7A90);
 
   final String id;
+
+  /// 반복 일정의 회차면 원본 일정 id (`singleEvents` 로 펼친 인스턴스의 `recurringEventId`).
+  final String? recurringEventId;
+
   final DateTime _start;
 
   @override
