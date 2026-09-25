@@ -13,6 +13,7 @@ import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/group_scope_chips.dart';
 import '../../ui/widgets/todo_status_filter.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../backlog/stale_backlog_screen.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
@@ -110,6 +111,9 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
           ),
     );
 
+    // 한 달 넘게 남은 할 일 — 있을 때만 정리 화면 입구를 띄운다.
+    final staleCount = ref.watch(staleBacklogProvider).length;
+
     final slivers = <Widget>[
       SliverToBoxAdapter(
         child: _Toolbar(
@@ -127,6 +131,18 @@ class _OutlineScreenState extends ConsumerState<OutlineScreen> {
           ),
         ),
       ),
+      if (staleCount > 0)
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(
+            AppTokens.space16,
+            0,
+            AppTokens.space16,
+            AppTokens.space12,
+          ),
+          sliver: SliverToBoxAdapter(
+            child: _StaleBacklogEntry(count: staleCount),
+          ),
+        ),
       if (pool.isNotEmpty)
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(
@@ -509,6 +525,57 @@ class _Toolbar extends StatelessWidget {
             const GroupScopeChips(padding: EdgeInsets.zero),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// "30일 넘은 할 일 N개 · 정리하기" — 오래된 할 일 정리 화면 입구.
+class _StaleBacklogEntry extends StatelessWidget {
+  const _StaleBacklogEntry({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      child: InkWell(
+        key: const ValueKey('outline-stale-entry'),
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+        onTap: () => StaleBacklogScreen.show(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space12,
+            vertical: AppTokens.space8,
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.history_rounded, size: 18, color: muted),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  '한 달 넘게 남은 할 일 $count개',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              Text(
+                '정리하기',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
