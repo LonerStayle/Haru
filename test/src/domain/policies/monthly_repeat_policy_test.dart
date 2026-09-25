@@ -97,4 +97,41 @@ void main() {
       DateTime(2027, 1, 30),
     );
   });
+
+  test('firstDate — 마지막 항목이 이미 앞날짜에 잡혀 있으면 그다음 달부터', () {
+    final now = DateTime(2026, 9, 25, 10);
+    MonthlyRepeatSuggestion s(DateTime latest) => MonthlyRepeatSuggestion(
+      key: 'k',
+      title: 't',
+      monthCount: 3,
+      dayOfMonth: latest.day,
+      latestDate: latest,
+    );
+    // "9월분" 을 10/21 로 잡아 둠 → 10/21 은 이미 있으니 11/21.
+    expect(
+      MonthlyRepeatPolicy.firstDate(s(DateTime(2026, 10, 21)), now),
+      DateTime(2026, 11, 21),
+    );
+    // 지난 항목(9/21) → 오늘 이후 첫 21일 = 10/21.
+    expect(
+      MonthlyRepeatPolicy.firstDate(s(DateTime(2026, 9, 21)), now),
+      DateTime(2026, 10, 21),
+    );
+    // 오늘 날짜의 항목이 이미 있으면 다음 달.
+    expect(
+      MonthlyRepeatPolicy.firstDate(s(DateTime(2026, 9, 25)), now),
+      DateTime(2026, 10, 25),
+    );
+  });
+
+  test('detect 는 가장 최근 항목의 날짜(dueAt 우선)를 기억한다', () {
+    final all = [
+      t('a', '관리비 7월분', DateTime(2026, 7, 20)),
+      t('b', '관리비 8월분', DateTime(2026, 8, 20)),
+      t('c', '관리비 9월분', DateTime(2026, 9, 23), due: DateTime(2026, 10, 21, 9)),
+    ];
+    final r = MonthlyRepeatPolicy.detect(all)['a']!;
+    expect(r.dayOfMonth, 21);
+    expect(r.latestDate, DateTime(2026, 10, 21));
+  });
 }

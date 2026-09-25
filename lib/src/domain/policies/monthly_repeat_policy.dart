@@ -71,12 +71,26 @@ class MonthlyRepeatPolicy {
         title: baseTitle(latest.title),
         monthCount: months.length,
         dayOfMonth: anchor.day,
+        latestDate: DateTime(anchor.year, anchor.month, anchor.day),
       );
       for (final t in items) {
         result[t.id] = suggestion;
       }
     }
     return result;
+  }
+
+  /// 반복의 첫 날짜 — 오늘 이후의 [MonthlyRepeatSuggestion.dayOfMonth] 이되, 마지막으로
+  /// 손으로 만든 항목의 날짜가 이미 그 이후면 **그다음 달**부터(같은 날 두 건 방지).
+  /// 예: "9월분" 을 10/21 로 잡아 뒀으면 반복은 11/21 부터.
+  static DateTime firstDate(MonthlyRepeatSuggestion s, DateTime now) {
+    final fromToday = nextDate(s.dayOfMonth, now);
+    final latest = s.latestDate;
+    if (fromToday.isAfter(latest)) return fromToday;
+    return nextDate(
+      s.dayOfMonth,
+      DateTime(latest.year, latest.month, latest.day + 1),
+    );
   }
 
   /// [dayOfMonth] 의 다음 날짜(오늘 포함). 그 달에 그 날이 없으면 말일.
@@ -100,6 +114,7 @@ class MonthlyRepeatSuggestion {
     required this.title,
     required this.monthCount,
     required this.dayOfMonth,
+    required this.latestDate,
   });
 
   /// 묶음 키(카테고리|제목) — "그만 보기" 기억에 쓴다.
@@ -107,4 +122,7 @@ class MonthlyRepeatSuggestion {
   final String title;
   final int monthCount;
   final int dayOfMonth;
+
+  /// 가장 최근에 손으로 만든 항목의 날짜(날짜 없으면 만든 날, 로컬 자정).
+  final DateTime latestDate;
 }

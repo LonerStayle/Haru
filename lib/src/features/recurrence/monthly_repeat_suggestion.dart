@@ -104,8 +104,8 @@ class MonthlyRepeatSuggestionCard extends ConsumerWidget {
                   ref,
                   initialCategory: todo.category,
                   initialTitle: suggestion.title,
-                  initialDueAt: MonthlyRepeatPolicy.nextDate(
-                    suggestion.dayOfMonth,
+                  initialDueAt: MonthlyRepeatPolicy.firstDate(
+                    suggestion,
                     ref.read(nowProvider)(),
                   ),
                   initialRecurrence: RecurrenceFreq.monthly,
