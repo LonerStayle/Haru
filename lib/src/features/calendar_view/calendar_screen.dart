@@ -724,9 +724,13 @@ class _CollapsedDayBar extends ConsumerWidget {
           child: SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppTokens.space16,
-                vertical: AppTokens.space8,
+              // 오른쪽 88 — 폰의 떠 있는 + 버튼이 건수·펼치기 표시를 가리지 않게
+              // (기기 테스트에서 발견). 이 막대는 폰에만 있다.
+              padding: const EdgeInsets.fromLTRB(
+                AppTokens.space16,
+                AppTokens.space8,
+                88,
+                AppTokens.space8,
               ),
               child: Row(
                 children: [
