@@ -11,6 +11,7 @@ import '../category/categories_controller.dart';
 import 'calendar_event.dart';
 import 'calendar_gateway.dart';
 import 'calendar_settings.dart';
+import 'calendar_sync_scheduler.dart' show CalendarSyncNowFailed;
 import 'google_auth_service.dart';
 import 'google_calendar_gateway.dart';
 import 'microsoft_auth_service.dart';
@@ -185,8 +186,13 @@ class _CalendarSettingsScreenState
       client?.close();
     }
 
-    // 사용자가 기다리다 취소했다 — 늦게 온 결과는 버린다.
-    if (!mounted || attempt != _connectAttempt) return;
+    // 사용자가 기다리다 취소했다 — 늦게 온 결과는 버린다. 그사이 브라우저에서 로그인을
+    // 마쳤다면 토큰만 저장되고 화면은 미연결로 남는 어긋남이 생기므로 로그아웃해 맞춘다.
+    if (attempt != _connectAttempt) {
+      if (client != null) await auth.signOut();
+      return;
+    }
+    if (!mounted) return;
     if (client == null) {
       setState(() => _connectBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -334,12 +340,16 @@ class _CalendarSettingsScreenState
     final action = ref.read(calendarSyncNowActionProvider);
     if (action == null || _syncBusy) return;
     setState(() => _syncBusy = true);
-    var ok = true;
+    String message = '동기화했어요';
     try {
       await action();
+    } on CalendarSyncNowFailed catch (e) {
+      message = e.authRequired
+          ? '다시 연결이 필요해요. 위의 "다시 연결" 을 눌러 주세요.'
+          : '동기화하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
     } catch (_) {
       // 자세한 오류 처리는 동기화 서비스 책임 — 여기선 결과만 알린다.
-      ok = false;
+      message = '동기화하지 못했어요. 잠시 뒤 다시 시도해 주세요.';
     } finally {
       if (mounted) setState(() => _syncBusy = false);
     }
@@ -348,7 +358,7 @@ class _CalendarSettingsScreenState
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         key: const ValueKey('sync-now-result'),
-        content: Text(ok ? '동기화했어요' : '동기화하지 못했어요. 잠시 뒤 다시 시도해 주세요.'),
+        content: Text(message),
         behavior: SnackBarBehavior.floating,
       ),
     );

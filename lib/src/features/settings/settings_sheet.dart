@@ -199,8 +199,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: scheme.primary.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -301,8 +301,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: scheme.onSurface.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -379,8 +379,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: scheme.onSurface.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -471,8 +471,8 @@ class _AccountTile extends ConsumerWidget {
           child: Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(AppTokens.radiusM),

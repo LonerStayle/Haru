@@ -65,6 +65,22 @@ class MemoryUiPrefsStore implements UiPrefsStore {
       lists[key] = [...values];
 }
 
+/// 앱 시작 전에 미리 읽어 둔 값(키 → 목록) — 테마처럼 첫 프레임부터 맞아야 하는 설정용.
+/// main 이 SharedPreferences 에서 읽어 override 한다. 기본은 비어 있음(비동기 복원).
+final preloadedUiListsProvider = Provider<Map<String, List<String>>>(
+  (ref) => const {},
+);
+
+/// [preloadedUiListsProvider] 에 넣을 값 읽기 — 실패하면 빈 맵(비동기 복원으로 대체).
+Future<Map<String, List<String>>> preloadUiLists(List<String> keys) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    return {for (final k in keys) k: ?prefs.getStringList('ui.list.$k')};
+  } catch (_) {
+    return const {};
+  }
+}
+
 final uiPrefsStoreProvider = Provider<UiPrefsStore>(
   (ref) => const SharedPrefsUiPrefsStore(),
 );

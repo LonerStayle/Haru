@@ -55,9 +55,20 @@ class CalendarSyncScheduler with WidgetsBindingObserver {
   }
 
   /// 사용자가 "지금 동기화" 를 눌렀을 때 — 자동 동기화 설정과 무관하게 돈다.
+  ///
+  /// 한 서비스라도 실패하거나 재인증이 필요하면 [CalendarSyncNowFailed] 를 던진다 —
+  /// 설정 화면이 결과를 사실대로 알리게(예전엔 실패해도 "동기화했어요" 였다).
+  /// 나머지 서비스는 끝까지 돈다(실패 격리).
   Future<void> syncNow() async {
+    var failed = false;
+    var authRequired = false;
     for (final coordinator in coordinators) {
-      await coordinator.syncNow();
+      final outcome = await coordinator.syncNow();
+      failed = failed || outcome.failed;
+      authRequired = authRequired || outcome.authRequired;
+    }
+    if (failed || authRequired) {
+      throw CalendarSyncNowFailed(authRequired: authRequired);
     }
   }
 
@@ -87,4 +98,14 @@ class CalendarSyncScheduler with WidgetsBindingObserver {
     if (!autoSyncEnabled()) return;
     await syncNow();
   }
+}
+
+/// "지금 동기화" 실패 — [authRequired] 면 다시 연결이 필요하다.
+class CalendarSyncNowFailed implements Exception {
+  const CalendarSyncNowFailed({this.authRequired = false});
+
+  final bool authRequired;
+
+  @override
+  String toString() => 'CalendarSyncNowFailed(authRequired: $authRequired)';
 }

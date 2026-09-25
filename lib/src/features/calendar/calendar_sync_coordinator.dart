@@ -11,18 +11,30 @@ class SyncOutcome {
     required this.push,
     required this.pull,
     this.skipped = false,
+    this.failed = false,
   });
 
   const SyncOutcome.skipped()
     : push = const PushResult(),
       pull = const PullResult(),
-      skipped = true;
+      skipped = true,
+      failed = false;
+
+  /// 도중에 예외로 실패 — "지금 동기화" 가 성공으로 오인하지 않게 따로 구분한다.
+  const SyncOutcome.failed()
+    : push = const PushResult(),
+      pull = const PullResult(),
+      skipped = true,
+      failed = true;
 
   final PushResult push;
   final PullResult pull;
 
   /// 연동이 꺼져 있거나 이미 진행 중이라 아무것도 하지 않았는가.
   final bool skipped;
+
+  /// 예외로 실패했는가.
+  final bool failed;
 
   /// 재인증이 필요한가 — 어느 방향에서든 걸리면 설정 화면이 "다시 연결" 을 띄운다.
   bool get authRequired => push.authRequired || pull.authRequired;
@@ -84,7 +96,7 @@ class CalendarSyncCoordinator {
     } catch (e) {
       // 동기화 실패가 앱을 멈추게 해선 안 된다. 다음 회차에 다시 시도한다.
       debugPrint('[solo_todo] 캘린더 동기화 실패: $e');
-      return const SyncOutcome.skipped();
+      return const SyncOutcome.failed();
     } finally {
       _running = false;
     }

@@ -7,6 +7,7 @@ import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../category/categories_controller.dart';
+import '../settings/app_preferences.dart';
 import 'calendar_entry.dart';
 
 /// 엔트리를 **조작 가능한 실제 Todo** 로 바꾼다.
@@ -51,10 +52,15 @@ Future<void> openAddTodoOnDate(
 /// 기본값으로 쓰고, 아직 로딩 중이면 builtin 기본값으로 떨어진다.
 /// (사용자가 시트에서 언제든 바꿀 수 있으므로 틀려도 손해가 작다.)
 Category defaultCalendarCategory(WidgetRef ref) {
+  final preferred = ref.read(defaultCategoryIdProvider);
   return ref
       .read(activeCategoriesProvider)
       .maybeWhen(
-        data: (list) => list.isEmpty ? Category.daily : list.first,
+        data: (list) {
+          if (list.isEmpty) return Category.daily;
+          // 설정의 "새 할 일 기본 카테고리"(목록에 없으면 무시) → 첫 카테고리.
+          return list.where((c) => c.id == preferred).firstOrNull ?? list.first;
+        },
         orElse: () => Category.daily,
       );
 }

@@ -104,7 +104,8 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
                     ),
                   ),
                   const Spacer(),
-                  if (!expanded)
+                  // 폰은 오른쪽 아래 + 버튼이 이 자리를 덮는다 — 안내 문구는 데스크탑만.
+                  if (!expanded && !compact)
                     Text(
                       '펼쳐서 달력으로 끌어놓기',
                       style: theme.textTheme.labelSmall?.copyWith(

@@ -45,8 +45,9 @@ class ArchiveScreen extends ConsumerWidget {
     final archivedCats = catsAsync.value ?? const <Category>[];
     final todos = ref.watch(allTodosProvider).asData?.value ?? const <Todo>[];
     final todoCount = <String, int>{};
+    // 반복 일정의 숨은 원본(시리즈 마스터)도 센다 — 삭제 규칙(DAO)이 그것까지 세므로,
+    // 화면이 "비어 있음" 이라 해 놓고 삭제가 막히는 어긋남을 없앤다.
     for (final t in todos) {
-      if (t.isSeriesMaster) continue;
       todoCount.update(t.category.id, (v) => v + 1, ifAbsent: () => 1);
     }
 

@@ -25,7 +25,10 @@ abstract class _SinglePrefNotifier<T> extends Notifier<T> {
     _disposed = false;
     ref.onDispose(() => _disposed = true);
     restored = _restore();
-    return fallback;
+    // 시작 전에 읽어 둔 값이 있으면 첫 프레임부터 그 값 — 테마 깜빡임·첫 ⌘N 의 기본
+    // 카테고리 누락을 막는다.
+    final pre = ref.read(preloadedUiListsProvider)[storageKey];
+    return pre == null ? fallback : decode(pre.isEmpty ? null : pre.first);
   }
 
   Future<void> _restore() async {
@@ -71,6 +74,9 @@ class ThemeModeNotifier extends _SinglePrefNotifier<ThemeMode> {
   @override
   String encode(ThemeMode value) => value.name;
 }
+
+/// main 이 미리 읽어 둘 키들 ([preloadUiLists]).
+const List<String> preloadedPrefKeys = ['app.themeMode', 'app.defaultCategory'];
 
 final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
   ThemeModeNotifier.new,

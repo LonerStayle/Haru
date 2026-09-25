@@ -151,6 +151,21 @@ void main() {
       expect(r.prefs.lists['app.defaultCategory'], [Category.daily.id]);
     });
 
+    testWidgets('미리 읽어 둔 테마는 첫 프레임부터 적용된다(깜빡임 없음)', (tester) async {
+      final c = ProviderContainer(
+        overrides: [
+          uiPrefsStoreProvider.overrideWithValue(MemoryUiPrefsStore()),
+          preloadedUiListsProvider.overrideWithValue({
+            'app.themeMode': ['dark'],
+            'app.defaultCategory': ['daily'],
+          }),
+        ],
+      );
+      addTearDown(c.dispose);
+      expect(c.read(themeModeProvider), ThemeMode.dark);
+      expect(c.read(defaultCategoryIdProvider), 'daily');
+    });
+
     testWidgets('단축키 목록 창', (tester) async {
       await open(tester);
       await scrollTo(tester, find.byKey(const ValueKey('settings-shortcuts')));

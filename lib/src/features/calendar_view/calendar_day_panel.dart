@@ -123,11 +123,12 @@ class CalendarDayPanel extends ConsumerWidget {
                   ),
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
+                  // 폰은 떠 있는 + 버튼이 마지막 줄을 가리지 않게 아래를 비운다.
+                  padding: EdgeInsets.fromLTRB(
                     AppTokens.space12,
                     0,
                     AppTokens.space12,
-                    AppTokens.space24,
+                    compact ? 88 : AppTokens.space24,
                   ),
                   itemCount: entries.length,
                   separatorBuilder: (_, _) =>

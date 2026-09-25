@@ -18,6 +18,7 @@ import '../../ui/widgets/todo_category_sections.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../category/categories_controller.dart';
+import '../settings/app_preferences.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
@@ -159,11 +160,16 @@ class HomeScreen extends ConsumerWidget {
           },
           // date-repeat — ⋮ '반복 중지' → 시리즈 마스터 삭제(비파괴적).
           onStopRecurrence: (t) => confirmStopRecurrence(context, ref, t),
-          onAddTodo: () => showNewTodoSheet(
-            context,
-            ref,
-            initialCategory: _defaultCategoryFor(ref, group),
-          ),
+          // 오늘 화면에서 추가하면 오늘 날짜 — 날짜가 없으면 '오늘' 에 안 보인다.
+          onAddTodo: () {
+            final now = ref.read(nowProvider)();
+            showNewTodoSheet(
+              context,
+              ref,
+              initialCategory: _defaultCategoryFor(ref, group),
+              initialDueAt: DateTime(now.year, now.month, now.day),
+            );
+          },
         );
       },
     );
@@ -178,6 +184,10 @@ Category _defaultCategoryFor(WidgetRef ref, Group? group) {
   final pool = group == null
       ? categories
       : categories.where((c) => c.groupId == group.id).toList();
+  // 설정의 "새 할 일 기본 카테고리" — 그룹 필터가 켜져 있으면 그 그룹 안에 있을 때만.
+  final preferredId = ref.read(defaultCategoryIdProvider);
+  final preferred = pool.where((c) => c.id == preferredId).firstOrNull;
+  if (preferred != null) return preferred;
   if (pool.isNotEmpty) return pool.first;
   return categories.isNotEmpty ? categories.first : Category.daily;
 }

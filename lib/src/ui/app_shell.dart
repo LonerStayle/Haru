@@ -119,7 +119,8 @@ class _AppShellState extends ConsumerState<AppShell> {
     _pushTrayState();
   }
 
-  /// 트레이에서 할 일 완료 — 창을 띄우지 않고 바로 체크(되돌리기는 앱의 ⌘Z/목록).
+  /// 트레이에서 할 일 완료 — 창을 띄우지 않고 바로 체크. 되돌리려면 앱에서 다시
+  /// 체크를 풀면 된다(트레이엔 되돌리기 스낵바가 없다).
   Future<void> _toggleFromTray(String id) async {
     final todo = ref
         .read(undoneTodayTodosProvider)
@@ -370,10 +371,15 @@ class _AppShellState extends ConsumerState<AppShell> {
       preferredCategoryId: ref.read(defaultCategoryIdProvider),
     );
 
-    // 캘린더 화면에서 누르면 거기서 고른 날짜가 기본값 — 날짜를 다시 고르는 단계를 없앤다.
-    final calendarDay = location.page == ShellPage.calendar
-        ? ref.read(calendarSelectionProvider).selectedDay
-        : null;
+    // 기본 날짜 — 캘린더 화면이면 거기서 고른 날, 오늘 화면이면 오늘.
+    // '오늘' 은 날짜가 있는 항목만 보여 주므로(v1.5), 오늘 화면에서 날짜 없이 추가하면
+    // 방금 추가한 항목이 곧바로 사라져 보였다(Phase 4 기기 테스트에서 발견).
+    final now = ref.read(nowProvider)();
+    final calendarDay = switch (location.page) {
+      ShellPage.calendar => ref.read(calendarSelectionProvider).selectedDay,
+      ShellPage.today => DateTime(now.year, now.month, now.day),
+      _ => null,
+    };
 
     _addSheetOpen = true;
     try {

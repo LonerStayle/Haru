@@ -11,6 +11,7 @@ import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/policies/todo_sort_policy.dart';
 import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/add_todo/add_todo_sheet.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/category_providers.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
@@ -218,6 +219,34 @@ void main() {
     expect(
       tester.widget<Text>(find.byKey(const ValueKey('sidebar-badge'))).data,
       '2',
+    );
+  });
+
+  // Phase 4 — 기기 테스트에서 발견: 오늘 화면에서 날짜 없이 추가하면 곧바로 사라져 보였다.
+  testWidgets('오늘 화면에서 ⌘N → 날짜 기본값은 오늘', (tester) async {
+    await pump(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    final sheet = tester.widget<AddTodoSheet>(find.byType(AddTodoSheet));
+    final now = DateTime.now();
+    expect(sheet.initialDueAt, DateTime(now.year, now.month, now.day));
+  });
+
+  testWidgets('전체보기에서 ⌘N 은 날짜 없이(둘러보는 화면)', (tester) async {
+    await pump(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<AddTodoSheet>(find.byType(AddTodoSheet)).initialDueAt,
+      isNull,
     );
   });
 }
