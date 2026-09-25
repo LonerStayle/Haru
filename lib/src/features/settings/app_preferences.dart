@@ -83,7 +83,7 @@ final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
 );
 
 /// 새 할 일의 기본 카테고리 — 오늘·전체보기·캘린더처럼 "지금 보는 카테고리" 가 없는
-/// 화면에서 쓴다. null = 첫 번째 카테고리(예전 동작). 카테고리 화면에서는 그 카테고리가
+/// 화면에서 쓴다. null = 자동(마지막에 쓴 카테고리 → 사이드바 첫 카테고리). 카테고리 화면에서는 그 카테고리가
 /// 우선이다.
 class DefaultCategoryNotifier extends _SinglePrefNotifier<String?> {
   @override

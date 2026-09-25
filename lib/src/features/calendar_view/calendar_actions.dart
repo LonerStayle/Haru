@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../../domain/category.dart';
+import '../../domain/group.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../add_todo/add_todo_default_category.dart';
 import '../category/categories_controller.dart';
+import '../category/groups_controller.dart';
 import '../settings/app_preferences.dart';
 import 'calendar_entry.dart';
 
@@ -48,18 +51,25 @@ Future<void> openAddTodoOnDate(
   );
 }
 
-/// 캘린더에는 "지금 보고 있는 카테고리" 라는 맥락이 없다. 활성 카테고리의 첫 번째를
-/// 기본값으로 쓰고, 아직 로딩 중이면 builtin 기본값으로 떨어진다.
+/// 캘린더에는 "지금 보고 있는 카테고리" 라는 맥락이 없다 — ⌘N 과 같은 규칙(설정의 기본
+/// 카테고리 → 마지막에 쓴 카테고리 → 사이드바 첫 카테고리). 로딩 중이면 builtin 기본값.
 /// (사용자가 시트에서 언제든 바꿀 수 있으므로 틀려도 손해가 작다.)
 Category defaultCalendarCategory(WidgetRef ref) {
-  final preferred = ref.read(defaultCategoryIdProvider);
   return ref
       .read(activeCategoriesProvider)
       .maybeWhen(
         data: (list) {
           if (list.isEmpty) return Category.daily;
-          // 설정의 "새 할 일 기본 카테고리"(목록에 없으면 무시) → 첫 카테고리.
-          return list.where((c) => c.id == preferred).firstOrNull ?? list.first;
+          return resolveAddTodoDefaultCategory(
+            categories: list,
+            groups:
+                ref.read(activeGroupsProvider).asData?.value ?? const <Group>[],
+            destinations: const [],
+            index: 0,
+            selectedGroupId: null,
+            preferredCategoryId: ref.read(defaultCategoryIdProvider),
+            lastUsedId: ref.read(lastUsedCategoryProvider),
+          );
         },
         orElse: () => Category.daily,
       );

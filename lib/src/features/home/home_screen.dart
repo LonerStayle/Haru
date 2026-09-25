@@ -17,6 +17,7 @@ import '../../ui/widgets/today_progress_summary.dart';
 import '../../ui/widgets/todo_category_sections.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../add_todo/add_todo_default_category.dart';
 import '../category/categories_controller.dart';
 import '../settings/app_preferences.dart';
 import '../category/groups_controller.dart';
@@ -176,20 +177,21 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-/// 오늘 화면 빈 상태 "새 할 일" 버튼의 기본 카테고리 — 그룹 탭이면 그 그룹의 첫 카테고리,
-/// 아니면 활성 카테고리의 첫 번째. 로딩 중이면 builtin '일상'.
+/// 오늘 화면 빈 상태 "새 할 일" 버튼의 기본 카테고리 — ⌘N 과 같은 규칙(설정의 기본 카테고리
+/// → 마지막에 쓴 카테고리 → 사이드바 첫 카테고리, 그룹 탭이면 그 그룹 안에서). 로딩 중이면 '일상'.
 Category _defaultCategoryFor(WidgetRef ref, Group? group) {
   final categories =
       ref.read(activeCategoriesProvider).asData?.value ?? const <Category>[];
-  final pool = group == null
-      ? categories
-      : categories.where((c) => c.groupId == group.id).toList();
-  // 설정의 "새 할 일 기본 카테고리" — 그룹 필터가 켜져 있으면 그 그룹 안에 있을 때만.
-  final preferredId = ref.read(defaultCategoryIdProvider);
-  final preferred = pool.where((c) => c.id == preferredId).firstOrNull;
-  if (preferred != null) return preferred;
-  if (pool.isNotEmpty) return pool.first;
-  return categories.isNotEmpty ? categories.first : Category.daily;
+  if (categories.isEmpty) return Category.daily;
+  return resolveAddTodoDefaultCategory(
+    categories: categories,
+    groups: ref.read(activeGroupsProvider).asData?.value ?? const <Group>[],
+    destinations: const [],
+    index: 0,
+    selectedGroupId: group?.id,
+    preferredCategoryId: ref.read(defaultCategoryIdProvider),
+    lastUsedId: ref.read(lastUsedCategoryProvider),
+  );
 }
 
 class _Loaded extends StatefulWidget {

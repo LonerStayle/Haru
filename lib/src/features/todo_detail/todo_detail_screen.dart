@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/date_format.dart';
 import '../../core/theme.dart';
 import '../../domain/group.dart';
+import '../../domain/policies/description_checklist.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
@@ -14,10 +15,12 @@ import '../../ui/widgets/todo_action_menu.dart';
 import '../../ui/widgets/todo_drill_list.dart';
 import '../../ui/widgets/todo_status_check.dart';
 import '../../ui/widgets/todo_status_filter.dart';
+import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
+import '../recurrence/monthly_repeat_suggestion.dart';
 import '../recurrence/recurrence_actions.dart';
 import '../settings/sort_mode_controller.dart';
 import '../todo_actions/todo_actions_controller.dart';
@@ -202,6 +205,39 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
     });
   }
 
+  /// 전환 중 — 더블클릭으로 하위가 두 벌 생기지 않게.
+  bool _converting = false;
+
+  /// 설명 속 목록을 하위 항목으로 옮긴다 — 되돌리기 스낵바(⌘Z)로 원래대로.
+  Future<void> _checklistToChildren(
+    Todo live,
+    DescriptionChecklist checklist,
+  ) async {
+    if (_converting) return;
+    _converting = true;
+    try {
+      await _convert(live, checklist);
+    } finally {
+      _converting = false;
+    }
+  }
+
+  Future<void> _convert(Todo live, DescriptionChecklist checklist) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final actions = ref.read(todoActionsProvider);
+    final result = await actions.checklistToChildren(
+      live,
+      items: [for (final i in checklist.items) (title: i.title, done: i.done)],
+      remainingDescription: checklist.remaining,
+    );
+    if (messenger == null || !messenger.mounted) return;
+    showUndoSnackbarOn(
+      messenger,
+      message: '설명 목록 ${result.created.length}개를 하위 항목으로 옮겼어요.',
+      onUndo: () => actions.undoChecklist(result.created, result.parentBefore),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final parent = widget.parent;
@@ -257,6 +293,15 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
         ),
       ),
     );
+    // 매달 손으로 만드는 항목이면 "매월 반복 만들기" 제안.
+    final monthly = SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: AppTokens.space16),
+      sliver: SliverToBoxAdapter(
+        child: gone
+            ? const SizedBox.shrink()
+            : MonthlyRepeatSuggestionCard(todo: live),
+      ),
+    );
 
     return asyncChildren.when(
       loading: () => const TodoListSkeleton(),
@@ -270,9 +315,12 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
         final descendants = _descendantsOf(live.id, allTodos);
         final progress = computeSubtreeProgress(live, allTodos);
         void addChild() => showAddChildSheet(context, ref, parent: live);
+        // 목록이 한 줄뿐이면 메모일 가능성이 커서 제안하지 않는다.
+        final checklist = DescriptionChecklist.parse(live.description);
         return CustomScrollView(
           slivers: [
             card,
+            monthly,
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
                 AppTokens.space16,
@@ -295,6 +343,22 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
                 ),
               ),
             ),
+            if (!gone && checklist.items.length >= 2)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTokens.space16,
+                  AppTokens.space8,
+                  AppTokens.space16,
+                  0,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: _ChecklistSuggestion(
+                    count: checklist.items.length,
+                    accent: accent,
+                    onConvert: () => _checklistToChildren(live, checklist),
+                  ),
+                ),
+              ),
             if (children.isEmpty)
               SliverPadding(
                 padding: const EdgeInsets.all(AppTokens.space16),
@@ -778,6 +842,54 @@ class _MetaChip extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "설명에 목록 N개가 있어요 → 하위 항목으로" 제안 줄. 누르기 전엔 아무것도 바꾸지 않는다.
+class _ChecklistSuggestion extends StatelessWidget {
+  const _ChecklistSuggestion({
+    required this.count,
+    required this.accent,
+    required this.onConvert,
+  });
+
+  final int count;
+  final Color accent;
+  final VoidCallback onConvert;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      key: const ValueKey('detail-checklist-suggestion'),
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space12,
+        AppTokens.space4,
+        AppTokens.space4,
+        AppTokens.space4,
+      ),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.format_list_bulleted_rounded, size: 18, color: accent),
+          const SizedBox(width: AppTokens.space8),
+          Expanded(
+            child: Text(
+              '설명에 목록 $count개가 있어요',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('detail-checklist-convert'),
+            onPressed: onConvert,
+            child: const Text('하위 항목으로'),
+          ),
+        ],
       ),
     );
   }

@@ -735,7 +735,7 @@ class _DefaultCategoryTile extends ConsumerWidget {
             .read(defaultCategoryIdProvider.notifier)
             .set(v == _auto ? null : v),
         itemBuilder: (context) => [
-          const PopupMenuItem(value: _auto, child: Text('첫 번째 카테고리')),
+          const PopupMenuItem(value: _auto, child: Text('마지막에 쓴 카테고리')),
           for (final c in categories)
             PopupMenuItem(
               value: c.id,
@@ -760,7 +760,7 @@ class _DefaultCategoryTile extends ConsumerWidget {
                 Icon(current.icon, size: 16, color: current.color),
                 const SizedBox(width: AppTokens.space4),
               ],
-              Text(current?.label ?? '첫 번째 카테고리'),
+              Text(current?.label ?? '마지막에 쓴 카테고리'),
               const Icon(Icons.arrow_drop_down),
             ],
           ),

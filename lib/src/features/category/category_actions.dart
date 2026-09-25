@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
+import '../../domain/todo.dart';
 import '../../ui/widgets/undo_snackbar.dart';
+import '../outline/tree_providers.dart';
 import 'add_category_dialog.dart';
 import 'add_group_dialog.dart';
 import 'categories_controller.dart';
@@ -301,12 +303,28 @@ class CategoryActions {
   }
 
   Future<void> archiveCategory(Category category) async {
+    // 보관하면 그 카테고리의 할 일은 오늘·검색·캘린더에서 모두 숨는다 — 미완료가
+    // 남아 있으면 그 사실을 같이 알린다(모르고 보관해 할 일을 잃어버리지 않게).
+    final all = _container.read(allTodosProvider).asData?.value;
+    final open = all == null
+        ? 0
+        : all
+              .where(
+                (t) =>
+                    t.category.id == category.id &&
+                    t.type == TodoType.task &&
+                    !t.isDone &&
+                    !t.isSeriesMaster,
+              )
+              .length;
     await _categories.archive(category.id);
     final messenger = _messenger;
     if (messenger == null || !messenger.mounted) return;
     showUndoSnackbarOn(
       messenger,
-      message: '${category.label} 카테고리를 보관했어요.',
+      message: open == 0
+          ? '${category.label} 카테고리를 보관했어요.'
+          : '${category.label} 카테고리를 보관했어요. 남은 할 일 $open개도 함께 숨겨져요.',
       onUndo: () => _categories.unarchive(category.id),
     );
   }

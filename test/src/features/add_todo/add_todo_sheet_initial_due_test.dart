@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
+import 'package:solo_todo/src/domain/recurrence.dart';
 import 'package:solo_todo/src/features/add_todo/add_todo_sheet.dart';
 import 'package:solo_todo/src/features/category/categories_controller.dart';
 import 'package:solo_todo/src/features/category/groups_controller.dart';
@@ -18,6 +19,8 @@ void main() {
     WidgetTester tester, {
     DateTime? initialDueAt,
     bool initialAllDay = true,
+    RecurrenceFreq? initialRecurrence,
+    String? initialTitle,
   }) async {
     await tester.binding.setSurfaceSize(const Size(700, 1400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -43,6 +46,8 @@ void main() {
                     onSubmit: submissions.add,
                     initialDueAt: initialDueAt,
                     initialAllDay: initialAllDay,
+                    initialRecurrence: initialRecurrence,
+                    initialTitle: initialTitle,
                   ),
                   child: const Text('열기'),
                 ),
@@ -103,5 +108,36 @@ void main() {
 
     expect(submissions, hasLength(1));
     expect(submissions.first.dueAt, isNull);
+  });
+
+  testWidgets(
+    'show(initialTitle:, initialRecurrence:) — 제목·매월 반복이 채워진 채 열린다 (2026-09-25)',
+    (tester) async {
+      final submissions = await openViaShow(
+        tester,
+        initialDueAt: DateTime(2026, 10, 21),
+        initialRecurrence: RecurrenceFreq.monthly,
+        initialTitle: '아파트 관리비 입금',
+      );
+      final field = tester.widget<TextField>(
+        find.byKey(const ValueKey('add-todo-title')),
+      );
+      expect(field.controller!.text, '아파트 관리비 입금');
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '추가'))
+          .onPressed!();
+      await tester.pump();
+      expect(submissions.single.recurrence?.freq, RecurrenceFreq.monthly);
+      expect(submissions.single.dueAt, DateTime(2026, 10, 21));
+    },
+  );
+
+  testWidgets('initialRecurrence 는 날짜가 없으면 무시된다', (tester) async {
+    final submissions = await openViaShow(
+      tester,
+      initialRecurrence: RecurrenceFreq.monthly,
+    );
+    await submit(tester, '날짜 없음');
+    expect(submissions.single.recurrence, isNull);
   });
 }

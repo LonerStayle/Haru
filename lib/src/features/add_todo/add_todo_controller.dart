@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../../data/todo_repository.dart';
 import '../../domain/category.dart';
+import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../calendar/calendar_service.dart';
+import 'add_todo_default_category.dart';
 import 'add_todo_sheet.dart';
 
 /// 새 할 일 시트 공통 flow — FAB / Cmd+N / 트레이 / 빈 화면 버튼 / 캘린더 "이 날짜로 추가".
@@ -20,6 +24,8 @@ Future<void> showNewTodoSheet(
   required Category initialCategory,
   DateTime? initialDueAt,
   bool initialAllDay = true,
+  String? initialTitle,
+  RecurrenceFreq? initialRecurrence,
 }) async {
   final pending = <AddTodoSubmission>[];
   await AddTodoSheet.show(
@@ -27,6 +33,8 @@ Future<void> showNewTodoSheet(
     initialCategory: initialCategory,
     initialDueAt: initialDueAt,
     initialAllDay: initialAllDay,
+    initialTitle: initialTitle,
+    initialRecurrence: initialRecurrence,
     onSubmit: pending.add,
   );
   if (!context.mounted) return;
@@ -41,6 +49,13 @@ Future<void> savePendingSubmissions(
   List<AddTodoSubmission> pending,
 ) async {
   if (pending.isEmpty) return;
+  // 최상위 새 항목이면 그 카테고리를 다음 ⌘N 의 기본값으로 기억한다(하위 추가는 제외).
+  final last = pending.last;
+  if (last.parentId == null) {
+    unawaited(
+      ref.read(lastUsedCategoryProvider.notifier).record(last.category.id),
+    );
+  }
   final controller = ref.read(addTodoControllerProvider);
   if (pending.length > 1) {
     await controller.addAll(pending);

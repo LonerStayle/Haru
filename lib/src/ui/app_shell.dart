@@ -369,6 +369,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       index: _indexOf(location),
       selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
       preferredCategoryId: ref.read(defaultCategoryIdProvider),
+      lastUsedId: ref.read(lastUsedCategoryProvider),
     );
 
     // 기본 날짜 — 캘린더 화면이면 거기서 고른 날, 오늘 화면이면 오늘.
@@ -464,6 +465,9 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     // v1.2 — 활성 카테고리 stream 에 따라 destinations 동적 build (보관 카테고리 제외).
     // loading / error 시 fallback 으로 builtin 5종 기준의 default 사용.
+    // ⌘N 기본값(마지막에 쓴 카테고리)을 앱 시작 때 미리 복원해 둔다 — 값이 바뀌어도
+    // 셸을 다시 그릴 필요는 없어 listen 으로 살려 두기만 한다.
+    ref.listen(lastUsedCategoryProvider, (_, _) {});
     final categoriesAsync = ref.watch(activeCategoriesProvider);
     final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
     _destinations = AppDestination.buildAll(categories);

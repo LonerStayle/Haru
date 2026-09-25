@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:solo_todo/src/core/theme.dart';
+import 'package:solo_todo/src/data/providers.dart';
+import 'package:solo_todo/src/data/local/app_database.dart';
 import 'package:solo_todo/src/core/ui_prefs.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
@@ -27,6 +30,7 @@ void main() {
   Future<(List<Category>, List<Group>)> mount(
     WidgetTester tester, {
     List<Todo> todos = const [],
+    List<Override> extra = const [],
   }) async {
     final opened = <Category>[];
     final openedGroups = <Group>[];
@@ -39,6 +43,7 @@ void main() {
           categoriesProvider.overrideWith((_) => Stream.value(cats)),
           groupsProvider.overrideWith((_) => Stream.value(const [ga])),
           allTodosProvider.overrideWith((_) => Stream.value(todos)),
+          ...extra,
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -110,5 +115,36 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('group-menu-open')));
     await tester.pumpAndSettle();
     expect(groupsOpened.single.id, 'ga');
+  });
+
+  testWidgets('보관할 때 미완료가 남아 있으면 숨겨진다고 알린다 (2026-09-25)', (tester) async {
+    final db = AppDatabase.memory();
+    addTearDown(db.close);
+    for (final c in cats) {
+      await db.categoriesDao.upsert(c);
+    }
+    Todo t(String id, {DateTime? done}) => Todo(
+      id: id,
+      title: id,
+      category: Category.work,
+      createdAt: DateTime.utc(2026, 9, 1),
+      updatedAt: DateTime.utc(2026, 9, 1),
+      doneAt: done,
+    );
+    await mount(
+      tester,
+      todos: [
+        t('a'),
+        t('b'),
+        t('c', done: DateTime.utc(2026, 9, 2)),
+      ],
+      extra: [appDatabaseProvider.overrideWithValue(db)],
+    );
+    await tester.tap(find.byKey(const ValueKey('manage-cat-menu-work')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-menu-archive')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('남은 할 일 2개도 함께 숨겨져요'), findsOneWidget);
+    expect((await db.categoriesDao.getById('work'))!.archived, isTrue);
   });
 }

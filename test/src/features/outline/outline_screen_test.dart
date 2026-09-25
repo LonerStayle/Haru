@@ -358,4 +358,32 @@ void main() {
       expect(find.text('진행중으로'), findsOneWidget);
     });
   });
+
+  group('오래된 할 일 입구 (2026-09-25)', () {
+    testWidgets('한 달 넘은 미완료 최상위가 있으면 입구 → 누르면 정리 화면', (tester) async {
+      // make() 의 createdAt 은 2026-05-27 — 오늘 기준 한 달이 훨씬 넘었다.
+      await mount(
+        tester,
+        allTodos: [
+          make(id: 'old1'),
+          make(id: 'old2'),
+          make(id: 'kid', parentId: 'old1'),
+          make(id: 'done', doneAt: DateTime.utc(2026, 5, 28)),
+        ],
+      );
+      expect(find.text('한 달 넘게 남은 할 일 2개'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('outline-stale-entry')));
+      await tester.pumpAndSettle();
+      expect(find.text('오래된 할 일'), findsOneWidget);
+      expect(find.byKey(const ValueKey('stale-row-old1')), findsOneWidget);
+    });
+
+    testWidgets('없으면 입구도 없다', (tester) async {
+      await mount(
+        tester,
+        allTodos: [make(id: 'd', doneAt: DateTime.utc(2026, 5, 28))],
+      );
+      expect(find.byKey(const ValueKey('outline-stale-entry')), findsNothing);
+    });
+  });
 }
