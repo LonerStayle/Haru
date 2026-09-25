@@ -288,6 +288,13 @@ Future<void> _tour(WidgetTester tester, _Cap cap, String prefix) async {
   await cap.shot('${prefix}_02b_outline_group');
   await tester.tap(find.byKey(const ValueKey('group-scope-all')));
   await cap.settle();
+  // Phase 3 — 데스크탑: 항목을 누르면 오른쪽 인스펙터.
+  if (AppPlatform.isDesktop) {
+    await tester.tap(find.text('결제 API 리팩토링 PR 리뷰').first);
+    await cap.shot('${prefix}_02c_inspector');
+    await tester.tap(find.byKey(const ValueKey('inspector-close')));
+    await cap.settle();
+  }
   await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
   await cap.shot('${prefix}_03_calendar');
   await tester.sendKeyEvent(LogicalKeyboardKey.digit3);

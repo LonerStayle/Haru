@@ -30,4 +30,11 @@ class AppPlatform {
 
   static bool get isDesktop => formFactor == FormFactor.desktop;
   static bool get isMobile => formFactor == FormFactor.mobile;
+
+  /// macOS 메뉴바(PlatformMenuBar)를 쓸지 — 실제 macOS 앱일 때만. 위젯 테스트는
+  /// macOS 호스트에서 돌아도 메뉴 채널이 없으니 끈다.
+  static bool get useNativeMenuBar =>
+      debugFormFactorOverride == null &&
+      Platform.isMacOS &&
+      !Platform.environment.containsKey('FLUTTER_TEST');
 }

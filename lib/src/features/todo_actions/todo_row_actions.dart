@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/todo.dart';
+import '../../ui/inspector.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_sheet.dart';
 import '../move_todo/move_todo_sheet.dart';
@@ -32,9 +33,17 @@ Future<void> openTodoEdit(BuildContext context, WidgetRef ref, Todo todo) {
   );
 }
 
-/// 할 일 상세 — 탭은 어디서나 여기로 온다 (하위 항목 유무와 무관).
-Future<void> openTodoDetail(BuildContext context, Todo todo) {
-  return Navigator.of(context).push(
+/// 할 일 상세 — 탭은 어디서나 여기로 온다 (하위 유무와 무관).
+///
+/// 데스크탑 셸 안이면 오른쪽 인스펙터에 연다(사이드바·목록 유지). 그 밖(폰, 셸 밖에
+/// push 된 화면)은 상세 화면을 push.
+Future<void> openTodoDetail(BuildContext context, Todo todo) async {
+  final inspector = InspectorScope.maybeOf(context);
+  if (inspector != null) {
+    inspector.open(todo);
+    return;
+  }
+  await Navigator.of(context).push(
     MaterialPageRoute<void>(builder: (_) => TodoDetailScreen(parent: todo)),
   );
 }

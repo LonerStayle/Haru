@@ -22,6 +22,26 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason> showUndoSnackbar(
   hideCurrentBeforeShow: hideCurrentBeforeShow,
 )!;
 
+/// 지금 떠 있는 되돌리기 스낵바의 동작 — ⌘Z 가 부른다 ([runLatestUndo]).
+({
+  VoidCallback onUndo,
+  ScaffoldFeatureController<SnackBar, SnackBarClosedReason> controller,
+})?
+_latestUndo;
+
+/// 되돌릴 게 떠 있는지 — ⌘Z 를 받을지 결정.
+bool hasLatestUndo() => _latestUndo != null;
+
+/// ⌘Z — 화면에 떠 있는 되돌리기 스낵바를 누른 것과 같다. 없으면 false.
+bool runLatestUndo() {
+  final latest = _latestUndo;
+  if (latest == null) return false;
+  _latestUndo = null;
+  latest.controller.close();
+  latest.onUndo();
+  return true;
+}
+
 /// 화면에 떠 있는 "양보하지 않는"(삭제·이동) 되돌리기 스낵바 수 — 창구별.
 final Expando<int> _firmVisible = Expando('undo-snackbar-firm');
 
@@ -52,6 +72,11 @@ ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? showUndoSnackbarOn(
       action: SnackBarAction(label: '되돌리기', onPressed: onUndo),
     ),
   );
+  final entry = (onUndo: onUndo, controller: controller);
+  _latestUndo = entry;
+  controller.closed.whenComplete(() {
+    if (identical(_latestUndo, entry)) _latestUndo = null;
+  });
   if (!yieldToOthers) {
     _firmVisible[messenger] = (_firmVisible[messenger] ?? 0) + 1;
     controller.closed.whenComplete(() {

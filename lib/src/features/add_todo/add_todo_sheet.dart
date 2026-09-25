@@ -128,6 +128,10 @@ class AddTodoSheet extends ConsumerStatefulWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      // 데스크탑은 넓은 창 전폭으로 펼쳐지면 입력칸·칩이 한 줄에 흩어진다 → 가운데 640.
+      constraints: AppPlatform.isDesktop
+          ? const BoxConstraints(maxWidth: 640)
+          : null,
       builder: (_) => Padding(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom,

@@ -24,11 +24,14 @@ import '../features/category/category_actions.dart';
 import '../core/ui_prefs.dart';
 import '../features/outline/outline_screen.dart';
 import '../features/search/search_screen.dart';
+import '../features/settings/archive_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
 import 'destination.dart';
+import 'inspector.dart';
 import 'shell_state.dart';
 import 'widgets/group_scope_chips.dart';
+import 'widgets/undo_snackbar.dart';
 import 'widgets/add_entity_buttons.dart';
 
 /// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + destination 숫자 단축키.
@@ -58,15 +61,26 @@ class _AppShellState extends ConsumerState<AppShell> {
   HotKey? _cmdN;
   TrayService? _tray;
 
+  /// 데스크탑 오른쪽 인스펙터(할 일 상세 패널) 스택.
+  final InspectorController _inspector = InspectorController();
+
   @override
   void initState() {
     super.initState();
     _registerGlobalHotkey();
     _initTray();
+    _inspector.addListener(_onInspectorChanged);
+  }
+
+  void _onInspectorChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _inspector
+      ..removeListener(_onInspectorChanged)
+      ..dispose();
     _unregisterGlobalHotkey();
     _tray?.dispose();
     super.dispose();
@@ -426,7 +440,23 @@ class _AppShellState extends ConsumerState<AppShell> {
                 ref.read(groupsControllerProvider).reorder(list, o, n),
           ),
           const VerticalDivider(width: AppTokens.hairline),
-          Expanded(child: mainContent),
+          Expanded(
+            child: InspectorScope(
+              controller: _inspector,
+              // 넓은 창에서 목록이 한없이 늘어나 눈이 좌우로 멀리 오가지 않게 최대 폭.
+              // 캘린더는 폭이 곧 정보량이라 제외.
+              child: location.page == ShellPage.calendar
+                  ? mainContent
+                  : _ReadableWidth(child: mainContent),
+            ),
+          ),
+          if (_inspector.isOpen) ...[
+            const VerticalDivider(width: AppTokens.hairline),
+            SizedBox(
+              width: InspectorPanel.width,
+              child: InspectorPanel(controller: _inspector),
+            ),
+          ],
         ],
       );
     } else {
@@ -438,11 +468,18 @@ class _AppShellState extends ConsumerState<AppShell> {
       _ => destination?.label ?? '오늘',
     };
 
-    return _ShortcutsHost(
+    final shell = _ShortcutsHost(
       destinations: _destinations,
       onSelect: _selectByDigit,
       onOpenSearch: _openSearch,
       onAddTodo: _openAddTodo,
+      onOpenSettings: () => SettingsSheet.show(context),
+      onCloseInspector: () {
+        if (!_inspector.isOpen) return false;
+        _inspector.close();
+        return true;
+      },
+      isInspectorOpen: () => _inspector.isOpen,
       // 모바일 시스템 뒤로가기 계단식 처리 — 카테고리→목록 / 그 밖→오늘.
       // canPop=false 로 두면 predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅된다.
       child: PopScope(
@@ -504,13 +541,110 @@ class _AppShellState extends ConsumerState<AppShell> {
         ),
       ),
     );
+    if (!AppPlatform.useNativeMenuBar) return shell;
+    return PlatformMenuBar(menus: _menus(), child: shell);
+  }
+
+  /// macOS 메뉴바 — 단축키를 메뉴에서 찾을 수 있게(발견성). 동작은 앱 안 단축키와 같다.
+  List<PlatformMenuItem> _menus() {
+    PlatformMenuItem item(
+      String label,
+      VoidCallback onSelected, [
+      MenuSerializableShortcut? shortcut,
+    ]) => PlatformMenuItem(
+      label: label,
+      onSelected: onSelected,
+      shortcut: shortcut,
+    );
+    final views = <PlatformMenuItem>[
+      for (final d in _destinations)
+        if (d.shortcutDigit >= 0 && d.shortcutDigit <= 9)
+          item(
+            d.label,
+            () => _selectByDigit(d.shortcutDigit),
+            SingleActivator(
+              _ShortcutsHost._digitKeys[d.shortcutDigit]!,
+              meta: true,
+            ),
+          ),
+    ];
+    return [
+      PlatformMenu(
+        label: '하루',
+        menus: [
+          const PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.about,
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              item(
+                '설정…',
+                () => SettingsSheet.show(context),
+                const SingleActivator(LogicalKeyboardKey.comma, meta: true),
+              ),
+            ],
+          ),
+          const PlatformMenuItemGroup(
+            members: [
+              PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+              PlatformProvidedMenuItem(
+                type: PlatformProvidedMenuItemType.hideOtherApplications,
+              ),
+            ],
+          ),
+          const PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.quit,
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: '파일',
+        menus: [
+          item(
+            '새 할 일',
+            _openAddTodo,
+            const SingleActivator(LogicalKeyboardKey.keyN, meta: true),
+          ),
+          item(
+            '검색',
+            _openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true),
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: '편집',
+        menus: [
+          // ⌘Z 는 입력 중이면 글자 되돌리기가 먼저 받는다(앱 안 단축키가 양보).
+          item('되돌리기', runLatestUndo),
+        ],
+      ),
+      PlatformMenu(
+        label: '보기',
+        menus: [
+          PlatformMenuItemGroup(members: views),
+          PlatformMenuItemGroup(members: [item('상세 패널 닫기', _inspector.close)]),
+        ],
+      ),
+      const PlatformMenu(
+        label: '윈도우',
+        menus: [
+          PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.minimizeWindow,
+          ),
+          PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.zoomWindow,
+          ),
+        ],
+      ),
+    ];
   }
 }
 
 class _SelectDestinationIntent extends Intent {
   const _SelectDestinationIntent(this.digit);
 
-  /// 0~6 단축키 digit. AppDestination.all 의 shortcutDigit 과 매핑.
+  /// 0~9 단축키 digit. [AppDestination.shortcutDigit] 과 매핑.
   final int digit;
 }
 
@@ -522,28 +656,50 @@ class _NewTodoIntent extends Intent {
   const _NewTodoIntent();
 }
 
+class _OpenSettingsIntent extends Intent {
+  const _OpenSettingsIntent();
+}
+
+class _UndoIntent extends Intent {
+  const _UndoIntent();
+}
+
+class _CloseInspectorIntent extends Intent {
+  const _CloseInspectorIntent();
+}
+
+/// 앱 안 단축키 (macOS 관례, UX 개선 Phase 3).
+///
+/// - `0~9` / `⌘0~9` — destination (0 오늘 · 1 전체보기 · 2 캘린더 · 3~9 카테고리).
+///   숫자만 누르는 것은 입력 중엔 꺼진다. ⌘ 조합은 입력 중에도 동작.
+/// - `⌘N` 새 할 일 · `⌘F`/`⌘K` 검색 · `⌘,` 설정
+/// - `⌘Z` — 화면에 떠 있는 되돌리기(스낵바)를 실행. 입력 중이면 글자 되돌리기에 양보.
+/// - `Esc` — 오른쪽 인스펙터 닫기 (입력 중이 아닐 때).
 class _ShortcutsHost extends StatelessWidget {
   const _ShortcutsHost({
     required this.destinations,
     required this.onSelect,
     required this.onOpenSearch,
     required this.onAddTodo,
+    required this.onOpenSettings,
+    required this.onCloseInspector,
+    required this.isInspectorOpen,
     required this.child,
   });
 
   final List<AppDestination> destinations;
   final void Function(int digit) onSelect;
-
-  /// Cmd+F — 전역 검색 열기. 숫자 단축키와 달리 modifier 조합이라 TextField 입력
-  /// 중에도 그대로 동작한다 (숫자처럼 오타로 눌릴 일이 없다).
   final VoidCallback onOpenSearch;
 
   /// ⌘N — 앱 안 새 할 일. (전역은 ⌘⇧N, hotkey_manager 가 담당)
   final VoidCallback onAddTodo;
+  final VoidCallback onOpenSettings;
+
+  /// Esc — 인스펙터가 열려 있으면 닫고 true.
+  final bool Function() onCloseInspector;
+  final bool Function() isInspectorOpen;
   final Widget child;
 
-  /// 단축키 digit (0~9) ↔ LogicalKeyboardKey 매핑. destinations 의 shortcutDigit
-  /// 이 동적이라 매 build 마다 활성 키만 추려서 Shortcuts map 만든다.
   static const _digitKeys = <int, LogicalKeyboardKey>{
     0: LogicalKeyboardKey.digit0,
     1: LogicalKeyboardKey.digit1,
@@ -566,12 +722,22 @@ class _ShortcutsHost extends StatelessWidget {
       final key = _digitKeys[digit];
       if (key == null) continue;
       shortcuts[SingleActivator(key)] = _SelectDestinationIntent(digit);
+      shortcuts[SingleActivator(key, meta: true)] = _SelectDestinationIntent(
+        digit,
+      );
     }
-    // macOS 관례대로 Cmd+F = 찾기. Cmd+N (추가) 과 같은 계열의 앱 단축키다.
     shortcuts[const SingleActivator(LogicalKeyboardKey.keyF, meta: true)] =
+        const _OpenSearchIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyK, meta: true)] =
         const _OpenSearchIntent();
     shortcuts[const SingleActivator(LogicalKeyboardKey.keyN, meta: true)] =
         const _NewTodoIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.comma, meta: true)] =
+        const _OpenSettingsIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyZ, meta: true)] =
+        const _UndoIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.escape)] =
+        const _CloseInspectorIntent();
 
     return Shortcuts(
       shortcuts: shortcuts,
@@ -592,6 +758,20 @@ class _ShortcutsHost extends StatelessWidget {
               return null;
             },
           ),
+          _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
+            onInvoke: (_) {
+              onOpenSettings();
+              return null;
+            },
+          ),
+          _UndoIntent: _NotWhileTypingAction<_UndoIntent>(
+            (_) => runLatestUndo(),
+            when: hasLatestUndo,
+          ),
+          _CloseInspectorIntent: _NotWhileTypingAction<_CloseInspectorIntent>(
+            (_) => onCloseInspector(),
+            when: isInspectorOpen,
+          ),
         },
         child: Focus(autofocus: true, child: child),
       ),
@@ -599,21 +779,45 @@ class _ShortcutsHost extends StatelessWidget {
   }
 }
 
-/// 0~6 키 destination 전환 Action. **TextField focus 시 disabled** 되어 사용자가 todo
-/// 제목에 숫자를 입력할 때 의도치 않은 전환이 발생하지 않게 한다.
+/// 숫자 단축키 Action. **입력 중엔 숫자만 누른 것은 꺼진다**(제목에 숫자 입력).
+/// ⌘ 조합은 오타로 눌릴 일이 없어 입력 중에도 동작한다.
 class _SelectDestinationAction extends Action<_SelectDestinationIntent> {
   _SelectDestinationAction({required this.onSelect});
 
   final void Function(int digit) onSelect;
 
   @override
-  bool isEnabled(_SelectDestinationIntent intent) => !isFocusInEditableText();
+  bool isEnabled(_SelectDestinationIntent intent) {
+    if (!isFocusInEditableText()) return true;
+    return HardwareKeyboard.instance.isMetaPressed;
+  }
 
   @override
   Object? invoke(_SelectDestinationIntent intent) {
     onSelect(intent.digit);
     return null;
   }
+}
+
+/// 입력 중이면 꺼지는 Action — 키가 입력칸(글자 되돌리기·Esc)으로 그대로 간다.
+/// [run] 이 false 를 돌려주면 처리하지 않은 것으로 보고 키를 흘려보낸다.
+class _NotWhileTypingAction<T extends Intent> extends Action<T> {
+  _NotWhileTypingAction(this.run, {this.when});
+
+  final bool Function(T intent) run;
+
+  /// 추가 조건 — false 면 꺼져서 키가 다른 곳으로 간다.
+  final bool Function()? when;
+
+  @override
+  bool isEnabled(T intent) =>
+      !isFocusInEditableText() && (when?.call() ?? true);
+
+  @override
+  bool consumesKey(T intent) => true;
+
+  @override
+  Object? invoke(T intent) => run(intent);
 }
 
 /// primaryFocus 가 [EditableText] (TextField 의 내부) 안에 있는지. 위 Action 의 isEnabled 가
@@ -737,18 +941,22 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             _actions.moveCategoryToGroup(cat, g.id);
           },
         ),
-        if (expanded && cats.isNotEmpty) _categorySection(cats),
+        // 그룹 안 카테고리는 들여써서 소속이 눈에 보이게.
+        if (expanded && cats.isNotEmpty) _categorySection(cats, indent: true),
       ],
     );
   }
 
   /// destination index → SidebarItem 위젯. 카테고리만 삭제/이동 컨텍스트 메뉴 + 드래그.
-  Widget _item(int index, {Key? key}) {
+  Widget _item(int index, {Key? key, bool indent = false}) {
     final dest = widget.destinations[index];
     final isCategory = dest.kind == DestinationKind.category;
     return SidebarItem(
       key: key,
       destination: dest,
+      indent: indent,
+      // "오늘" 옆 남은 할 일 수 — 사이드바만 봐도 오늘 얼마 남았는지.
+      badge: dest.isToday ? ref.watch(undoneTodayCountProvider) : 0,
       selected: index == widget.selectedIndex,
       onTap: () => widget.onSelect(index),
       // 카테고리만 우클릭 → 커서 위치 메뉴 (수정 · 그룹 이동 · 보관 · 삭제).
@@ -764,7 +972,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   /// 같은 그룹/미분류 섹션 — 각 행을 DragTarget 으로 감싸, 다른 카테고리를 그 행 위로
   /// 드롭하면 그 위치(앞)로 이동/순서변경(K, E 통합). 드래그 소스는 행 본문 길게누름
   /// 또는 ⠿ 핸들(SidebarItem 내부). 그룹 이동은 그룹 헤더/미분류 DragTarget 이 처리.
-  Widget _categorySection(List<int> indices) {
+  Widget _categorySection(List<int> indices, {bool indent = false}) {
     final siblings = [
       for (final i in indices) widget.destinations[i].category!,
     ];
@@ -776,7 +984,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
             target: siblings[i],
             sectionSiblings: siblings,
             onMoveInto: widget.onMoveCategoryInto,
-            child: _item(indices[i]),
+            child: _item(indices[i], indent: indent),
           ),
       ],
     );
@@ -841,6 +1049,9 @@ class _SidebarState extends ConsumerState<_Sidebar> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final archivedCount =
+        (ref.watch(archivedCategoriesProvider).asData?.value.length ?? 0) +
+        (ref.watch(archivedGroupsProvider).asData?.value.length ?? 0);
 
     // 카테고리 destination 들을 groupId 별로 분류 (index 보존).
     final ungrouped = <int>[];
@@ -936,6 +1147,25 @@ class _SidebarState extends ConsumerState<_Sidebar> {
       // 카테고리/그룹 추가 — 목록 바로 아래 (FAB/Cmd+N 은 새 할 일 전용, Phase 0).
       const SizedBox(height: AppTokens.space8),
       const AddEntityButtons(),
+      // 보관함 — 숨긴 그룹·카테고리가 있을 때만 (설정 안에 묻혀 있던 입구).
+      if (archivedCount > 0)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
+          child: TextButton.icon(
+            key: const ValueKey('sidebar-archive'),
+            style: TextButton.styleFrom(
+              foregroundColor: colorScheme.onSurface.withValues(alpha: 0.72),
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.space12,
+                vertical: AppTokens.space8,
+              ),
+            ),
+            onPressed: () => ArchiveScreen.show(context),
+            icon: const Icon(Icons.inventory_2_outlined, size: 18),
+            label: Text('보관함 ($archivedCount)'),
+          ),
+        ),
       const SizedBox(height: AppTokens.space12),
     ];
 
@@ -1214,6 +1444,8 @@ class SidebarItem extends StatefulWidget {
     this.onContextMenu,
     this.autofocus = false,
     this.dragData,
+    this.indent = false,
+    this.badge = 0,
   });
 
   final AppDestination destination;
@@ -1225,6 +1457,12 @@ class SidebarItem extends StatefulWidget {
 
   /// 우클릭 — 커서 위치(global)를 받아 그 자리에 메뉴. 있으면 [onLongPress] 대신 쓴다.
   final void Function(Offset globalPosition)? onContextMenu;
+
+  /// 그룹 안 카테고리 — 12px 들여쓰기.
+  final bool indent;
+
+  /// 오른쪽 숫자 배지(0 이면 없음) — "오늘" 의 남은 할 일 수.
+  final int badge;
 
   /// 테스트 결정성 — true 면 mount 직후 InkWell 이 focus 를 잡는다.
   final bool autofocus;
@@ -1242,6 +1480,9 @@ class SidebarItemState extends State<SidebarItem> {
   /// 키보드 focus 가 이 item 에 들어와 있는지. true 면 outline ring 표시 — 마우스 사용자
   /// 에게도 영향 X (InkWell.onFocusChange 는 키보드 traversal 에서만 true 가 됨).
   bool _focused = false;
+
+  /// 마우스가 올라와 있는지 — ⠿ 는 이때만 보인다(평소엔 목록이 조용하게).
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1264,9 +1505,11 @@ class SidebarItemState extends State<SidebarItem> {
     final draggable = widget.dragData != null;
 
     final tile = Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space8,
-        vertical: AppTokens.space2,
+      padding: EdgeInsets.only(
+        left: AppTokens.space8 + (widget.indent ? AppTokens.space12 : 0),
+        right: AppTokens.space8,
+        top: AppTokens.space2,
+        bottom: AppTokens.space2,
       ),
       child: Tooltip(
         message: widget.destination.tooltipWithShortcut,
@@ -1316,24 +1559,37 @@ class SidebarItemState extends State<SidebarItem> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (widget.badge > 0)
+                    Text(
+                      '${widget.badge}',
+                      key: const ValueKey('sidebar-badge'),
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.6),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   if (draggable)
-                    Draggable<Category>(
-                      // ⠿ 를 잡고 → 그룹 헤더/미분류에 놓으면 그룹 이동, 다른 행에 놓으면
-                      // 순서변경(상위 DragTarget 들이 처리). 마우스로 바로 끌림(즉시 드래그).
-                      data: widget.dragData!,
-                      dragAnchorStrategy: pointerDragAnchorStrategy,
-                      feedback: _CategoryDragFeedback(
-                        destination: widget.destination,
-                      ),
-                      childWhenDragging: Icon(
-                        Icons.drag_indicator,
-                        size: 16,
-                        color: scheme.onSurface.withValues(alpha: 0.2),
-                      ),
-                      child: Icon(
-                        Icons.drag_indicator,
-                        size: 16,
-                        color: scheme.onSurface.withValues(alpha: 0.4),
+                    AnimatedOpacity(
+                      opacity: _hovered || _focused ? 1 : 0,
+                      duration: AppTokens.motionFast,
+                      child: Draggable<Category>(
+                        // ⠿ 를 잡고 → 그룹 헤더/미분류에 놓으면 그룹 이동, 다른 행에 놓으면
+                        // 순서변경(상위 DragTarget 들이 처리). 마우스로 바로 끌림(즉시 드래그).
+                        data: widget.dragData!,
+                        dragAnchorStrategy: pointerDragAnchorStrategy,
+                        feedback: _CategoryDragFeedback(
+                          destination: widget.destination,
+                        ),
+                        childWhenDragging: Icon(
+                          Icons.drag_indicator,
+                          size: 16,
+                          color: scheme.onSurface.withValues(alpha: 0.2),
+                        ),
+                        child: Icon(
+                          Icons.drag_indicator,
+                          size: 16,
+                          color: scheme.onSurface.withValues(alpha: 0.4),
+                        ),
                       ),
                     ),
                 ],
@@ -1344,14 +1600,19 @@ class SidebarItemState extends State<SidebarItem> {
       ),
     );
 
-    if (!draggable) return tile;
+    final hoverable = MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: tile,
+    );
+    if (!draggable) return hoverable;
     // 길게 눌러 그룹 헤더/미분류로 드롭 → 그룹 이동(E). ⠿ 순서변경과 별개 제스처.
     return LongPressDraggable<Category>(
       data: widget.dragData!,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: _CategoryDragFeedback(destination: widget.destination),
       childWhenDragging: Opacity(opacity: 0.4, child: tile),
-      child: tile,
+      child: hoverable,
     );
   }
 }
@@ -1397,6 +1658,26 @@ class _CategoryDragFeedback extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 데스크탑 본문 최대 폭 — 넓은 창에서 가운데 정렬.
+class _ReadableWidth extends StatelessWidget {
+  const _ReadableWidth({required this.child});
+
+  final Widget child;
+
+  static const double maxWidth = 960;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: child,
       ),
     );
   }
