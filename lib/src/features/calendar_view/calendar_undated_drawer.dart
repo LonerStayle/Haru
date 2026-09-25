@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform.dart';
 import '../../core/theme.dart';
+import '../../core/ui_prefs.dart';
 import '../../domain/todo.dart';
-import 'calendar_actions.dart';
+import '../todo_actions/todo_row_actions.dart';
 import 'calendar_providers.dart';
 
 /// 화면 하단의 "날짜 없음" 서랍.
@@ -12,7 +13,8 @@ import 'calendar_providers.dart';
 /// 아직 일정으로 옮기지 않은 할 일을 모아두고, 달력 칸으로 끌어다 놓으면 그 날짜가
 /// 붙는다 — "언젠가 할 일" 을 일정으로 옮기는 동작이 이 화면에서 가장 짧아진다.
 ///
-/// 기본은 **접힘**이고 펼침 상태는 세션 내에서만 유지한다 (영속 저장 없음).
+/// 기본은 데스크탑 **펼침**(끌어다 놓을 대상이 바로 보이게), 폰은 접힘(세로 공간).
+/// 사용자가 한 번 펼치거나 접으면 그 선택을 기억한다.
 /// 항목이 하나도 없으면 서랍 자체를 숨긴다 — 늘 비어 있는 줄이 화면 아래를
 /// 차지하고 있을 이유가 없다.
 class CalendarUndatedDrawer extends ConsumerStatefulWidget {
@@ -27,13 +29,32 @@ class CalendarUndatedDrawer extends ConsumerStatefulWidget {
 }
 
 class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
-  bool _expanded = false;
+  static const String _openFlag = 'drawer.open';
+  static const String _closedFlag = 'drawer.closed';
+
+  bool _isExpanded(Set<String> flags) {
+    if (flags.contains(_openFlag)) return true;
+    if (flags.contains(_closedFlag)) return false;
+    return AppPlatform.isDesktop;
+  }
+
+  void _toggle(bool expanded) {
+    final prefs = ref.read(persistedIdSetProvider(calendarPrefsKey).notifier);
+    final flags = {...ref.read(persistedIdSetProvider(calendarPrefsKey))}
+      ..remove(_openFlag)
+      ..remove(_closedFlag)
+      ..add(expanded ? _closedFlag : _openFlag);
+    prefs.replace(flags);
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final compact = AppPlatform.isMobile;
+    final expanded = _isExpanded(
+      ref.watch(persistedIdSetProvider(calendarPrefsKey)),
+    );
 
     final todos =
         ref.watch(calendarUndatedTodosProvider).asData?.value ?? const <Todo>[];
@@ -54,7 +75,7 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
         children: [
           InkWell(
             key: const ValueKey('calendar-undated-header'),
-            onTap: () => setState(() => _expanded = !_expanded),
+            onTap: () => _toggle(expanded),
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: compact ? AppTokens.space12 : AppTokens.space24,
@@ -63,7 +84,7 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
               child: Row(
                 children: [
                   Icon(
-                    _expanded ? Icons.expand_more : Icons.chevron_right,
+                    expanded ? Icons.expand_more : Icons.chevron_right,
                     size: 18,
                     color: scheme.onSurface.withValues(alpha: 0.6),
                   ),
@@ -83,7 +104,8 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
                     ),
                   ),
                   const Spacer(),
-                  if (!_expanded)
+                  // 폰은 오른쪽 아래 + 버튼이 이 자리를 덮는다 — 안내 문구는 데스크탑만.
+                  if (!expanded && !compact)
                     Text(
                       '펼쳐서 달력으로 끌어놓기',
                       style: theme.textTheme.labelSmall?.copyWith(
@@ -94,7 +116,7 @@ class _CalendarUndatedDrawerState extends ConsumerState<CalendarUndatedDrawer> {
               ),
             ),
           ),
-          if (_expanded)
+          if (expanded)
             // 높이를 제한하지 않으면 무날짜 항목이 수백 건일 때 서랍이 화면을
             // 통째로 밀어낸다. 안에서만 스크롤되게 상한을 둔다.
             //
@@ -142,7 +164,7 @@ class UndatedTodoTile extends ConsumerWidget {
       child: InkWell(
         key: ValueKey('calendar-undated-tile-${todo.id}'),
         borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        onTap: () => openCalendarEditSheet(context, ref, todo),
+        onTap: () => openTodoDetail(context, todo),
         child: Container(
           padding: const EdgeInsets.symmetric(
             horizontal: AppTokens.space8,

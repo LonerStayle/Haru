@@ -47,6 +47,18 @@ final undoneTodayCountProvider = Provider<int>((ref) {
   );
 });
 
+/// 트레이 메뉴에 올릴 오늘 남은 할 일 — 오늘 화면과 같은 순서의 미체크 task.
+final undoneTodayTodosProvider = Provider<List<Todo>>((ref) {
+  return ref
+      .watch(visibleTodayTodosProvider)
+      .maybeWhen(
+        data: (todos) => todos
+            .where((t) => t.type == TodoType.task && !t.isDone)
+            .toList(growable: false),
+        orElse: () => const <Todo>[],
+      );
+});
+
 /// 어제 이전에서 이월된 미체크 항목의 개수 (배너 표시용).
 final carryoverCountProvider = Provider<int>((ref) {
   // currentDayProvider 가 자정 갱신 시 같이 재계산되도록 transitively 의존.

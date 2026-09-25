@@ -7,6 +7,7 @@ import 'package:solo_todo/src/features/calendar/calendar_event.dart';
 import 'package:solo_todo/src/features/calendar/calendar_gateway.dart';
 import 'package:solo_todo/src/features/calendar/calendar_settings.dart';
 import 'package:solo_todo/src/features/calendar/calendar_sync_coordinator.dart';
+import 'package:solo_todo/src/features/calendar/calendar_sync_scheduler.dart';
 import 'package:solo_todo/src/features/calendar/calendar_sync_service.dart';
 
 import 'fake_calendar_gateway.dart';
@@ -40,6 +41,26 @@ class _MemoryPreference implements CalendarSettingsPreference {
     String calendarId,
   ) async {
     cleared.add('${provider.wire}/$calendarId');
+  }
+}
+
+/// 정해 둔 결과만 돌려주는 코디네이터 — 스케줄러의 결과 집계 검증용.
+class _FixedCoordinator extends CalendarSyncCoordinator {
+  _FixedCoordinator(this.outcome, {required super.service})
+    : super(
+        preference: _MemoryPreference(const CalendarSettings()),
+        readSettings: () => const CalendarSettings(),
+        writeSettings: (_) {},
+        activeCategories: () => const [],
+      );
+
+  final SyncOutcome outcome;
+  int calls = 0;
+
+  @override
+  Future<SyncOutcome> syncNow() async {
+    calls++;
+    return outcome;
   }
 }
 
@@ -192,6 +213,76 @@ void main() {
 
       expect(r.authRequired, isTrue);
       expect(gateway.callCount(CalendarOp.listChanges), 0);
+    });
+  });
+
+  group('지금 동기화 — 결과를 사실대로 (Phase 4)', () {
+    CalendarSyncService svc() => CalendarSyncService(
+      gateway: gateway,
+      ops: db.calendarOpsDao,
+      repo: LocalTodoRepository(db.todosDao),
+      now: () => t0,
+    );
+
+    test('예외로 실패하면 failed', () async {
+      expect(const SyncOutcome.failed().failed, isTrue);
+      expect(const SyncOutcome.skipped().failed, isFalse);
+    });
+
+    test('한 서비스라도 실패하면 던지고, 나머지 서비스는 끝까지 돈다', () async {
+      final bad = _FixedCoordinator(const SyncOutcome.failed(), service: svc());
+      final good = _FixedCoordinator(
+        const SyncOutcome(push: PushResult(), pull: PullResult()),
+        service: svc(),
+      );
+      final scheduler = CalendarSyncScheduler(
+        coordinators: [bad, good],
+        autoSyncEnabled: () => false,
+      );
+      await expectLater(
+        scheduler.syncNow(),
+        throwsA(isA<CalendarSyncNowFailed>()),
+      );
+      expect(good.calls, 1);
+    });
+
+    test('재인증이 필요하면 authRequired 로 던진다', () async {
+      final scheduler = CalendarSyncScheduler(
+        coordinators: [
+          _FixedCoordinator(
+            const SyncOutcome(
+              push: PushResult(authRequired: true),
+              pull: PullResult(),
+            ),
+            service: svc(),
+          ),
+        ],
+        autoSyncEnabled: () => false,
+      );
+      await expectLater(
+        scheduler.syncNow(),
+        throwsA(
+          isA<CalendarSyncNowFailed>().having(
+            (e) => e.authRequired,
+            'authRequired',
+            isTrue,
+          ),
+        ),
+      );
+    });
+
+    test('모두 성공(또는 연결 안 된 쪽 skip)이면 조용히 끝난다', () async {
+      final scheduler = CalendarSyncScheduler(
+        coordinators: [
+          _FixedCoordinator(const SyncOutcome.skipped(), service: svc()),
+          _FixedCoordinator(
+            const SyncOutcome(push: PushResult(), pull: PullResult()),
+            service: svc(),
+          ),
+        ],
+        autoSyncEnabled: () => false,
+      );
+      await scheduler.syncNow();
     });
   });
 }

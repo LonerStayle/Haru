@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
+import '../../core/ui_prefs.dart';
 import '../../domain/group.dart';
 import '../../domain/todo.dart';
 import '../../data/providers.dart';
@@ -54,6 +55,8 @@ class TimelineScreen extends ConsumerWidget {
           ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
 
     final buckets = _bucketize(dated, now);
+    final flags = ref.watch(persistedIdSetProvider(timelinePrefsKey));
+    final prefs = ref.read(persistedIdSetProvider(timelinePrefsKey).notifier);
 
     return CustomScrollView(
       slivers: [
@@ -90,57 +93,80 @@ class TimelineScreen extends ConsumerWidget {
                 ),
                 sliver: SliverToBoxAdapter(
                   child: _BucketHeader(
+                    key: ValueKey('timeline-bucket-${bucket.kind.name}'),
                     label: bucket.label,
                     count: bucket.items.length,
                     accent: bucket.accent,
+                    collapsed: _isCollapsed(flags, bucket.kind),
+                    onToggle: () => prefs.replace(_toggled(flags, bucket.kind)),
                   ),
                 ),
               ),
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppTokens.space24,
-                ),
-                sliver: SliverList(
-                  // builder 의 context 는 쓰지 않는다 — 완료·삭제하면 그 줄이 목록에서
-                  // 빠져 죽는다. 스낵바·시트는 화면 context 로.
-                  delegate: SliverChildBuilderDelegate((_, i) {
-                    final t = bucket.items[i];
-                    final groupLabel = t.category.groupId == null
-                        ? null
-                        : groupLabelOf[t.category.groupId];
-                    return Padding(
-                      key: ValueKey('timeline-tile-${t.id}'),
-                      padding: const EdgeInsets.only(bottom: AppTokens.space8),
-                      // 다른 목록과 같은 한 줄(체크 하나 + hover/길게 누르기 메뉴).
-                      // 카테고리가 섞여 있으니 소속을 제목 위 한 줄로 보인다.
-                      child: TodoTile(
-                        todo: t,
-                        breadcrumb: groupLabel == null
-                            ? t.category.label
-                            : '$groupLabel › ${t.category.label}',
-                        isCarriedOver: bucket.kind == _BucketKind.overdue,
-                        onToggle: () => toggleWithUndo(
-                          context,
-                          ref.read(todoActionsProvider),
-                          t,
+              if (!_isCollapsed(flags, bucket.kind))
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTokens.space24,
+                  ),
+                  sliver: SliverList(
+                    // builder 의 context 는 쓰지 않는다 — 완료·삭제하면 그 줄이 목록에서
+                    // 빠져 죽는다. 스낵바·시트는 화면 context 로.
+                    delegate: SliverChildBuilderDelegate((_, i) {
+                      final t = bucket.items[i];
+                      final groupLabel = t.category.groupId == null
+                          ? null
+                          : groupLabelOf[t.category.groupId];
+                      return Padding(
+                        key: ValueKey('timeline-tile-${t.id}'),
+                        padding: const EdgeInsets.only(
+                          bottom: AppTokens.space8,
                         ),
-                        onToggleInProgress: () =>
-                            ref.read(todoActionsProvider).toggleInProgress(t),
-                        onTap: () => openTodoDetail(context, t),
-                        onEditItem: () => openTodoEdit(context, ref, t),
-                        onMove: () => showMoveTodoSheet(context, ref, item: t),
-                        onCopy: () =>
-                            showCopyTodoSheet(context, ref, original: t),
-                        onDelete: () => deleteTodoWithUndo(context, ref, t),
-                      ),
-                    );
-                  }, childCount: bucket.items.length),
+                        // 다른 목록과 같은 한 줄(체크 하나 + hover/길게 누르기 메뉴).
+                        // 카테고리가 섞여 있으니 소속을 제목 위 한 줄로 보인다.
+                        child: TodoTile(
+                          todo: t,
+                          breadcrumb: groupLabel == null
+                              ? t.category.label
+                              : '$groupLabel › ${t.category.label}',
+                          isCarriedOver: bucket.kind == _BucketKind.overdue,
+                          onToggle: () => toggleWithUndo(
+                            context,
+                            ref.read(todoActionsProvider),
+                            t,
+                          ),
+                          onToggleInProgress: () =>
+                              ref.read(todoActionsProvider).toggleInProgress(t),
+                          onTap: () => openTodoDetail(context, t),
+                          onEditItem: () => openTodoEdit(context, ref, t),
+                          onMove: () =>
+                              showMoveTodoSheet(context, ref, item: t),
+                          onCopy: () =>
+                              showCopyTodoSheet(context, ref, original: t),
+                          onDelete: () => deleteTodoWithUndo(context, ref, t),
+                        ),
+                      );
+                    }, childCount: bucket.items.length),
+                  ),
                 ),
-              ),
             ],
         const SliverToBoxAdapter(child: SizedBox(height: AppTokens.space48)),
       ],
     );
+  }
+
+  /// 버킷 접힘 — '이후' 는 기본 접힘(먼 일정이 길게 늘어져 가까운 일을 밀어낸다),
+  /// 나머지는 기본 펼침. 사용자가 바꾼 것은 저장된다.
+  static bool _isCollapsed(Set<String> flags, _BucketKind kind) {
+    if (flags.contains('open.${kind.name}')) return false;
+    if (flags.contains('closed.${kind.name}')) return true;
+    return kind == _BucketKind.later;
+  }
+
+  static Set<String> _toggled(Set<String> flags, _BucketKind kind) {
+    final collapsed = _isCollapsed(flags, kind);
+    return {...flags}
+      ..remove('open.${kind.name}')
+      ..remove('closed.${kind.name}')
+      ..add(collapsed ? 'open.${kind.name}' : 'closed.${kind.name}');
   }
 
   /// 날짜순 정렬된 [dated] 를 버킷으로 분배. 입력이 정렬돼 있으므로 각 버킷도 정렬 유지.
@@ -217,46 +243,67 @@ class _Header extends StatelessWidget {
 
 class _BucketHeader extends StatelessWidget {
   const _BucketHeader({
+    super.key,
     required this.label,
     required this.count,
     required this.accent,
+    required this.collapsed,
+    required this.onToggle,
   });
 
   final String label;
   final int count;
   final Color accent;
+  final bool collapsed;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Row(
-      children: [
-        Container(
-          width: 4,
-          height: 18,
-          decoration: BoxDecoration(
-            color: accent,
-            borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-          ),
+    return InkWell(
+      onTap: onToggle,
+      borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 36),
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              height: 18,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(AppTokens.radiusFull),
+              ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Text(
+              label,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(width: AppTokens.space8),
+            Text(
+              '$count',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.onSurface.withValues(alpha: 0.5),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            Icon(
+              collapsed ? Icons.chevron_right : Icons.expand_more,
+              size: 20,
+              color: scheme.onSurface.withValues(alpha: 0.5),
+            ),
+          ],
         ),
-        const SizedBox(width: AppTokens.space8),
-        Text(
-          label,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.2,
-          ),
-        ),
-        const SizedBox(width: AppTokens.space8),
-        Text(
-          '$count',
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: scheme.onSurface.withValues(alpha: 0.5),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
+
+/// 타임라인 버킷 접힘 저장 키.
+const String timelinePrefsKey = 'timeline.buckets';

@@ -96,7 +96,13 @@ void main() {
         find.byKey(const ValueKey('calendar-panel-check-gcal:g1')),
         findsNothing,
       );
-      expect(find.textContaining('Google'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('calendar-panel-tile-gcal:g1')),
+          matching: find.textContaining('Google'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('여러 날 이벤트는 기간 막대로 그려진다', (tester) async {

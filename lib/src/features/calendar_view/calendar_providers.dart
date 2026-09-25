@@ -270,3 +270,21 @@ final calendarUndatedTodosProvider = Provider<AsyncValue<List<Todo>>>((ref) {
     (todos) => buildUndatedTodos(all: todos, archivedIds: archived),
   );
 });
+
+/// 캘린더 화면에서 지금 선택된 날짜 — ⌘N·새 할 일 버튼이 캘린더 화면에서 눌렸을 때
+/// 그 날짜를 기본값으로 넣으려고 셸이 읽는다.
+///
+/// 반응형 상태가 아니라 단순 보관함이다: 셸은 누르는 순간에만 읽고, 화면은 선택이
+/// 바뀔 때 쓴다. provider 상태로 두면 화면 initState/dispose 에서 쓸 수 없다
+/// (위젯 build 중 provider 변경 금지).
+class CalendarSelectionHolder {
+  DateTime? selectedDay;
+}
+
+final calendarSelectionProvider = Provider<CalendarSelectionHolder>(
+  (ref) => CalendarSelectionHolder(),
+);
+
+/// 캘린더 화면 보기 상태 저장 키 ([persistedIdSetProvider]) — 접힘 플래그 모음 / 패널 폭.
+const String calendarPrefsKey = 'calendar.flags';
+const String calendarPanelWidthKey = 'calendar.panelWidth';

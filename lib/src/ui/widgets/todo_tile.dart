@@ -8,6 +8,8 @@ import '../../core/date_format.dart';
 import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/todo.dart';
+import '../inspector.dart';
+import 'highlight_text.dart';
 import 'in_progress_triangle.dart';
 import 'todo_action_menu.dart';
 import 'todo_status_check.dart';
@@ -55,6 +57,7 @@ class TodoTile extends StatefulWidget {
     this.onStopRecurrence,
     this.breadcrumb,
     this.snippet,
+    this.highlight,
     this.isCarriedOver = false,
   });
 
@@ -106,6 +109,9 @@ class TodoTile extends StatefulWidget {
 
   /// 검색 결과에서 메모 본문의 매칭된 부분 발췌.
   final String? snippet;
+
+  /// 검색어 — 제목·발췌에서 일치하는 부분을 강조한다. null = 강조 없음.
+  final String? highlight;
 
   /// 어제 이전 날짜라 오늘로 넘어온 항목 — 메타 줄에 "이월" 표시. (오늘 화면만 배선)
   final bool isCarriedOver;
@@ -334,8 +340,9 @@ class _TodoTileState extends State<TodoTile> {
         ),
     ];
 
-    final title = Text(
+    final title = HighlightText(
       todo.title,
+      query: w.highlight,
       // 최대 2줄 + 말줄임. 전체 제목은 타일 탭(편집 시트)에서.
       maxLines: 2,
       overflow: TextOverflow.ellipsis,
@@ -410,8 +417,9 @@ class _TodoTileState extends State<TodoTile> {
         if (w.snippet != null)
           Padding(
             padding: const EdgeInsets.only(top: AppTokens.space4),
-            child: Text(
+            child: HighlightText(
               w.snippet!,
+              query: w.highlight,
               key: const ValueKey('todo-tile-search-snippet'),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -575,27 +583,52 @@ class _TodoTileState extends State<TodoTile> {
       ],
     );
 
-    Widget tile = Card(
+    // 데스크탑 인스펙터에 열려 있는 항목은 테두리로 표시 — 오른쪽 패널이 어느 줄을
+    // 보고 있는지 목록에서 바로 찾게.
+    final inspector = InspectorScope.maybeOf(context);
+    // key 는 바꾸지 않는다 — 바꾸면 안쪽이 통째로 새로 만들어져 hover·물결 상태가 사라진다.
+    Widget card({required bool selected, required Widget child}) => Card(
       // note 는 카테고리색 틴트 배경(헤딩=진한 틴트 / leaf=연한 틴트).
       color: isNoteHeading
           ? NoteVisual.headingTint(todo.category, theme.brightness)
           : isNote
           ? NoteVisual.tint(todo.category, theme.brightness)
           : null,
-      child: InkWell(
-        onTap: w.onTap == null ? null : _handleTap,
-        borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            compact ? AppTokens.space8 : AppTokens.space12,
-            AppTokens.space8,
-            AppTokens.space8,
-            AppTokens.space8,
-          ),
-          child: row,
+      shape: selected
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppTokens.radiusM),
+              side: const BorderSide(color: AppPalette.accent, width: 1.5),
+            )
+          : null,
+      child: child,
+    );
+    final inkwell = InkWell(
+      onTap: w.onTap == null ? null : _handleTap,
+      borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          compact ? AppTokens.space8 : AppTokens.space12,
+          AppTokens.space8,
+          AppTokens.space8,
+          AppTokens.space8,
         ),
+        child: row,
       ),
     );
+    Widget tile = inspector == null
+        ? card(selected: false, child: inkwell)
+        : ListenableBuilder(
+            listenable: inspector,
+            builder: (context, child) {
+              // 목록에서 연 항목 하나만(패널 안에서 하위로 들어가도 부모 줄 유지).
+              final selected = inspector.stack.firstOrNull?.id == todo.id;
+              return Semantics(
+                selected: selected,
+                child: card(selected: selected, child: child!),
+              );
+            },
+            child: inkwell,
+          );
 
     if (isMobile) {
       tile = Listener(

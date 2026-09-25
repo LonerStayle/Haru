@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/platform.dart';
 import '../../core/theme.dart';
@@ -14,12 +15,17 @@ import '../calendar/google_auth_service.dart';
 import '../calendar/microsoft_auth_service.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
+import '../../domain/policies/todo_sort_policy.dart';
+import '../recurrence/recurrence_manage_screen.dart';
+import 'app_preferences.dart';
 import 'archive_screen.dart';
 import 'launch_at_login_service.dart';
+import 'sort_mode_controller.dart';
 
-/// 앱 설정 하단 시트. 현재 항목:
-///   - (데스크탑) macOS 로그인 시 자동 실행 토글 — 기본 꺼짐.
-///   - 앱 정보 (이름 · 버전).
+/// 앱 설정 — 섹션: 계정 · 일반 · 캘린더 연동 · 데이터 · 정보.
+///
+/// 데스크탑은 ⌘, 로 여는 가운데 대화상자(폭 600), 폰은 전체 화면 페이지. (예전엔
+/// 항목 몇 개가 섹션 없이 나열된 하단 시트였다.)
 ///
 /// 자동 실행 토글은 [LaunchAtLoginService] (네이티브 SMAppService) 를 호출하며,
 /// 네이티브가 보고한 **실제 상태**로 UI 를 갱신한다. 실패 시 스낵바 안내 후 롤백.
@@ -33,11 +39,28 @@ class SettingsSheet extends StatefulWidget {
   final LaunchAtLoginService launchService;
 
   static Future<void> show(BuildContext context) {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const SettingsSheet(),
-    );
+    if (AppPlatform.isDesktop) {
+      return showDialog<void>(
+        context: context,
+        builder: (context) {
+          final size = MediaQuery.sizeOf(context);
+          return Dialog(
+            insetPadding: const EdgeInsets.all(AppTokens.space24),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 600,
+                maxHeight: size.height * 0.86,
+              ),
+              child: const SettingsSheet(),
+            ),
+          );
+        },
+      );
+    }
+    return Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SettingsSheet()));
   }
 
   @override
@@ -91,69 +114,78 @@ class _SettingsSheetState extends State<SettingsSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final desktop = AppPlatform.isDesktop;
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppTokens.space12,
-          AppTokens.space8,
-          AppTokens.space12,
-          AppTokens.space16,
+    final sections = <Widget>[
+      // 로그인 계정 + 로그아웃 — 로그인 상태일 때만 (섹션 제목 포함).
+      const _AccountTile(),
+      const _SectionHeader('일반'),
+      if (desktop) _autoLaunchTile(theme, scheme),
+      const _ThemeTile(),
+      const _DefaultCategoryTile(),
+      const _SortModeTile(),
+      if (desktop) const _ShortcutsTile(),
+      const _CalendarSectionHeader(),
+      _calendarTile(theme, scheme),
+      _microsoftCalendarTile(theme, scheme),
+      const _SectionHeader('데이터'),
+      _archiveTile(theme, scheme),
+      const _RecurrenceTile(),
+      const _SectionHeader('정보'),
+      const _VersionTile(),
+      const SizedBox(height: AppTokens.space16),
+    ];
+
+    if (!desktop) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('설정')),
+        body: ListView(
+          key: const ValueKey('settings-list'),
+          children: sections,
         ),
-        child: Material(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(AppTokens.radiusL),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  margin: const EdgeInsets.only(top: AppTokens.space8),
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: scheme.onSurface.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space8,
-                ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
+      );
+    }
+    return Material(
+      color: scheme.surface,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppTokens.space24,
+              AppTokens.space16,
+              AppTokens.space12,
+              AppTokens.space8,
+            ),
+            child: Row(
+              children: [
+                Expanded(
                   child: Text(
                     '설정',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-              ),
-              if (AppPlatform.isDesktop) ...[
-                _autoLaunchTile(theme, scheme),
-                const Divider(height: AppTokens.hairline),
+                IconButton(
+                  key: const ValueKey('settings-close'),
+                  icon: const Icon(Icons.close),
+                  tooltip: '닫기 (Esc)',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
               ],
-              _archiveTile(theme, scheme),
-              const Divider(height: AppTokens.hairline),
-              _calendarTile(theme, scheme),
-              _microsoftCalendarTile(theme, scheme),
-              const Divider(height: AppTokens.hairline),
-              // 로그인 계정 + 로그아웃 — 로그인 상태일 때만 보인다 (UX 감사 B9:
-              // 로그아웃 기능은 있었지만 누를 곳이 없었다).
-              const _AccountTile(),
-              _infoTile(theme, scheme),
-              const SizedBox(height: AppTokens.space8),
-            ],
+            ),
           ),
-        ),
+          const Divider(height: 1, thickness: AppTokens.hairline),
+          Flexible(
+            child: ListView(
+              key: const ValueKey('settings-list'),
+              shrinkWrap: true,
+              children: sections,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -167,8 +199,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: scheme.primary.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -269,8 +301,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: scheme.onSurface.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -347,8 +379,8 @@ class _SettingsSheetState extends State<SettingsSheet> {
             child: Row(
               children: [
                 Container(
-                  width: 44,
-                  height: 44,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: scheme.onSurface.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -412,31 +444,6 @@ class _SettingsSheetState extends State<SettingsSheet> {
       },
     );
   }
-
-  Widget _infoTile(ThemeData theme, ColorScheme scheme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space16,
-        vertical: AppTokens.space12,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.info_outline_rounded,
-            size: 20,
-            color: scheme.onSurface.withValues(alpha: 0.5),
-          ),
-          const SizedBox(width: AppTokens.space12),
-          Text(
-            '하루 · v1.0.0',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurface.withValues(alpha: 0.7),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// 로그인한 계정 이메일 + 로그아웃 버튼. Supabase 미사용(로컬 전용)이거나 로그아웃
@@ -453,7 +460,9 @@ class _AccountTile extends ConsumerWidget {
     final email = user.email ?? '로그인됨';
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const _SectionHeader('계정'),
         Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppTokens.space16,
@@ -462,8 +471,8 @@ class _AccountTile extends ConsumerWidget {
           child: Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: scheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -498,7 +507,6 @@ class _AccountTile extends ConsumerWidget {
             ],
           ),
         ),
-        const Divider(height: AppTokens.hairline),
       ],
     );
   }
@@ -534,11 +542,387 @@ class _AccountTile extends ConsumerWidget {
         ) ??
         false;
     if (!ok || !context.mounted) return;
-    // 설정 시트를 먼저 닫는다 — 로그아웃되면 _AuthGate 가 AppShell 을 SignInScreen 으로
+    // 설정을 먼저 닫는다 — 로그아웃되면 _AuthGate 가 AppShell 을 SignInScreen 으로
     // 바꾸므로, 시트가 열린 채면 사라진 화면 위에 떠 있게 된다.
     // ref 는 시트가 닫히며 dispose 되므로 컨트롤러를 먼저 잡아 둔다.
     final signOut = ref.read(signOutControllerProvider);
     Navigator.of(context).pop();
     await signOut.signOutAndClear();
+  }
+}
+
+/// 섹션 제목 — 작은 회색 글씨.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      key: ValueKey('settings-section-$label'),
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space16,
+        AppTokens.space20,
+        AppTokens.space16,
+        AppTokens.space4,
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+        ),
+      ),
+    );
+  }
+}
+
+/// 캘린더 연동 섹션 제목 — 연동할 수 있는 서비스가 하나도 없으면(키 없는 빌드) 숨긴다.
+class _CalendarSectionHeader extends ConsumerWidget {
+  const _CalendarSectionHeader();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final any =
+        ref.watch(googleCalendarAvailableProvider) ||
+        ref.watch(microsoftCalendarAvailableProvider);
+    return any ? const _SectionHeader('캘린더 연동') : const SizedBox.shrink();
+  }
+}
+
+/// 설정 한 줄 — 아이콘 · 제목 · 부제 · 오른쪽 조작.
+class _SettingRow extends StatelessWidget {
+  const _SettingRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.below,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  /// 폭이 좁을 때 오른쪽 대신 아래 줄에 둘 조작(세그먼트 등).
+  final Widget? below;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.space16,
+        vertical: AppTokens.space8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: scheme.onSurface.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(AppTokens.radiusM),
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: scheme.onSurface.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(width: AppTokens.space16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: AppTokens.space2),
+                      Text(
+                        subtitle!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurface.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: AppTokens.space12),
+                trailing!,
+              ],
+            ],
+          ),
+          if (below != null)
+            Padding(
+              padding: const EdgeInsets.only(
+                left: 40 + AppTokens.space16,
+                top: AppTokens.space8,
+              ),
+              child: Align(alignment: Alignment.centerLeft, child: below),
+            ),
+        ],
+      ),
+    );
+    return onTap == null ? content : InkWell(onTap: onTap, child: content);
+  }
+}
+
+/// 테마 — 시스템 / 라이트 / 다크.
+class _ThemeTile extends ConsumerWidget {
+  const _ThemeTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(themeModeProvider);
+    return _SettingRow(
+      icon: Icons.brightness_6_outlined,
+      title: '테마',
+      subtitle: '기본은 기기 설정을 따라가요',
+      below: SegmentedButton<ThemeMode>(
+        key: const ValueKey('settings-theme'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: ThemeMode.system, label: Text('시스템')),
+          ButtonSegment(value: ThemeMode.light, label: Text('라이트')),
+          ButtonSegment(value: ThemeMode.dark, label: Text('다크')),
+        ],
+        selected: {mode},
+        onSelectionChanged: (s) =>
+            ref.read(themeModeProvider.notifier).set(s.first),
+      ),
+    );
+  }
+}
+
+/// 새 할 일의 기본 카테고리 — 오늘·전체보기·캘린더에서 추가할 때.
+class _DefaultCategoryTile extends ConsumerWidget {
+  const _DefaultCategoryTile();
+
+  static const String _auto = '__auto__';
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final categories =
+        ref.watch(activeCategoriesProvider).asData?.value ?? const <Category>[];
+    final id = ref.watch(defaultCategoryIdProvider);
+    final current = categories.where((c) => c.id == id).firstOrNull;
+    return _SettingRow(
+      icon: Icons.label_outline,
+      title: '새 할 일 기본 카테고리',
+      subtitle: '카테고리 화면에서 추가하면 그 카테고리가 먼저예요',
+      trailing: PopupMenuButton<String>(
+        key: const ValueKey('settings-default-category'),
+        tooltip: '기본 카테고리 고르기',
+        initialValue: current?.id ?? _auto,
+        onSelected: (v) => ref
+            .read(defaultCategoryIdProvider.notifier)
+            .set(v == _auto ? null : v),
+        itemBuilder: (context) => [
+          const PopupMenuItem(value: _auto, child: Text('첫 번째 카테고리')),
+          for (final c in categories)
+            PopupMenuItem(
+              value: c.id,
+              child: Row(
+                children: [
+                  Icon(c.icon, size: 16, color: c.color),
+                  const SizedBox(width: AppTokens.space8),
+                  Text(c.label),
+                ],
+              ),
+            ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.space8,
+            vertical: AppTokens.space8,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (current != null) ...[
+                Icon(current.icon, size: 16, color: current.color),
+                const SizedBox(width: AppTokens.space4),
+              ],
+              Text(current?.label ?? '첫 번째 카테고리'),
+              const Icon(Icons.arrow_drop_down),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 목록 정렬 기본값 — 목록 머리의 정렬 버튼과 같은 설정(모든 목록에 적용).
+class _SortModeTile extends ConsumerWidget {
+  const _SortModeTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final mode = ref.watch(sortModeProvider);
+    return _SettingRow(
+      icon: Icons.sort_rounded,
+      title: '목록 정렬',
+      subtitle: '모든 목록에 적용돼요 · 목록 머리의 정렬 버튼과 같아요',
+      below: SegmentedButton<TodoSortMode>(
+        key: const ValueKey('settings-sort-mode'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(value: TodoSortMode.manual, label: Text('직접 정한 순서')),
+          ButtonSegment(value: TodoSortMode.dueDate, label: Text('일정순')),
+        ],
+        selected: {mode},
+        onSelectionChanged: (s) =>
+            ref.read(sortModeProvider.notifier).setMode(s.first),
+      ),
+    );
+  }
+}
+
+/// 단축키 목록 (데스크탑).
+class _ShortcutsTile extends StatelessWidget {
+  const _ShortcutsTile();
+
+  static const List<(String, String)> shortcuts = [
+    ('⌘N', '새 할 일 (하루 창 안에서)'),
+    ('⌘⇧N', '새 할 일 (어디서나)'),
+    ('⌘K · ⌘F', '검색'),
+    ('⌘,', '설정'),
+    ('⌘0 ~ ⌘9', '화면 전환 (오늘 · 전체보기 · 캘린더 · 카테고리)'),
+    ('⌘Z', '방금 한 일 되돌리기'),
+    ('⌘↩', '시트 저장'),
+    ('Esc', '시트 · 패널 · 검색 닫기'),
+    ('← →  ·  T', '캘린더 달 이동 · 오늘로'),
+    ('칸 두 번 클릭', '캘린더에서 그 날짜로 새 할 일'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingRow(
+      key: const ValueKey('settings-shortcuts'),
+      icon: Icons.keyboard_outlined,
+      title: '단축키',
+      subtitle: '⌘N 새 할 일 · ⌘K 검색 · ⌘Z 되돌리기 …',
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const ValueKey('settings-shortcuts-dialog'),
+          title: const Text('단축키'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final (keys, what) in shortcuts)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppTokens.space4,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 130,
+                          child: Text(
+                            keys,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        Expanded(child: Text(what)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('닫기'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 반복 일정 관리 진입 (예전엔 오늘 화면 머리의 🔁 아이콘뿐이었다).
+class _RecurrenceTile extends StatelessWidget {
+  const _RecurrenceTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingRow(
+      key: const ValueKey('settings-recurrence'),
+      icon: Icons.repeat_rounded,
+      title: '반복 일정',
+      subtitle: '반복 중인 할 일을 보고 멈출 수 있어요',
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const RecurrenceManageScreen()),
+      ),
+    );
+  }
+}
+
+/// 앱 이름 · 버전 — 빌드에 박힌 실제 버전을 읽는다(예전엔 v1.0.0 고정 문구).
+class _VersionTile extends StatefulWidget {
+  const _VersionTile();
+
+  @override
+  State<_VersionTile> createState() => _VersionTileState();
+}
+
+class _VersionTileState extends State<_VersionTile> {
+  String? _version;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(
+        () => _version = info.buildNumber.isEmpty
+            ? info.version
+            : '${info.version} (${info.buildNumber})',
+      );
+    } catch (_) {
+      // 플랫폼 정보를 못 읽으면 버전 없이 이름만.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingRow(
+      key: const ValueKey('settings-version'),
+      icon: Icons.info_outline_rounded,
+      title: '하루',
+      subtitle: _version == null ? null : '버전 $_version',
+    );
   }
 }

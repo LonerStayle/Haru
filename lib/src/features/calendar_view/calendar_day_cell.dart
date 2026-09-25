@@ -14,13 +14,13 @@ String calendarDateKey(DateTime date) {
 
 /// 셀 안에 세울 수 있는 칩/점의 상한.
 ///
-/// 데스크탑은 칸이 넓어 제목을 읽을 수 있으니 칩 3개, 모바일은 좁아서 점 4개로
+/// 데스크탑은 칸이 넓어 제목을 읽을 수 있으니 칩 4개, 모바일은 좁아서 점 4개로
 /// 압축한다 — "기능은 양쪽 parity, 폭·줄 수·터치 타겟만 모바일 압축" 규칙.
 ///
 /// 데스크탑에서 이 값은 **상한일 뿐 실제 표시 수가 아니다**. 기간 막대가 몇 레인
 /// 깔렸느냐([CalendarDayCell.reservedTop])에 따라 칩이 쓸 수 있는 높이가 매 칸
 /// 달라지므로, 실제 개수는 [_chipCapacityFor] 가 남은 높이에서 계산한다.
-int get calendarCellItemCap => AppPlatform.isMobile ? 4 : 3;
+int get calendarCellItemCap => 4;
 
 /// 셀 안쪽 padding.
 ///
@@ -31,11 +31,18 @@ double get calendarCellPadding => AppPlatform.isMobile ? 2 : AppTokens.space4;
 /// 날짜 숫자 줄의 높이.
 double get calendarDayNumberHeight => AppPlatform.isMobile ? 20 : 22;
 
-/// 칩 한 줄이 차지하는 높이 (칩 16 + 아래 간격 2).
-const double _chipRowHeight = 18;
+/// 칩 한 칸의 높이. 글자 12px 이 잘리지 않는 최소 높이다
+/// (UX 개선 Phase 4: 10px 칩은 읽기 어려웠다).
+const double calendarChipHeight = 18;
+
+/// 칩 한 줄이 차지하는 높이 (칩 + 아래 간격 2).
+const double _chipRowHeight = calendarChipHeight + 2;
 
 /// "외 N건" 한 줄의 높이.
-const double _moreRowHeight = 14;
+const double _moreRowHeight = 15;
+
+/// 점 한 줄(칩 대신)을 그릴 최소 높이.
+const double _dotRowMinHeight = 7;
 
 /// 남은 높이 [available] 에 실제로 세울 수 있는 칩 수.
 ///
@@ -67,6 +74,8 @@ class CalendarDayCell extends StatelessWidget {
     required this.isOutsideMonth,
     this.onTap,
     this.onLongPress,
+    this.onSecondaryTapUp,
+    this.chipWrapper,
     this.isDropTarget = false,
   });
 
@@ -90,6 +99,12 @@ class CalendarDayCell extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
+  /// 데스크탑 우클릭 — 칸 메뉴(이 날짜에 추가 등). 커서 위치가 필요해 details 를 받는다.
+  final GestureTapUpCallback? onSecondaryTapUp;
+
+  /// 데스크탑 칩을 감싸는 훅 — 드래그 소스로 만든다(칩을 끌어 다른 날로 옮기기).
+  final Widget Function(CalendarEntry entry, Widget chip)? chipWrapper;
+
   /// 드래그 중인 항목이 이 칸 위에 있는가 (드롭 하이라이트).
   final bool isDropTarget;
 
@@ -105,6 +120,7 @@ class CalendarDayCell extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
+        onSecondaryTapUp: onSecondaryTapUp,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: isDropTarget
@@ -179,6 +195,20 @@ class CalendarDayCell extends StatelessWidget {
                               );
                             }
 
+                            // 창이 낮아 칩이 한 줄도 안 들어가면 폰처럼 점으로 — 아무것도
+                            // 안 그리면 할 일이 있는 날인지조차 알 수 없었다(작은 창).
+                            if (capacity == 0 &&
+                                total > 0 &&
+                                available >= _dotRowMinHeight) {
+                              final dots = singleDayEntries
+                                  .take(calendarCellItemCap)
+                                  .toList();
+                              return _DotRow(
+                                entries: dots,
+                                overflow: total - dots.length,
+                              );
+                            }
+
                             final shown = singleDayEntries
                                 .take(capacity)
                                 .toList();
@@ -190,6 +220,7 @@ class CalendarDayCell extends StatelessWidget {
                               date: date,
                               entries: shown,
                               overflow: canShowMore ? total - shown.length : 0,
+                              chipWrapper: chipWrapper,
                             );
                           },
                         ),
@@ -271,11 +302,13 @@ class _ChipColumn extends StatelessWidget {
     required this.date,
     required this.entries,
     required this.overflow,
+    this.chipWrapper,
   });
 
   final DateTime date;
   final List<CalendarEntry> entries;
   final int overflow;
+  final Widget Function(CalendarEntry entry, Widget chip)? chipWrapper;
 
   @override
   Widget build(BuildContext context) {
@@ -286,7 +319,7 @@ class _ChipColumn extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (final e in entries) ...[
-          CalendarEntryChip(entry: e),
+          _wrap(e, CalendarEntryChip(entry: e)),
           const SizedBox(height: 2),
         ],
         if (overflow > 0)
@@ -301,9 +334,9 @@ class _ChipColumn extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.clip,
                 style: theme.textTheme.labelSmall?.copyWith(
-                  fontSize: 10,
+                  fontSize: 11,
                   height: 1.2,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -312,6 +345,35 @@ class _ChipColumn extends StatelessWidget {
       ],
     );
   }
+
+  /// 칩에 전체 제목·시각 툴팁을 달고(칸이 좁아 잘린 제목을 마우스만 올려 확인),
+  /// 드래그 훅이 있으면 그걸로 감싼다.
+  Widget _wrap(CalendarEntry e, Widget chip) {
+    final tip = calendarEntryTooltip(e);
+    final withTip = Tooltip(
+      message: tip,
+      waitDuration: const Duration(milliseconds: 400),
+      // 마우스를 올릴 때만 — 길게 누르기를 툴팁이 가져가면 칸의 "이 날짜로 추가" 가
+      // 막힌다.
+      triggerMode: TooltipTriggerMode.manual,
+      child: chip,
+    );
+    return chipWrapper?.call(e, withTip) ?? withTip;
+  }
+}
+
+/// 칩 툴팁 문구 — 제목 + (시각이 있으면) 시각 + 출처.
+String calendarEntryTooltip(CalendarEntry e) {
+  final parts = <String>[e.title];
+  final at = e.timeAnchorAt;
+  if (!e.isAllDay && at != null) {
+    final h = at.hour.toString().padLeft(2, '0');
+    final m = at.minute.toString().padLeft(2, '0');
+    parts.add('$h:$m');
+  }
+  if (e.isGhost) parts.add('반복 예정');
+  if (e is GoogleEventEntry) parts.add('Google');
+  return parts.join(' · ');
 }
 
 /// 모바일 — 카테고리 색 점.
@@ -334,15 +396,19 @@ class _DotRow extends StatelessWidget {
               key: ValueKey('calendar-dot-${e.entryKey}'),
               entry: e,
             ),
-          // 넘친 건수는 점 하나를 더 찍는 대신 작은 '+' 로 — 개수를 세는 게 아니라
-          // "더 있다" 만 알리면 되고, 좁은 칸에서 숫자는 읽히지 않는다.
+          // 넘친 건수는 "+N" 으로 — 점만으로는 몇 개가 더 있는지 알 수 없었다.
           if (overflow > 0)
-            Icon(
-              Icons.add,
-              size: 8,
-              color: Theme.of(
-                context,
-              ).colorScheme.onSurface.withValues(alpha: 0.5),
+            Text(
+              '+$overflow',
+              key: const ValueKey('calendar-dot-more'),
+              style: TextStyle(
+                fontSize: 9,
+                height: 0.8,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
             ),
         ],
       ),
@@ -364,7 +430,7 @@ class CalendarEntryChip extends StatelessWidget {
 
     return Container(
       key: ValueKey('calendar-chip-${entry.entryKey}'),
-      height: 16,
+      height: calendarChipHeight,
       padding: const EdgeInsets.only(right: 3),
       decoration: BoxDecoration(
         // 실체가 있는 항목만 채운다. 고스트(미래 반복 예정)와 구글 이벤트는
@@ -397,8 +463,8 @@ class CalendarEntryChip extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 10,
-                height: 1.1,
+                fontSize: 12,
+                height: 1.15,
                 fontWeight: FontWeight.w600,
                 decoration: entry.isDone ? TextDecoration.lineThrough : null,
                 color: scheme.onSurface.withValues(

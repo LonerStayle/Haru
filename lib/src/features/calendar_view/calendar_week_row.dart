@@ -14,7 +14,7 @@ import 'calendar_layout.dart';
 /// 넣으면 레인 수가 0 으로 계산돼 여러 날 일정이 격자에서 통째로 사라졌다
 /// (UX 감사 B5). 띠만 있어도 "며칠에 걸친 일정이 있다" 는 신호는 충분하고, 제목은
 /// 아래 선택일 목록이 보여 준다.
-double get _barHeight => AppPlatform.isMobile ? 5 : 14;
+double get _barHeight => AppPlatform.isMobile ? 5 : 16;
 double get _barGap => AppPlatform.isMobile ? 2 : 3;
 
 /// 막대 안에 제목을 쓸지 — 모바일 띠는 너무 얇아 글자를 넣지 않는다.
@@ -38,7 +38,7 @@ int get _laneHardCap => AppPlatform.isMobile ? 2 : 3;
 /// 안 보이고 빗금만 뜬다 (기본 창 크기에서 실제로 그랬다).
 ///
 /// 모바일 셀은 칩 대신 6px 점 한 줄을 그리므로 필요한 공간이 훨씬 작다.
-double get _minChipRoom => AppPlatform.isMobile ? 8 : 18;
+double get _minChipRoom => AppPlatform.isMobile ? 8 : 20;
 
 /// 주 행 높이 [rowHeight] 에서 실제로 쓸 수 있는 막대 레인 수.
 ///
@@ -68,6 +68,8 @@ class CalendarWeekRow extends StatelessWidget {
     required this.selectedDay,
     this.onSelectDay,
     this.onLongPressDay,
+    this.onSecondaryTapDay,
+    this.chipWrapper,
     this.dayCellBuilder,
   });
 
@@ -83,6 +85,12 @@ class CalendarWeekRow extends StatelessWidget {
 
   final void Function(DateTime date)? onSelectDay;
   final void Function(DateTime date)? onLongPressDay;
+
+  /// 데스크탑 우클릭 — 칸 메뉴. [Offset] 은 전역 커서 위치.
+  final void Function(DateTime date, Offset globalPosition)? onSecondaryTapDay;
+
+  /// 데스크탑 칩 드래그 훅 — [CalendarDayCell.chipWrapper] 로 그대로 넘긴다.
+  final Widget Function(CalendarEntry entry, Widget chip)? chipWrapper;
 
   /// 셀을 드롭 타깃으로 감싸기 위한 훅.
   ///
@@ -195,6 +203,10 @@ class CalendarWeekRow extends StatelessWidget {
       isDropTarget: isDropTarget,
       onTap: onSelectDay == null ? null : () => onSelectDay!(date),
       onLongPress: onLongPressDay == null ? null : () => onLongPressDay!(date),
+      onSecondaryTapUp: onSecondaryTapDay == null
+          ? null
+          : (d) => onSecondaryTapDay!(date, d.globalPosition),
+      chipWrapper: chipWrapper,
     );
     return dayCellBuilder?.call(date, build) ?? build();
   }
@@ -281,8 +293,8 @@ class _Bar extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall?.copyWith(
-                fontSize: 9,
-                height: 1.1,
+                fontSize: 11,
+                height: 1.15,
                 fontWeight: FontWeight.w700,
                 decoration: e.isDone ? TextDecoration.lineThrough : null,
                 color: outlined

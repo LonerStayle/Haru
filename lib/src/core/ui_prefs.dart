@@ -8,6 +8,11 @@ abstract interface class UiPrefsStore {
   Future<Set<String>> loadIds(String key);
 
   Future<void> saveIds(String key, Set<String> ids);
+
+  /// 순서가 있는 문자열 목록 (최근 검색어 등). 저장한 순서 그대로 돌아온다.
+  Future<List<String>> loadList(String key);
+
+  Future<void> saveList(String key, List<String> values);
 }
 
 /// shared_preferences 기반 기본 구현. 키는 `ui.<key>` 로 저장된다.
@@ -25,6 +30,18 @@ class SharedPrefsUiPrefsStore implements UiPrefsStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList('ui.$key', ids.toList()..sort());
   }
+
+  @override
+  Future<List<String>> loadList(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList('ui.list.$key') ?? const <String>[];
+  }
+
+  @override
+  Future<void> saveList(String key, List<String> values) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('ui.list.$key', values);
+  }
 }
 
 /// 인메모리 구현 — 테스트용 (앱 재시작 시뮬레이션은 같은 인스턴스를 다시 주입).
@@ -37,6 +54,31 @@ class MemoryUiPrefsStore implements UiPrefsStore {
   @override
   Future<void> saveIds(String key, Set<String> ids) async =>
       data[key] = {...ids};
+
+  final Map<String, List<String>> lists = {};
+
+  @override
+  Future<List<String>> loadList(String key) async => [...?lists[key]];
+
+  @override
+  Future<void> saveList(String key, List<String> values) async =>
+      lists[key] = [...values];
+}
+
+/// 앱 시작 전에 미리 읽어 둔 값(키 → 목록) — 테마처럼 첫 프레임부터 맞아야 하는 설정용.
+/// main 이 SharedPreferences 에서 읽어 override 한다. 기본은 비어 있음(비동기 복원).
+final preloadedUiListsProvider = Provider<Map<String, List<String>>>(
+  (ref) => const {},
+);
+
+/// [preloadedUiListsProvider] 에 넣을 값 읽기 — 실패하면 빈 맵(비동기 복원으로 대체).
+Future<Map<String, List<String>>> preloadUiLists(List<String> keys) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    return {for (final k in keys) k: ?prefs.getStringList('ui.list.$k')};
+  } catch (_) {
+    return const {};
+  }
 }
 
 final uiPrefsStoreProvider = Provider<UiPrefsStore>(

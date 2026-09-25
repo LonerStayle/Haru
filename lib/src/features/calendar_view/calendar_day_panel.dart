@@ -7,10 +7,12 @@ import '../../core/theme.dart';
 import '../../domain/todo.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../todo_actions/todo_actions_controller.dart';
+import '../todo_actions/todo_row_actions.dart';
 import '../todo_actions/toggle_with_undo.dart';
 import '../../ui/widgets/todo_status_check.dart';
 import 'calendar_actions.dart';
 import 'calendar_entry.dart';
+import 'calendar_providers.dart';
 
 /// 선택된 날짜의 할 일 목록.
 ///
@@ -23,7 +25,7 @@ class CalendarDayPanel extends ConsumerWidget {
     required this.date,
     required this.entries,
     this.entryWrapper,
-    this.onToggleCollapse,
+    this.handle,
   });
 
   final DateTime date;
@@ -34,64 +36,48 @@ class CalendarDayPanel extends ConsumerWidget {
   /// 타일을 감싸 드래그 소스로 만들기 위한 훅 (T13 에서 사용).
   final Widget Function(CalendarEntry entry, Widget tile)? entryWrapper;
 
-  /// 이 패널을 접는다. null 이면 접기 affordance 미표시 (데스크탑은 헤더의 패널
-  /// 토글이 같은 일을 하므로 넘기지 않는다).
-  final VoidCallback? onToggleCollapse;
+  /// 모바일 목록 위 손잡이(끌어서 달력/목록 크기 조절). 데스크탑은 헤더의 패널
+  /// 토글이 같은 일을 하므로 null.
+  final Widget? handle;
+
+  /// 빈 날 안내 — 실제로 있는 통로만 가리킨다(서랍이 없으면 서랍 얘기를 하지 않는다).
+  static String _emptyHint(bool hasUndated) {
+    final add = AppPlatform.isDesktop
+        ? '＋ 이 날짜로 추가 를 누르거나 칸을 두 번 클릭하세요'
+        : '＋ 이 날짜로 추가 를 누르거나 칸을 길게 누르세요';
+    return hasUndated ? '$add. 아래 "날짜 없음"에서 끌어다 놓아도 돼요' : add;
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final compact = AppPlatform.isMobile;
+    final hasUndated =
+        ref.watch(calendarUndatedTodosProvider).asData?.value.isNotEmpty ??
+        false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        ?handle,
         Padding(
           padding: EdgeInsets.fromLTRB(
             AppTokens.space16,
-            compact ? AppTokens.space8 : AppTokens.space16,
+            compact ? 0 : AppTokens.space16,
             AppTokens.space8,
             AppTokens.space8,
           ),
           child: Row(
             children: [
-              // 날짜 영역 자체가 접기 버튼 — 모바일에서 달력을 크게 보려면 이 패널을
-              // 내려야 하는데, 헤더에 토글을 하나 더 두면 '달력 접기' 와 헷갈린다.
               Expanded(
-                child: onToggleCollapse == null
-                    ? Text(
-                        KoDate.dayWithWeekday(date),
-                        key: const ValueKey('calendar-panel-header'),
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                      )
-                    : InkWell(
-                        key: const ValueKey('calendar-panel-collapse'),
-                        onTap: onToggleCollapse,
-                        borderRadius: BorderRadius.circular(AppTokens.radiusM),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            vertical: AppTokens.space4,
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  KoDate.dayWithWeekday(date),
-                                  key: const ValueKey('calendar-panel-header'),
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                              const Icon(Icons.expand_more, size: 18),
-                            ],
-                          ),
-                        ),
-                      ),
+                child: Text(
+                  KoDate.dayWithWeekday(date),
+                  key: const ValueKey('calendar-panel-header'),
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
               if (entries.isNotEmpty)
                 Padding(
@@ -128,20 +114,21 @@ class CalendarDayPanel extends ConsumerWidget {
                       constraints: BoxConstraints(
                         minHeight: constraints.maxHeight,
                       ),
-                      child: const EmptyState(
+                      child: EmptyState(
                         icon: Icons.event_available_outlined,
                         title: '이 날은 비어 있습니다',
-                        subtitle: '＋ 이 날짜로 추가 를 누르거나, 아래 서랍에서 끌어다 놓으세요',
+                        subtitle: _emptyHint(hasUndated),
                       ),
                     ),
                   ),
                 )
               : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(
+                  // 폰은 떠 있는 + 버튼이 마지막 줄을 가리지 않게 아래를 비운다.
+                  padding: EdgeInsets.fromLTRB(
                     AppTokens.space12,
                     0,
                     AppTokens.space12,
-                    AppTokens.space24,
+                    compact ? 88 : AppTokens.space24,
                   ),
                   itemCount: entries.length,
                   separatorBuilder: (_, _) =>
@@ -161,7 +148,7 @@ class CalendarDayPanel extends ConsumerWidget {
 /// 선택일 목록의 한 줄.
 ///
 /// 세 종류를 한 위젯이 그린다 —
-/// - 실제 Todo: 체크 + 제목 + 날짜 라벨. 탭하면 편집 시트 (닫으면 저장).
+/// - 실제 Todo: 체크 + 제목 + 날짜 라벨. 탭하면 상세(데스크탑은 인스펙터).
 /// - 미래 반복 고스트: 테두리만. 체크·탭하면 그 회차를 실체화한 뒤 같은 동작.
 /// - 구글 이벤트: 체크 없음, 탭해도 아무 일 없음 (읽기 전용).
 class CalendarEntryTile extends ConsumerWidget {
@@ -189,7 +176,7 @@ class CalendarEntryTile extends ConsumerWidget {
       child: InkWell(
         key: ValueKey('calendar-panel-tile-${entry.entryKey}'),
         borderRadius: BorderRadius.circular(AppTokens.radiusM),
-        onTap: isEvent ? null : () => _openEdit(context, ref),
+        onTap: isEvent ? null : () => _openDetail(context, ref),
         child: Container(
           padding: EdgeInsets.symmetric(
             horizontal: AppTokens.space8,
@@ -277,10 +264,11 @@ class CalendarEntryTile extends ConsumerWidget {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  Future<void> _openEdit(BuildContext context, WidgetRef ref) async {
+  /// 탭 = 상세 (전 앱 공통). 데스크탑은 오른쪽 인스펙터, 폰은 상세 화면.
+  Future<void> _openDetail(BuildContext context, WidgetRef ref) async {
     final todo = await resolveEntryTodo(ref, entry);
     if (todo == null || !context.mounted) return;
-    openCalendarEditSheet(context, ref, todo);
+    await openTodoDetail(context, todo);
   }
 }
 

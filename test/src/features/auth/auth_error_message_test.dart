@@ -40,12 +40,34 @@ void main() {
       expect(friendlyAuthErrorMessage(err, forVerify: true), contains('코드 확인'));
     });
 
-    test('AuthException 의 알려지지 않은 메시지 → 원본 message 반환', () {
+    test('AuthException 의 알려지지 않은 메시지 → 영문 원문 대신 한국어 안내', () {
       const err = AuthException('Unknown server issue');
+      final msg = friendlyAuthErrorMessage(err, forVerify: false);
+      expect(msg, isNot(contains('Unknown')));
+      expect(msg, contains('코드 발송'));
+    });
+
+    test('네트워크 끊김 → 인터넷 연결 안내', () {
+      final err = Exception('SocketException: Failed host lookup');
       expect(
         friendlyAuthErrorMessage(err, forVerify: false),
-        'Unknown server issue',
+        contains('인터넷 연결'),
       );
+    });
+
+    test('문구는 해요체 — "주십시오" 없음', () {
+      for (final err in [
+        const AuthException('rate limit', statusCode: '429'),
+        const AuthException('invalid email'),
+        Exception('x'),
+      ]) {
+        for (final v in [true, false]) {
+          expect(
+            friendlyAuthErrorMessage(err, forVerify: v),
+            isNot(contains('주십시오')),
+          );
+        }
+      }
     });
   });
 }

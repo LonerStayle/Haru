@@ -6,10 +6,8 @@ import '../../domain/category.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../add_todo/add_todo_controller.dart';
-import '../add_todo/add_todo_sheet.dart';
 import '../category/categories_controller.dart';
-import '../move_todo/move_todo_sheet.dart';
-import '../todo_actions/todo_actions_controller.dart';
+import '../settings/app_preferences.dart';
 import 'calendar_entry.dart';
 
 /// 엔트리를 **조작 가능한 실제 Todo** 로 바꾼다.
@@ -33,21 +31,6 @@ Future<Todo?> resolveEntryTodo(WidgetRef ref, CalendarEntry entry) async {
   return instance;
 }
 
-/// 캘린더에서 여는 편집 시트 — 전 앱 공통 관용구 그대로.
-/// 닫으면 저장이 규칙이므로 취소 개념을 넣지 않는다.
-void openCalendarEditSheet(BuildContext context, WidgetRef ref, Todo todo) {
-  AddTodoSheet.show(
-    context,
-    initialCategory: todo.category,
-    initialTodo: todo,
-    onSubmit: (_) {},
-    onUpdate: (updated) => ref.read(todoActionsProvider).update(updated),
-    onStatusChanged: (updated) =>
-        ref.read(todoActionsProvider).updatePreservingOrder(updated),
-    onRequestMove: (item) => showMoveTodoSheet(context, ref, item: item),
-  );
-}
-
 /// "이 날짜로 추가" — [date] 가 이미 채워진 추가 시트를 연다.
 ///
 /// 캘린더의 핵심 가치가 "날짜 입력 단계를 통째로 생략" 이라 종일로 프리셋한다
@@ -69,10 +52,15 @@ Future<void> openAddTodoOnDate(
 /// 기본값으로 쓰고, 아직 로딩 중이면 builtin 기본값으로 떨어진다.
 /// (사용자가 시트에서 언제든 바꿀 수 있으므로 틀려도 손해가 작다.)
 Category defaultCalendarCategory(WidgetRef ref) {
+  final preferred = ref.read(defaultCategoryIdProvider);
   return ref
       .read(activeCategoriesProvider)
       .maybeWhen(
-        data: (list) => list.isEmpty ? Category.daily : list.first,
+        data: (list) {
+          if (list.isEmpty) return Category.daily;
+          // 설정의 "새 할 일 기본 카테고리"(목록에 없으면 무시) → 첫 카테고리.
+          return list.where((c) => c.id == preferred).firstOrNull ?? list.first;
+        },
         orElse: () => Category.daily,
       );
 }

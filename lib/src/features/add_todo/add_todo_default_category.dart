@@ -20,10 +20,15 @@ Category resolveAddTodoDefaultCategory({
   required List<AppDestination> destinations,
   required int index,
   required String? selectedGroupId,
+  String? preferredCategoryId,
 }) {
-  final fallback = categories.isNotEmpty
-      ? categories.first
-      : Category.builtinSeeds.first;
+  // 설정의 "기본 카테고리"(보관·삭제돼 목록에 없으면 무시) → 없으면 첫 카테고리.
+  final preferred = preferredCategoryId == null
+      ? null
+      : categories.where((c) => c.id == preferredCategoryId).firstOrNull;
+  final fallback =
+      preferred ??
+      (categories.isNotEmpty ? categories.first : Category.builtinSeeds.first);
 
   // build 의 selectedGroup 판정과 동일 — 이미 삭제된 그룹 id 면 그룹 화면으로 보지 않는다.
   final onGroup =

@@ -26,11 +26,18 @@ class TodoSearchHit {
 /// (`watchToday` / 전체보기 탭 필터와 같은 방식).
 ///
 /// [excludedCategoryIds] 에 속한 항목과 반복 시리즈 마스터는 제외한다.
-/// 완료 항목은 **포함** 한다 — 지난 기록을 다시 찾는 것이 검색의 주 용도다.
+/// 완료 항목은 기본 **포함** 한다 — 지난 기록을 다시 찾는 것이 검색의 주 용도다.
+///
+/// 필터: [includeDone] false 면 완료 제외, [notesOnly] 면 메모만, [categoryId] 면 그
+/// 카테고리만. [groupLabels](그룹 id → 이름)를 주면 경로 맨 앞에 그룹을 붙인다.
 List<TodoSearchHit> searchTodos({
   required List<Todo> all,
   required String query,
   Set<String> excludedCategoryIds = const <String>{},
+  bool includeDone = true,
+  bool notesOnly = false,
+  String? categoryId,
+  Map<String, String> groupLabels = const <String, String>{},
 }) {
   final q = query.trim().toLowerCase();
   if (q.isEmpty) return const <TodoSearchHit>[];
@@ -43,6 +50,9 @@ List<TodoSearchHit> searchTodos({
     // 반복 규칙을 담은 숨김 템플릿은 모든 목록에서 빠지는 불변 규칙 — 검색도 동일.
     if (todo.isSeriesMaster) continue;
     if (excludedCategoryIds.contains(todo.category.id)) continue;
+    if (!includeDone && todo.isDone) continue;
+    if (notesOnly && todo.type != TodoType.note) continue;
+    if (categoryId != null && todo.category.id != categoryId) continue;
 
     final description = todo.description ?? '';
     final titleIndex = todo.title.toLowerCase().indexOf(q);
@@ -60,7 +70,7 @@ List<TodoSearchHit> searchTodos({
         order: i,
         hit: TodoSearchHit(
           todo: todo,
-          breadcrumb: breadcrumbOf(todo, byId),
+          breadcrumb: breadcrumbOf(todo, byId, groupLabels: groupLabels),
           snippet: descriptionIndex < 0 ? null : buildSnippet(description, q),
         ),
       ),
@@ -76,10 +86,14 @@ List<TodoSearchHit> searchTodos({
   return [for (final r in ranked) r.hit];
 }
 
-/// [todo] 의 소속 경로 문자열 — `카테고리 › 상위 › 그 하위`.
+/// [todo] 의 소속 경로 문자열 — `그룹 › 카테고리 › 상위 › 그 하위` (그룹은 있을 때만).
 ///
 /// dangling parentId (동기화 race) 나 사이클을 만나면 거기서 walk 를 멈춘다.
-String breadcrumbOf(Todo todo, Map<String, Todo> byId) {
+String breadcrumbOf(
+  Todo todo,
+  Map<String, Todo> byId, {
+  Map<String, String> groupLabels = const <String, String>{},
+}) {
   final titles = <String>[];
   final visited = <String>{todo.id};
   final parentId = todo.parentId;
@@ -90,7 +104,9 @@ String breadcrumbOf(Todo todo, Map<String, Todo> byId) {
     final pid = current.parentId;
     current = pid == null ? null : byId[pid];
   }
-  return [todo.category.label, ...titles].join(' › ');
+  final groupId = todo.category.groupId;
+  final group = groupId == null ? null : groupLabels[groupId];
+  return [?group, todo.category.label, ...titles].join(' › ');
 }
 
 /// 메모 본문에서 [query] 주변만 잘라낸 한 줄 발췌.

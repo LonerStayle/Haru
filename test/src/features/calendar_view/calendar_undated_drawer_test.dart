@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
+import 'package:solo_todo/src/core/ui_prefs.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
@@ -31,7 +33,15 @@ Todo make({
 );
 
 void main() {
-  Future<void> mount(WidgetTester tester, List<Todo> todos) async {
+  // 폰 기준(기본 접힘). 데스크탑 기본 펼침은 아래 별도 테스트.
+  Future<void> mount(
+    WidgetTester tester,
+    List<Todo> todos, {
+    FormFactor form = FormFactor.mobile,
+    MemoryUiPrefsStore? prefs,
+  }) async {
+    AppPlatform.debugFormFactorOverride = form;
+    addTearDown(() => AppPlatform.debugFormFactorOverride = null);
     await tester.binding.setSurfaceSize(const Size(800, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -43,6 +53,7 @@ void main() {
             (_) => Stream.value(Category.builtinSeeds),
           ),
           groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
+          uiPrefsStoreProvider.overrideWithValue(prefs ?? MemoryUiPrefsStore()),
         ],
         child: MaterialApp(
           theme: AppTheme.mobileLight(),
@@ -132,6 +143,29 @@ void main() {
     expect(
       tester.getSize(find.byType(ListView)).height,
       lessThanOrEqualTo(200),
+    );
+  });
+
+  testWidgets('데스크탑은 기본 펼침 — 끌어다 놓을 항목이 바로 보인다', (tester) async {
+    await mount(tester, [make(id: 'a')], form: FormFactor.desktop);
+    expect(
+      find.byKey(const ValueKey('calendar-undated-tile-a')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('펼침/접힘 선택은 저장돼 다시 열어도 유지된다', (tester) async {
+    final prefs = MemoryUiPrefsStore();
+    await mount(tester, [make(id: 'a')], prefs: prefs);
+    await tester.tap(find.byKey(const ValueKey('calendar-undated-header')));
+    await tester.pumpAndSettle();
+    expect(prefs.data['calendar.flags'], contains('drawer.open'));
+
+    await tester.pumpWidget(const SizedBox());
+    await mount(tester, [make(id: 'a')], prefs: prefs);
+    expect(
+      find.byKey(const ValueKey('calendar-undated-tile-a')),
+      findsOneWidget,
     );
   });
 }

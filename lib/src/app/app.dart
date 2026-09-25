@@ -5,19 +5,21 @@ import '../core/theme.dart';
 import '../data/remote/supabase_provider.dart';
 import '../features/auth/auth_providers.dart';
 import '../features/auth/sign_in_screen.dart';
+import '../features/settings/app_preferences.dart';
 import '../ui/app_shell.dart';
 
 /// 루트 위젯. 단일 [MaterialApp] 베이스 — 폼팩터 분기는 [AppShell] 내부에서 처리.
-class SoloTodoApp extends StatelessWidget {
+class SoloTodoApp extends ConsumerWidget {
   const SoloTodoApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
       title: '하루',
       theme: AppTheme.mobileLight(),
       darkTheme: AppTheme.mobileDark(),
-      themeMode: ThemeMode.system,
+      // 설정 > 일반 > 테마 (기본 시스템 따라가기).
+      themeMode: ref.watch(themeModeProvider),
       debugShowCheckedModeBanner: false,
       home: const _AuthGate(),
     );
