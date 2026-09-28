@@ -1,0 +1,386 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:solo_todo/src/core/platform.dart';
+import 'package:solo_todo/src/core/theme.dart';
+import 'package:solo_todo/src/data/providers.dart';
+import 'package:solo_todo/src/domain/category.dart';
+import 'package:solo_todo/src/domain/group.dart';
+import 'package:solo_todo/src/domain/todo.dart';
+import 'package:solo_todo/src/features/calendar_view/calendar_day_cell.dart';
+import 'package:solo_todo/src/features/calendar_view/calendar_screen.dart';
+import 'package:solo_todo/src/features/category/categories_controller.dart';
+import 'package:solo_todo/src/features/category/groups_controller.dart';
+import 'package:solo_todo/src/features/home/today_providers.dart';
+import 'package:solo_todo/src/features/outline/tree_providers.dart';
+import 'package:solo_todo/src/features/timeline/timeline_screen.dart';
+
+Todo make({
+  required String id,
+  String title = '할 일',
+  DateTime? dueAt,
+  bool isAllDay = true,
+}) => Todo(
+  id: id,
+  title: title,
+  category: Category.work,
+  dueAt: dueAt,
+  isAllDay: isAllDay,
+  createdAt: DateTime(2026, 1, 1),
+  updatedAt: DateTime(2026, 1, 1),
+);
+
+void main() {
+  final now = DateTime(2026, 8, 15, 12);
+
+  Future<void> mount(
+    WidgetTester tester, {
+    List<Todo> todos = const [],
+    Size size = const Size(1200, 900),
+    FormFactor form = FormFactor.desktop,
+  }) async {
+    AppPlatform.debugFormFactorOverride = form;
+    addTearDown(() => AppPlatform.debugFormFactorOverride = null);
+    await tester.binding.setSurfaceSize(size);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          nowProvider.overrideWithValue(() => now),
+          recurrenceMaterializerProvider.overrideWith((_) {}),
+          allTodosProvider.overrideWith((_) => Stream.value(todos)),
+          categoriesProvider.overrideWith(
+            (_) => Stream.value(Category.builtinSeeds),
+          ),
+          groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.mobileLight(),
+          home: const Scaffold(body: CalendarScreen()),
+        ),
+      ),
+    );
+    for (var i = 0; i < 5; i++) {
+      await tester.pump();
+    }
+  }
+
+  Finder cell(DateTime d) =>
+      find.byKey(ValueKey('calendar-cell-${calendarDateKey(d)}'));
+
+  group('초기 상태', () {
+    testWidgets('오늘이 속한 달을 열고 오늘을 선택한다', (tester) async {
+      await mount(tester);
+      expect(find.text('2026년 8월'), findsOneWidget);
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+      expect(
+        tester.widget<CalendarDayCell>(cell(DateTime(2026, 8, 15))).isSelected,
+        isTrue,
+      );
+    });
+
+    testWidgets('기본 세그먼트는 [달력]', (tester) async {
+      await mount(tester);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+      expect(find.byType(TimelineScreen), findsNothing);
+    });
+  });
+
+  group('날짜 선택', () {
+    testWidgets('날짜를 탭하면 선택일 패널 헤더가 바뀐다', (tester) async {
+      await mount(tester);
+      await tester.tap(cell(DateTime(2026, 8, 20)));
+      await tester.pumpAndSettle();
+      expect(find.text('8월 20일 (목)'), findsOneWidget);
+    });
+
+    testWidgets('선택일의 할 일이 패널에 나온다', (tester) async {
+      await mount(
+        tester,
+        todos: [
+          make(id: 'a', title: '세금계산서', dueAt: DateTime(2026, 8, 15)),
+          make(id: 'b', title: '다른날', dueAt: DateTime(2026, 8, 20)),
+        ],
+      );
+      expect(
+        find.byKey(const ValueKey('calendar-panel-tile-todo:a')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('calendar-panel-tile-todo:b')),
+        findsNothing,
+      );
+
+      await tester.tap(cell(DateTime(2026, 8, 20)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('calendar-panel-tile-todo:b')),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('월 이동', () {
+    testWidgets('› 버튼으로 다음 달', (tester) async {
+      await mount(tester);
+      await tester.tap(find.byKey(const ValueKey('calendar-next-month')));
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 9월'), findsOneWidget);
+    });
+
+    testWidgets('‹ 버튼으로 이전 달, 연 경계도 넘는다', (tester) async {
+      await mount(tester);
+      for (var i = 0; i < 8; i++) {
+        await tester.tap(find.byKey(const ValueKey('calendar-prev-month')));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('2025년 12월'), findsOneWidget);
+    });
+
+    testWidgets('"오늘" 버튼으로 복귀', (tester) async {
+      await mount(tester);
+      await tester.tap(find.byKey(const ValueKey('calendar-next-month')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('calendar-today-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 8월'), findsOneWidget);
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+    });
+
+    testWidgets('← / → 키로 달 이동, T 키로 오늘 복귀', (tester) async {
+      await mount(tester);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 9월'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 7월'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyT);
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 8월'), findsOneWidget);
+    });
+
+    testWidgets('넘침 날짜를 탭하면 그 달로 따라 이동한다', (tester) async {
+      await mount(tester);
+      // 2026-09-05 는 8월 그리드의 마지막 칸.
+      await tester.tap(cell(DateTime(2026, 9, 5)));
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 9월'), findsOneWidget);
+      expect(find.text('9월 5일 (토)'), findsOneWidget);
+    });
+  });
+
+  group('세그먼트', () {
+    testWidgets('[목록] 로 바꾸면 타임라인이, 다시 [달력] 이면 격자가 나온다', (tester) async {
+      await mount(tester);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-segment-list')));
+      await tester.pumpAndSettle();
+      expect(find.byType(TimelineScreen), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsNothing);
+      // embed 된 타임라인은 자기 제목을 다시 달지 않는다 (헤더가 이미 표시).
+      expect(find.text('날짜가 정해진 할 일을 한눈에'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-segment-grid')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+      expect(find.byType(TimelineScreen), findsNothing);
+    });
+
+    testWidgets('세그먼트를 오가도 선택일이 유지된다', (tester) async {
+      await mount(tester);
+      await tester.tap(cell(DateTime(2026, 8, 20)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('calendar-segment-list')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('calendar-segment-grid')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('8월 20일 (목)'), findsOneWidget);
+    });
+  });
+
+  group('데스크탑 우측 패널 접기', () {
+    testWidgets('토글로 접었다 폈다 — 접으면 선택일 패널이 사라진다', (tester) async {
+      await mount(
+        tester,
+        todos: [make(id: 't1', dueAt: DateTime(2026, 8, 15))],
+      );
+
+      // 기본은 펼침 — 선택일 헤더가 보인다.
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.text('8월 15일 (토)'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+    });
+
+    testWidgets('접으면 격자가 패널 폭만큼 넓어진다', (tester) async {
+      await mount(tester);
+      final before = tester.getSize(cell(DateTime(2026, 8, 15))).width;
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-toggle')));
+      await tester.pumpAndSettle();
+
+      final after = tester.getSize(cell(DateTime(2026, 8, 15))).width;
+      expect(after, greaterThan(before));
+    });
+
+    testWidgets('좁은 데스크탑 창에서도 헤더가 가로로 넘치지 않는다', (tester) async {
+      // 실사용 신고: 사이드바를 뺀 폭이 330 남짓일 때 제목을 0 으로 줄여도
+      // 버튼들만으로 5.5px 넘쳤다. 폭에 따라 ‹ › / 구글 토글을 접어야 한다.
+      await mount(tester, size: const Size(330, 700));
+      expect(tester.takeException(), isNull);
+      // 패널 토글은 절대 접지 않는다 — 접힌 상태에서 사라지면 되돌릴 수 없다.
+      expect(
+        find.byKey(const ValueKey('calendar-panel-toggle')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('calendar-prev-month')), findsNothing);
+    });
+
+    testWidgets('넓은 창에서는 ‹ › 가 다시 나온다', (tester) async {
+      await mount(tester, size: const Size(1200, 900));
+      expect(find.byKey(const ValueKey('calendar-prev-month')), findsOneWidget);
+    });
+
+    testWidgets('모바일에는 패널 토글이 없다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(find.byKey(const ValueKey('calendar-panel-toggle')), findsNothing);
+    });
+  });
+
+  group('모바일 레이아웃', () {
+    testWidgets('헤더는 두 줄 — 접기 버튼 없이 [달력|타임라인] 과 월 제목이 나뉜다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(
+        find.byKey(const ValueKey('calendar-collapse-toggle')),
+        findsNothing,
+      );
+      final title = tester.getCenter(
+        find.byKey(const ValueKey('calendar-month-title')),
+      );
+      final segment = tester.getCenter(
+        find.byKey(const ValueKey('calendar-segment-grid')),
+      );
+      expect(segment.dy, greaterThan(title.dy + 10));
+    });
+
+    testWidgets('모바일에는 ‹ › 대신 스와이프로 달을 넘긴다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      // 헤더 폭을 아끼려고 모바일에선 화살표 버튼을 두지 않는다.
+      expect(find.byKey(const ValueKey('calendar-prev-month')), findsNothing);
+      expect(find.byKey(const ValueKey('calendar-next-month')), findsNothing);
+
+      await tester.fling(
+        find.byKey(const ValueKey('calendar-grid-pager')),
+        const Offset(-400, 0),
+        1000,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('2026년 9월'), findsOneWidget);
+    });
+
+    testWidgets('모바일 헤더가 좁은 폭에서도 넘치지 않는다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(360, 800));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('앱바를 대신할 ⋮ 메뉴(검색·설정)가 헤더에 있다', (tester) async {
+      // 캘린더 화면은 세로 높이를 위해 앱바를 쓰지 않는다 — 앱바가 들고 있던
+      // 검색·설정 통로가 사라지지 않았는지 확인.
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      expect(
+        find.byKey(const ValueKey('calendar-overflow-menu')),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('데스크탑 헤더에는 ⋮ 메뉴가 없다', (tester) async {
+      await mount(tester);
+      expect(
+        find.byKey(const ValueKey('calendar-overflow-menu')),
+        findsNothing,
+      );
+    });
+  });
+
+  group('모바일 — 목록 손잡이 하나로 크기 조절', () {
+    Future<void> dragHandle(WidgetTester tester, double dy) async {
+      await tester.drag(
+        find.byKey(const ValueKey('calendar-panel-handle')),
+        Offset(0, dy),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('손잡이를 누르면 목록이 접히고 하단 막대만 남는다', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-handle')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('calendar-panel-expand')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+    });
+
+    testWidgets('아래로 끌면 달력 크게, 막대를 누르면 다시 분할', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await dragHandle(tester, 120);
+      expect(
+        find.byKey(const ValueKey('calendar-panel-expand')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-expand')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+    });
+
+    testWidgets('위로 끌면 목록이 화면 전체, 다시 아래로 끌면 분할', (tester) async {
+      await mount(tester, form: FormFactor.mobile, size: const Size(420, 900));
+      await dragHandle(tester, -120);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsNothing);
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
+
+      await dragHandle(tester, 120);
+      expect(find.byKey(const ValueKey('calendar-grid-pager')), findsOneWidget);
+      expect(find.byKey(const ValueKey('calendar-add-on-day')), findsOneWidget);
+    });
+
+    testWidgets('접힌 막대에 선택일과 건수가 나온다', (tester) async {
+      await mount(
+        tester,
+        form: FormFactor.mobile,
+        size: const Size(420, 900),
+        todos: [make(id: 'x', title: '회의', dueAt: DateTime(2026, 8, 15, 10))],
+      );
+      await tester.tap(find.byKey(const ValueKey('calendar-panel-handle')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('8월 15일 (토)'), findsOneWidget);
+      expect(find.text('1건'), findsOneWidget);
+    });
+
+    testWidgets('데스크탑 패널에는 손잡이가 없다 (헤더 토글이 담당)', (tester) async {
+      await mount(tester);
+      expect(find.byKey(const ValueKey('calendar-panel-handle')), findsNothing);
+    });
+  });
+}

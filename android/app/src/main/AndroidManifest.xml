@@ -52,5 +52,11 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Microsoft 365 로그인 동의 화면을 기본 브라우저로 열기 위해 필요.
+             Android 11+ 는 이 선언이 없으면 url_launcher 가 브라우저를 찾지 못한다. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

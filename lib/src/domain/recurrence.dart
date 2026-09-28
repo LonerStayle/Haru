@@ -172,6 +172,67 @@ class RecurrenceRule {
     return 'RRULE:$body;UNTIL=$stamp';
   }
 
+  /// [toRRule] 역변환 — Google Calendar 의 RRULE 문자열을 규칙 + 종료일로 되돌린다.
+  ///
+  /// **지원 범위를 일부러 좁혔다.** FREQ / INTERVAL / BYDAY(서수 없는 요일) / UNTIL
+  /// 만 받고, 그 밖의 토큰(BYSETPOS · BYMONTHDAY · COUNT · 서수 BYDAY 등)이 하나라도
+  /// 있으면 **null 을 반환**한다. 우리 모델(RecurrenceRule)이 표현하지 못하는 규칙을
+  /// 억지로 근사하면, 되가져온 뒤 앱이 계산한 발생일이 구글 캘린더와 어긋난 채로
+  /// 조용히 굴러간다 — 그것보다 "반복 없는 단일 할 일" 로 폴백하는 편이 정직하다.
+  ///
+  /// 앱에서 만든 반복은 항상 [toRRule] 이 낸 형태이므로 왕복은 언제나 성립한다.
+  static ({RecurrenceRule rule, DateTime? until})? tryFromRRule(String raw) {
+    var body = raw.trim();
+    if (body.isEmpty) return null;
+    if (body.toUpperCase().startsWith('RRULE:')) {
+      body = body.substring('RRULE:'.length);
+    }
+
+    RecurrenceFreq? freq;
+    var interval = 1;
+    final byWeekday = <int>{};
+    DateTime? until;
+
+    for (final pair in body.split(';')) {
+      if (pair.trim().isEmpty) continue;
+      final eq = pair.indexOf('=');
+      if (eq < 0) return null; // key=value 형태가 아니면 RRULE 이 아니다.
+      final key = pair.substring(0, eq).trim().toUpperCase();
+      final val = pair.substring(eq + 1).trim().toUpperCase();
+      switch (key) {
+        case 'FREQ':
+          freq = _tokenToFreq(val);
+          if (freq == null) return null; // HOURLY/MINUTELY 등 — 표현 불가.
+        case 'INTERVAL':
+          final n = int.tryParse(val);
+          if (n == null || n < 1) return null;
+          interval = n;
+        case 'BYDAY':
+          for (final t in val.split(',')) {
+            final wd = _tokenToWeekday(t.trim());
+            if (wd == null) return null; // '2MO' 같은 서수 접두사 포함.
+            byWeekday.add(wd);
+          }
+        case 'UNTIL':
+          until = _parseUntil(val); // 파싱 실패는 규칙 자체를 버리지 않는다.
+        case 'WKST':
+          break; // 주 시작 요일 — 우리 계산은 월요일 고정이라 무해하게 무시.
+        default:
+          return null; // 모르는 토큰이 있으면 근사하지 않고 포기한다.
+      }
+    }
+
+    if (freq == null) return null;
+    return (
+      rule: RecurrenceRule(
+        freq: freq,
+        interval: interval,
+        byWeekday: freq == RecurrenceFreq.weekly ? byWeekday : const {},
+      ),
+      until: until,
+    );
+  }
+
   // ── 사람용 한국어 요약 ──────────────────────────────────────────────────────
 
   /// 규칙을 한국어 한 줄로 요약. UI(편집 시트·상세·반복 관리)가 공유.
@@ -277,3 +338,22 @@ int? _tokenToWeekday(String t) {
 
 String _p2(int n) => n.toString().padLeft(2, '0');
 String _p4(int n) => n.toString().padLeft(4, '0');
+
+/// RRULE 의 `UNTIL` 값 파싱. `yyyyMMddTHHmmssZ` 와 `yyyyMMdd` 두 형태를 받는다.
+/// 실패하면 null — 호출자가 종료일만 버리고 규칙은 살린다.
+DateTime? _parseUntil(String v) {
+  final s = v.trim();
+  final m = RegExp(
+    r'^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})Z?)?$',
+  ).firstMatch(s);
+  if (m == null) return null;
+  int at(int i) => int.parse(m.group(i)!);
+  return DateTime.utc(
+    at(1),
+    at(2),
+    at(3),
+    m.group(4) == null ? 0 : at(4),
+    m.group(5) == null ? 0 : at(5),
+    m.group(6) == null ? 0 : at(6),
+  );
+}

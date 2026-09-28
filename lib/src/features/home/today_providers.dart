@@ -47,6 +47,18 @@ final undoneTodayCountProvider = Provider<int>((ref) {
   );
 });
 
+/// 트레이 메뉴에 올릴 오늘 남은 할 일 — 오늘 화면과 같은 순서의 미체크 task.
+final undoneTodayTodosProvider = Provider<List<Todo>>((ref) {
+  return ref
+      .watch(visibleTodayTodosProvider)
+      .maybeWhen(
+        data: (todos) => todos
+            .where((t) => t.type == TodoType.task && !t.isDone)
+            .toList(growable: false),
+        orElse: () => const <Todo>[],
+      );
+});
+
 /// 어제 이전에서 이월된 미체크 항목의 개수 (배너 표시용).
 final carryoverCountProvider = Provider<int>((ref) {
   // currentDayProvider 가 자정 갱신 시 같이 재계산되도록 transitively 의존.
@@ -128,3 +140,27 @@ final dedupedTodayProvider = Provider<DedupedToday>((ref) {
     orElse: () => const DedupedToday(visible: [], hiddenCountBySeries: {}),
   );
 });
+
+/// 이월 배너를 "닫기" 한 날(로컬 자정) — 화면별(전역 오늘 = '', 그룹 탭 = 그룹 id).
+/// 그날은 다시 띄우지 않고, 다음 날 새 이월이 생기면 다시 보인다. 세션 동안만
+/// 기억한다 — 앱을 다시 켜면 한 번 더 알려 주는 게 낫다(놓친 이월을 알리는 배너).
+final carryoverBannerDismissedProvider =
+    NotifierProvider<CarryoverBannerDismissed, Map<String, DateTime>>(
+      CarryoverBannerDismissed.new,
+    );
+
+class CarryoverBannerDismissed extends Notifier<Map<String, DateTime>> {
+  @override
+  Map<String, DateTime> build() => const {};
+
+  void dismiss(String scope, DateTime now) =>
+      state = {...state, scope: DateTime(now.year, now.month, now.day)};
+
+  bool isDismissedOn(String scope, DateTime now) {
+    final d = state[scope];
+    return d != null &&
+        d.year == now.year &&
+        d.month == now.month &&
+        d.day == now.day;
+  }
+}

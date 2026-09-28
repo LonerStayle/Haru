@@ -60,13 +60,23 @@ class SupabaseTodosApi implements RemoteTodosApi {
     'user_id': userId,
     'title': t.title,
     'category': t.category.id,
-    'due_at': t.dueAt?.toIso8601String(),
-    'done_at': t.doneAt?.toIso8601String(),
-    'started_at': t.startedAt?.toIso8601String(),
+    // ⚠️ 모든 시각은 **반드시 toUtc() 후** 직렬화한다. local 로 만든 DateTime 을 그대로
+    // toIso8601String() 하면 오프셋 없는 문자열("2026-09-13T19:00:00.000")이 나가고,
+    // Postgres timestamptz 는 그걸 UTC 로 해석한다 → 저장값이 로컬 오프셋만큼 밀린다.
+    // (실제 사고: 한국시간 9/13 19시 일정이 19:00Z 로 저장돼 달력에 9/14 04시로 표시.)
+    'due_at': t.dueAt?.toUtc().toIso8601String(),
+    'done_at': t.doneAt?.toUtc().toIso8601String(),
+    'started_at': t.startedAt?.toUtc().toIso8601String(),
     'created_at': t.createdAt.toUtc().toIso8601String(),
     // updatedAt 은 LWW 키 — UTC 로 전송해 로컬 저장(UTC)과 round-trip 일치.
     'updated_at': t.updatedAt.toUtc().toIso8601String(),
     'calendar_event_id': t.calendarEventId,
+    // v10 — Google Calendar 양방향 동기화. calendar_origin 은 삭제 규칙의 근거이므로
+    // 반드시 원격에 함께 전파돼야 macOS/Android 양쪽이 같은 판단을 한다.
+    'calendar_id': t.calendarId,
+    'calendar_origin': t.calendarOrigin,
+    // v11 — 어느 캘린더 서비스(구글 / Microsoft)의 이벤트인지. null = 구글(하위호환).
+    'calendar_provider': t.calendarProvider,
     // v1.1 — 트리 / 메모 모델
     'parent_id': t.parentId,
     'type': t.type.name,
@@ -74,7 +84,7 @@ class SupabaseTodosApi implements RemoteTodosApi {
     // v1.2 — 상세 메모
     'description': t.description,
     // fast-tasks — 날짜·기간 모델
-    'end_at': t.endAt?.toIso8601String(),
+    'end_at': t.endAt?.toUtc().toIso8601String(),
     'is_all_day': t.isAllDay,
     'time_anchor': t.timeAnchor,
   };
@@ -101,6 +111,18 @@ class SupabaseTodosApi implements RemoteTodosApi {
     createdAt: _parseTime(row['created_at'])!,
     updatedAt: _parseTime(row['updated_at'])!,
     calendarEventId: row['calendar_event_id'] as String?,
+    // v10 — 옛 row (다른 기기가 아직 구버전 빌드라 컬럼 자체가 없는 경우 포함) 도
+    // 예외 없이 안전하게 복원해야 동기화 전체가 멈추지 않는다. calendarOrigin 은
+    // 삭제 규칙의 유일한 근거라 누락 시 'app' 으로 안전 폴백 (TodosDao 의 category
+    // placeholder 방어와 같은 톤).
+    calendarId: row['calendar_id'] as String?,
+    calendarOrigin: row['calendar_origin'] is String
+        ? row['calendar_origin'] as String
+        : 'app',
+    // v11 — 컬럼이 없는 옛 row 는 null → 코드가 구글로 읽는다.
+    calendarProvider: row['calendar_provider'] is String
+        ? row['calendar_provider'] as String
+        : null,
     // v1.1 — 옛 v1.0 row (컬럼 없음) 도 안전하게 기본값으로 복원.
     parentId: row['parent_id'] as String?,
     type: _parseType(row['type']),

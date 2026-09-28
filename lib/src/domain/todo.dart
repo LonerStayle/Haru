@@ -27,6 +27,7 @@ enum TodoType {
 ///   세팅되지 않는다** — 미완료(둘 다 null) / 진행중(startedAt만) / 완료(doneAt) 3-상태.
 /// - [dueAt] 는 사용자가 지정한 일정 (Google Calendar 등록 대상).
 /// - [calendarEventId] 가 있으면 캘린더에 이벤트가 등록된 상태.
+/// - [calendarId] / [calendarOrigin] — Google Calendar 양방향 동기화용 (아래 참조).
 /// - [createdAt] / [updatedAt] 은 Supabase last-write-wins 충돌 해소에 사용.
 /// - [parentId] 가 null 이면 카테고리 직속 root, set 이면 그 todo 의 자식 (트리 노드).
 /// - [type] — task / note (기본 task).
@@ -50,6 +51,25 @@ enum TodoDateMode {
   range,
 }
 
+/// 할 일의 3-상태 — 미완료 / 진행중 / 완료.
+///
+/// [Todo.startedAt] 와 [Todo.doneAt] 조합에 이름을 붙인 것이다. 두 필드는 동시에
+/// 세팅되지 않는다는 불변식 덕분에 조합은 정확히 이 셋뿐이다.
+/// ([TodoType.note] 는 체크·진행 개념이 없어 항상 [TodoStatus.undone].)
+///
+/// 뷰 필터인 `TodoStatusFilter` 와 라벨은 같지만 층이 다르다 — 이쪽은 도메인 상태,
+/// 저쪽은 목록을 좁히는 렌더 조건.
+enum TodoStatus {
+  /// 둘 다 null — 아직 손대지 않음. (□)
+  undone,
+
+  /// startedAt 만 있음 — 시작했으나 미완. (△)
+  inProgress,
+
+  /// doneAt 있음 — 완료. (◯)
+  done,
+}
+
 @freezed
 abstract class Todo with _$Todo {
   const Todo._();
@@ -67,6 +87,23 @@ abstract class Todo with _$Todo {
     required DateTime createdAt,
     required DateTime updatedAt,
     String? calendarEventId,
+    // [calendarId] — calendarEventId 가 속한 Google Calendar id. null = 미등록
+    // 또는 레거시(과거엔 'primary' 하드코딩이었으므로 null 이면 primary 로 간주).
+    String? calendarId,
+    // [calendarOrigin] — 'app'(앱에서 만든 할 일) | 'gcal'(Google Calendar 유입)
+    // | 'msgraph'(Microsoft 365 유입). **삭제 규칙의 유일한 근거**: 캘린더 쪽 이벤트가
+    // 삭제됐을 때 origin='app' 이면 할 일은 남기고 연결만 해제, 그 외(캘린더 유입)면
+    // 할 일도 함께 삭제한다 ([isFromCalendar]). 반드시 Supabase 로 전파되어
+    // macOS/Android 양쪽이 같은 판단을 한다.
+    // ⚠️ RISK(breaking): 이 세 필드는 Supabase 의 `calendar_id` / `calendar_origin` /
+    // `calendar_provider` 컬럼과 1:1 대응한다. `supabase/schema.sql` 재실행 없이
+    // 배포하면 PGRST204 로 todos 동기화 전체가 멈춘다 (컬럼 추가 후 `notify pgrst` 필요).
+    @Default('app') String calendarOrigin,
+    // [calendarProvider] — 이 할 일이 연결된 캘린더 서비스 ('google' | 'microsoft').
+    // **null 은 구글**이다 — 이 필드가 생기기 전 데이터(전부 구글 연동)와의 하위호환이
+    // 여기서 성립하므로 기본값을 넣지 않고 nullable 로 둔다. 큐가 어느 게이트웨이로
+    // 작업을 보낼지, 수신한 이벤트를 어느 할 일과 짝지을지가 이 값으로 갈린다.
+    String? calendarProvider,
     String? parentId,
     @Default(TodoType.task) TodoType type,
     @Default(0) int sortOrder,
@@ -112,6 +149,9 @@ abstract class Todo with _$Todo {
     String? recurrenceRule,
     DateTime? recurrenceEndAt,
     bool isSeriesMaster = false,
+    String? calendarId,
+    String calendarOrigin = 'app',
+    String? calendarProvider,
   }) {
     final n = (now ?? DateTime.now)();
     return Todo(
@@ -124,6 +164,9 @@ abstract class Todo with _$Todo {
       createdAt: n,
       updatedAt: n,
       calendarEventId: null,
+      calendarId: calendarId,
+      calendarOrigin: calendarOrigin,
+      calendarProvider: calendarProvider,
       parentId: parentId,
       type: type,
       sortOrder: sortOrder,
@@ -173,6 +216,49 @@ abstract class Todo with _$Todo {
     return isInProgress
         ? copyWith(startedAt: null, updatedAt: n)
         : copyWith(startedAt: n, doneAt: null, updatedAt: n);
+  }
+
+  /// 캘린더에서 유입된 할 일인가 (앱에서 만든 것이 아닌가).
+  ///
+  /// 삭제 규칙의 단일 판정 — 캘린더 쪽 일정이 지워졌을 때 이 값이 true 면 할 일도
+  /// 함께 지우고, false 면 할 일은 남기고 연결만 끊는다. 값 비교를 `== 'gcal'` 로
+  /// 흩뿌리면 서비스가 늘 때마다 빠뜨리는 곳이 생긴다.
+  bool get isFromCalendar => calendarOrigin != 'app';
+
+  /// 현재 3-상태. note 는 상태 개념이 없어 항상 [TodoStatus.undone].
+  TodoStatus get status {
+    if (isDone) return TodoStatus.done;
+    if (isInProgress) return TodoStatus.inProgress;
+    return TodoStatus.undone;
+  }
+
+  /// 상태를 [next] 로 **직접 지정**한다. 현재 상태에서 다음으로 넘어가는 toggle 과
+  /// 달리, 어디에 있든 목표 상태로 간다 (편집 시트의 □ / △ / ◯ 탭).
+  ///
+  /// 불변식 유지 — 완료면 [startedAt] 를 비우고, 진행중이면 [doneAt] 를 비우며,
+  /// 미완료면 둘 다 비운다. [toggleDone] / [toggleInProgress] 가 만드는 결과와 정확히
+  /// 같은 조합이라 의미가 어긋나지 않는다.
+  ///
+  /// 이미 그 상태면 **원본을 그대로** 돌려준다 — [updatedAt] 도 건드리지 않아 헛저장·
+  /// 헛동기화가 생기지 않는다. [sortOrder] 는 어떤 경로로도 바뀌지 않는다 (체크·세모
+  /// 토글과 같은 규칙 — 상태를 바꿔도 자리는 그대로).
+  /// note 타입은 무시.
+  Todo withStatus(TodoStatus next, {DateTime Function()? now}) {
+    if (type == TodoType.note || status == next) return this;
+    final n = (now ?? DateTime.now)();
+    return switch (next) {
+      TodoStatus.undone => copyWith(
+        doneAt: null,
+        startedAt: null,
+        updatedAt: n,
+      ),
+      TodoStatus.inProgress => copyWith(
+        doneAt: null,
+        startedAt: n,
+        updatedAt: n,
+      ),
+      TodoStatus.done => copyWith(doneAt: n, startedAt: null, updatedAt: n),
+    };
   }
 
   /// 캘린더 이벤트 id 갱신.

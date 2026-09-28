@@ -1,0 +1,111 @@
+import 'dart:async';
+
+import 'package:flutter/widgets.dart';
+
+import 'calendar_sync_coordinator.dart';
+
+/// 자동 동기화 트리거. **연결된 모든 서비스**를 한 tick 에 돈다.
+///
+/// 이 앱에는 [WidgetsBindingObserver] 를 쓰는 곳이 한 군데도 없었다 — 캘린더
+/// 연동이 처음으로 "앱이 다시 앞으로 나왔을 때" 를 알아야 하는 기능이다.
+///
+/// 트리거는 셋:
+/// - **시작 직후 1회** — 다른 기기에서 바뀐 내용을 바로 반영
+/// - **포그라운드 복귀** — macOS 는 창 포커스, Android 는 앱 전환 복귀에서 발생
+/// - **주기** (기본 5분) — 앱이 떠 있는 동안만. `paused` 면 타이머를 멈춘다
+///
+/// 실시간(수 초)을 노리지 않는 이유는 구글 API 쿼터와 배터리다. Supabase 쪽
+/// 실시간 동기화와 달리 캘린더는 사람이 다른 앱에서 고치는 빈도가 훨씬 낮다.
+class CalendarSyncScheduler with WidgetsBindingObserver {
+  CalendarSyncScheduler({
+    required this.coordinators,
+    required this.autoSyncEnabled,
+    this.interval = const Duration(minutes: 5),
+  });
+
+  /// 서비스별 코디네이터 (구글 / Microsoft). 연결 안 된 쪽은 스스로 skip 한다.
+  ///
+  /// **순차로 돈다.** 동시에 돌리면 두 수신 결과가 같은 할 일을 겹쳐 쓰는 경합이
+  /// 생기고, 그 경합은 재현이 어렵다. 5분 주기 작업이라 순차로도 충분하다.
+  final List<CalendarSyncCoordinator> coordinators;
+
+  /// 호출 시점의 자동 동기화 설정 — 사용자가 끄면 다음 tick 부터 멈춘다.
+  final bool Function() autoSyncEnabled;
+
+  final Duration interval;
+
+  Timer? _timer;
+  bool _started = false;
+
+  /// 앱 시작 시 1회 호출. 즉시 한 번 돌리고 주기 타이머를 건다.
+  void start() {
+    if (_started) return;
+    _started = true;
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_tick());
+    _restartTimer();
+  }
+
+  void dispose() {
+    if (!_started) return;
+    _started = false;
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  /// 사용자가 "지금 동기화" 를 눌렀을 때 — 자동 동기화 설정과 무관하게 돈다.
+  ///
+  /// 한 서비스라도 실패하거나 재인증이 필요하면 [CalendarSyncNowFailed] 를 던진다 —
+  /// 설정 화면이 결과를 사실대로 알리게(예전엔 실패해도 "동기화했어요" 였다).
+  /// 나머지 서비스는 끝까지 돈다(실패 격리).
+  Future<void> syncNow() async {
+    var failed = false;
+    var authRequired = false;
+    for (final coordinator in coordinators) {
+      final outcome = await coordinator.syncNow();
+      failed = failed || outcome.failed;
+      authRequired = authRequired || outcome.authRequired;
+    }
+    if (failed || authRequired) {
+      throw CalendarSyncNowFailed(authRequired: authRequired);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        unawaited(_tick());
+        _restartTimer();
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        // 백그라운드에서까지 돌 이유가 없다 — 쿼터와 배터리만 쓴다.
+        _timer?.cancel();
+        _timer = null;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  void _restartTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(interval, (_) => unawaited(_tick()));
+  }
+
+  Future<void> _tick() async {
+    if (!autoSyncEnabled()) return;
+    await syncNow();
+  }
+}
+
+/// "지금 동기화" 실패 — [authRequired] 면 다시 연결이 필요하다.
+class CalendarSyncNowFailed implements Exception {
+  const CalendarSyncNowFailed({this.authRequired = false});
+
+  final bool authRequired;
+
+  @override
+  String toString() => 'CalendarSyncNowFailed(authRequired: $authRequired)';
+}

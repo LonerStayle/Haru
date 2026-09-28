@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/core/theme.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/todo.dart';
@@ -192,5 +193,125 @@ void main() {
       find.byKey(const ValueKey('todo-tile-check')),
     );
     expect(btn.onPressed, isNull);
+  });
+
+  // 모바일 폭(360dp)에서 세모+체크+⋮ 3버튼이 제목 폭을 다 먹어 제목이 세로로
+  // 무한 wrap 되던 문제(대표님 리포트)의 회귀 가드. 데스크탑은 현행 유지.
+  group('모바일 압축 레이아웃', () {
+    const longTitle = '회사 분기 보고서 초안 작성하고 팀에 공유한 뒤 피드백 반영해서 최종본 만들기';
+
+    tearDown(() => AppPlatform.debugFormFactorOverride = null);
+
+    Future<void> mountNarrow(
+      WidgetTester tester,
+      Todo todo, {
+      int? drillChildCount,
+      double width = 360,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.mobileLight(),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: width,
+              child: TodoTile(
+                todo: todo,
+                onToggle: () {},
+                onToggleInProgress: () {},
+                onCopy: () {},
+                onEditItem: () {},
+                onDelete: () {},
+                drillChildCount: drillChildCount,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('제목은 최대 2줄 + 말줄임', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      await mountNarrow(tester, make(title: longTitle));
+
+      final title = tester.widget<Text>(find.text(longTitle));
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
+    });
+
+    testWidgets('3버튼이 붙어도 제목 폭 180dp 이상 확보', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      await mountNarrow(
+        tester,
+        make(title: longTitle, dueAt: DateTime(2026, 5, 27, 14, 30)),
+      );
+
+      expect(
+        tester.getSize(find.text(longTitle)).width,
+        greaterThanOrEqualTo(180),
+      );
+    });
+
+    testWidgets('폰 — 체크 하나(36dp)만, 진행중·⋮ 버튼은 없다 (Phase 1)', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      await mountNarrow(tester, make());
+
+      expect(
+        tester.getSize(find.byKey(const ValueKey('todo-tile-check'))),
+        const Size(36, 36),
+      );
+      // 진행중·이동·복사·삭제는 길게 눌렀다 떼면 나오는 메뉴 시트로.
+      expect(find.byKey(const ValueKey('todo-tile-progress')), findsNothing);
+      expect(find.byKey(const ValueKey('todo-tile-menu-a')), findsNothing);
+    });
+
+    testWidgets('드릴 배지는 trailing 이 아니라 제목 아래 메타 줄', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      await mountNarrow(tester, make(title: longTitle), drillChildCount: 3);
+
+      final drill = find.byKey(const ValueKey('todo-tile-drill-a'));
+      expect(drill, findsOneWidget);
+      // 제목 아래로 내려갔는지 — 배지 top 이 제목 top 보다 아래.
+      expect(
+        tester.getTopLeft(drill).dy,
+        greaterThan(tester.getTopLeft(find.text(longTitle)).dy),
+      );
+    });
+
+    testWidgets('데스크탑 넓은 폭 — 제목 2줄 제한, 체크는 compact 40dp', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mountNarrow(tester, make(title: longTitle), width: 600);
+
+      final title = tester.widget<Text>(find.text(longTitle));
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
+      expect(
+        tester.getSize(find.byKey(const ValueKey('todo-tile-check'))),
+        const Size(40, 40),
+      );
+    });
+
+    testWidgets('데스크탑이라도 폭이 좁으면 압축된다', (tester) async {
+      // 실사용 신고: 창을 좁히면 오늘 화면 타일이 글자당 한 줄로 접히고 가로로
+      // 넘쳤다. 압축 판단은 플랫폼이 아니라 실제 폭 기준이어야 한다.
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mountNarrow(tester, make(title: longTitle), width: 360);
+
+      final title = tester.widget<Text>(find.text(longTitle));
+      expect(title.maxLines, 2);
+      expect(title.overflow, TextOverflow.ellipsis);
+    });
+
+    testWidgets('좁은 데스크탑 폭 + 모든 버튼이 붙어도 가로로 넘치지 않는다', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mountNarrow(
+        tester,
+        make(title: longTitle, startedAt: DateTime.utc(2026, 5, 27, 10)),
+        drillChildCount: 10,
+        width: 320,
+      );
+
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -20,6 +20,19 @@ class KoDate {
 
   /// "M/D HH:mm" — 짧은 날짜 + 24h 시각.
   static String shortDateTime(DateTime d) => '${shortDate(d)} ${time(d)}';
+
+  /// "2026년 8월" — 캘린더 월 헤더용. 연도를 붙이는 이유는 달을 넘겨 이동하다
+  /// 해가 바뀌었는데 모르는 상황을 막기 위해서다.
+  static String monthTitle(DateTime d) => '${d.year}년 ${d.month}월';
+
+  /// "8월 15일 (토)" — 캘린더 선택일 헤더용. [pretty] 의 "…화요일" 보다 짧아
+  /// 좁은 패널에서도 한 줄에 들어간다.
+  static String dayWithWeekday(DateTime d) =>
+      '${d.month}월 ${d.day}일 (${_weekdays[d.weekday - 1]})';
+
+  /// 요일 한 글자 — 캘린더 그리드의 요일 헤더용.
+  /// [weekday] 는 `DateTime.weekday` 규약 (1=월 … 7=일).
+  static String weekdayShort(int weekday) => _weekdays[weekday - 1];
 }
 
 /// Todo 의 날짜·기간 모델을 화면용 짧은 라벨로 변환. 단일 출처.
@@ -36,7 +49,9 @@ class TodoDateLabel {
   const TodoDateLabel._();
 
   static String? format(Todo todo) {
-    final due = todo.dueAt;
+    // 다른 기기에서 동기화된 값은 UTC 로 들어온다 — 날짜를 읽기 전에 로컬로.
+    // (그대로 읽으면 한국 종일 항목이 전날로 보인다.)
+    final due = todo.dueAt?.toLocal();
     if (due == null) return null;
     switch (todo.dateMode) {
       case TodoDateMode.none:
@@ -48,7 +63,7 @@ class TodoDateLabel {
       case TodoDateMode.endTime:
         return '마감 ${KoDate.shortDateTime(due)}';
       case TodoDateMode.range:
-        final end = todo.endAt;
+        final end = todo.endAt?.toLocal();
         if (end == null) return KoDate.shortDate(due);
         if (todo.isAllDay) {
           return '${KoDate.shortDate(due)} ~ ${KoDate.shortDate(end)}';

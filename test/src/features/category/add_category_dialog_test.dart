@@ -75,6 +75,70 @@ void main() {
     expect(find.byType(AddCategoryDialog), findsNothing); // 닫힘
   });
 
+  testWidgets('수정 모드 — 기존 값 프리필 + 같은 id 로 저장, 순서·기본 여부 보존', (tester) async {
+    // UX 감사 B6 — 카테고리 이름·색·아이콘을 고칠 방법이 없었다.
+    const existing = Category(
+      id: 'cat-reading',
+      label: '독서',
+      iconCodePoint: 0xe865,
+      colorValue: 0xFF3B82F6,
+      sortOrder: 7,
+    );
+    final repo = _FakeRepo();
+    await tester.binding.setSurfaceSize(const Size(700, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          categoriesRepositoryProvider.overrideWithValue(repo),
+          groupsProvider.overrideWith((_) => Stream.value(<Group>[])),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => AddCategoryDialog.showEdit(ctx, existing),
+                  child: const Text('수정'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('수정'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('카테고리 수정'), findsOneWidget);
+    expect(find.text('독서'), findsOneWidget, reason: '기존 이름이 채워져 있어야 한다');
+
+    await tester.enterText(find.byType(TextField), '독서 모임');
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '저장'));
+    await tester.pumpAndSettle();
+
+    final saved = repo.upsertCalls.single;
+    expect(saved.id, 'cat-reading');
+    expect(saved.label, '독서 모임');
+    expect(saved.sortOrder, 7);
+    expect(saved.iconCodePoint, 0xe865);
+    expect(find.byType(AddCategoryDialog), findsNothing);
+  });
+
+  testWidgets('이름 입력 후 Enter → 바로 추가', (tester) async {
+    final repo = _FakeRepo();
+    await mount(tester, repo);
+    await tester.tap(find.text('열기'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '운동');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(repo.upsertCalls.single.label, '운동');
+  });
+
   testWidgets('취소 버튼 → dialog 닫힘 + controller 호출 X', (tester) async {
     final repo = _FakeRepo();
     await mount(tester, repo);

@@ -72,11 +72,13 @@ void main() {
     );
   });
 
-  testWidgets('task — Card 기본 surface(null) + 8px 카테고리 컬러바 유지', (tester) async {
+  testWidgets('task — Card 기본 surface(null) + 3px 카테고리 컬러바 (Phase 1)', (
+    tester,
+  ) async {
     await mount(tester, make(type: TodoType.task, category: Category.daily));
     expect(card(tester).color, isNull);
     final bar = colorbar(tester);
-    expect(bar.constraints?.maxWidth, 8);
+    expect(bar.constraints?.maxWidth, 3);
     expect((bar.decoration as BoxDecoration).color, Category.daily.color);
   });
 
@@ -133,10 +135,12 @@ void main() {
 
   testWidgets('task 미완료 체크 — 카테고리색 ring(0.55) 대비 강화', (tester) async {
     await mount(tester, make(type: TodoType.task, category: Category.work));
-    final btn = tester.widget<IconButton>(
-      find.byKey(const ValueKey('todo-tile-check')),
+    final icon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(const ValueKey('todo-tile-check')),
+        matching: find.byType(Icon),
+      ),
     );
-    final icon = btn.icon as Icon;
     expect(icon.icon, Icons.radio_button_unchecked);
     expect(icon.color, Category.work.color.withValues(alpha: 0.55));
   });
@@ -183,10 +187,12 @@ void main() {
         calendarEventId: null,
       ),
     );
-    final btn = tester.widget<IconButton>(
-      find.byKey(const ValueKey('todo-tile-check')),
+    final icon = tester.widget<Icon>(
+      find.descendant(
+        of: find.byKey(const ValueKey('todo-tile-check')),
+        matching: find.byType(Icon),
+      ),
     );
-    final icon = btn.icon as Icon;
     expect(icon.icon, Icons.check_circle_rounded);
     expect(icon.color, Category.work.color);
   });

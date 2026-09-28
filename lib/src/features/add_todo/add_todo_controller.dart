@@ -1,12 +1,73 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../../data/todo_repository.dart';
+import '../../domain/category.dart';
+import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
 import '../calendar/calendar_service.dart';
+import 'add_todo_default_category.dart';
 import 'add_todo_sheet.dart';
+
+/// 새 할 일 시트 공통 flow — FAB / Cmd+N / 트레이 / 빈 화면 버튼 / 캘린더 "이 날짜로 추가".
+///
+/// 예전엔 진입점마다 `onSubmit: (s) => submitted = s` 로 **마지막 한 건만** 받아 저장해서,
+/// 여러 줄 붙여넣기(일괄 추가)를 하면 마지막 줄만 남았다. 캘린더 경로는 캘린더 등록 경고도
+/// 버렸다. 이 함수 하나로 모아 두 문제를 같이 없앤다 (UX 개선 Phase 0).
+Future<void> showNewTodoSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required Category initialCategory,
+  DateTime? initialDueAt,
+  bool initialAllDay = true,
+  String? initialTitle,
+  RecurrenceFreq? initialRecurrence,
+}) async {
+  final pending = <AddTodoSubmission>[];
+  await AddTodoSheet.show(
+    context,
+    initialCategory: initialCategory,
+    initialDueAt: initialDueAt,
+    initialAllDay: initialAllDay,
+    initialTitle: initialTitle,
+    initialRecurrence: initialRecurrence,
+    onSubmit: pending.add,
+  );
+  if (!context.mounted) return;
+  await savePendingSubmissions(context, ref, pending);
+}
+
+/// 시트가 모아 준 제출분 저장 — 1건이면 [AddTodoController.add] (캘린더 경고 안내),
+/// 여러 건이면 입력 순서를 보존하는 [AddTodoController.addAll].
+Future<void> savePendingSubmissions(
+  BuildContext context,
+  WidgetRef ref,
+  List<AddTodoSubmission> pending,
+) async {
+  if (pending.isEmpty) return;
+  // 최상위 새 항목이면 그 카테고리를 다음 ⌘N 의 기본값으로 기억한다(하위 추가는 제외).
+  final last = pending.last;
+  if (last.parentId == null) {
+    unawaited(
+      ref.read(lastUsedCategoryProvider.notifier).record(last.category.id),
+    );
+  }
+  final controller = ref.read(addTodoControllerProvider);
+  if (pending.length > 1) {
+    await controller.addAll(pending);
+    return;
+  }
+  final result = await controller.add(pending.first);
+  final warning = result.calendarWarning;
+  if (warning == null || !context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(warning), behavior: SnackBarBehavior.floating),
+  );
+}
 
 /// Task C — "＋ 하위 추가" 공통 flow. 부모 [parent] 를 받아 AddTodoSheet 를 child
 /// 모드로 열고, 제출 시 parentId + 부모 category 를 상속한 자식 todo 를 생성한다.
@@ -25,13 +86,8 @@ Future<void> showAddChildSheet(
     parentId: parent.id,
     onSubmit: pending.add,
   );
-  if (pending.isEmpty) return;
-  final controller = ref.read(addTodoControllerProvider);
-  if (pending.length == 1) {
-    await controller.add(pending.first);
-  } else {
-    await controller.addAll(pending);
-  }
+  if (!context.mounted) return;
+  await savePendingSubmissions(context, ref, pending);
 }
 
 /// 항목 복사 — [original] 의 제목·내용·카테고리·날짜/시간·종류를 그대로 채운 "새 항목"
@@ -50,13 +106,8 @@ Future<void> showCopyTodoSheet(
     parentId: original.parentId,
     onSubmit: pending.add,
   );
-  if (pending.isEmpty) return;
-  final controller = ref.read(addTodoControllerProvider);
-  if (pending.length == 1) {
-    await controller.add(pending.first);
-  } else {
-    await controller.addAll(pending);
-  }
+  if (!context.mounted) return;
+  await savePendingSubmissions(context, ref, pending);
 }
 
 /// AddTodoSheet 가 만든 [AddTodoSubmission] 을 도메인 [Todo] 로 변환 + 저장 + (선택) Calendar 등록.
@@ -125,28 +176,12 @@ class AddTodoController {
       }
     }
 
-    String? warning;
-    if (s.addToCalendar && s.dueAt != null) {
-      if (calendar == null) {
-        warning = 'Google Calendar 연동이 설정되지 않아 등록을 건너뛰었어요.';
-      } else {
-        try {
-          final eventId = await calendar!.createEventForTodo(
-            todo,
-            isAllDay: s.isAllDay,
-          );
-          if (eventId != null) {
-            todo = todo.withCalendarEvent(eventId, now: now);
-            await repo.upsert(todo);
-          } else {
-            warning = 'Google Calendar 권한이 거부됐어요. 등록을 건너뛰었어요.';
-          }
-        } catch (e) {
-          debugPrint('[solo_todo] Calendar 이벤트 생성 실패: $e');
-          warning = 'Google Calendar 등록에 실패했어요. (권한 또는 네트워크 확인)';
-        }
-      }
-    }
+    // 캘린더 등록은 저장소 데코레이터가 큐에 넣어 처리한다 (위 upsert 시점에 이미
+    // 판정됐다). 여기서 직접 이벤트를 만들면 데코레이터와 **둘 다** 만들어 이벤트가
+    // 두 개 생긴다. 연동이 아예 설정되지 않은 경우만 사용자에게 알린다.
+    final warning = (s.addToCalendar && s.dueAt != null && calendar == null)
+        ? 'Google Calendar 연동이 설정되지 않아 등록을 건너뛰었어요.'
+        : null;
     return AddTodoResult(todo: todo, calendarWarning: warning);
   }
 
@@ -161,6 +196,14 @@ class AddTodoController {
   /// 모든 submission 이 같은 category/parentId 라고 가정 (AddTodoSheet bulk 흐름이 보장).
   Future<void> addAll(List<AddTodoSubmission> subs) async {
     if (subs.isEmpty) return;
+    // 반복 규칙이 있으면 건마다 마스터 + 인스턴스 생성이 필요하다 → [add] 에 맡긴다.
+    // add 는 매번 맨 위(min-1)에 넣으므로 **역순**으로 넣어야 입력 순서가 위→아래로 보존된다.
+    if (subs.any((s) => s.recurrence != null && s.dueAt != null)) {
+      for (final s in subs.reversed) {
+        await add(s);
+      }
+      return;
+    }
     final first = subs.first;
     final minSibling = await repo.minSiblingSortOrder(
       categoryId: first.category.id,
@@ -184,21 +227,8 @@ class AddTodoController {
         // 첫 줄 = min - N (맨 위), 마지막 줄 = min - 1.
         sortOrder: min - (n - i),
       );
+      // 캘린더 등록은 저장소 데코레이터가 처리한다 — 여기서 또 만들면 이벤트가 둘이 된다.
       await repo.upsert(todo);
-      if (s.addToCalendar && s.dueAt != null && calendar != null) {
-        try {
-          final eventId = await calendar!.createEventForTodo(
-            todo,
-            isAllDay: s.isAllDay,
-          );
-          if (eventId != null) {
-            todo = todo.withCalendarEvent(eventId, now: now);
-            await repo.upsert(todo);
-          }
-        } catch (e) {
-          debugPrint('[solo_todo] Calendar 이벤트 생성 실패 (bulk): $e');
-        }
-      }
     }
   }
 }

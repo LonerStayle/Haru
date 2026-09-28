@@ -181,6 +181,62 @@ void main() {
     expect(result.updates.single.endAt, isNull);
   });
 
+  // 열람 목적으로 탭해서 시트를 열었다가 그냥 저장을 눌렀을 때, 시트가 만들어내는
+  // Todo 가 원본과 완전히 동일해야 한다. 한 필드라도 재구성 편차가 생기면 컨트롤러의
+  // "변경 없음 → 자리 유지" 판정이 무너져 항목이 맨 위로 튄다.
+  group('열람 후 그냥 저장 — 원본과 동일한 Todo 가 넘어온다', () {
+    Future<void> expectRoundTrip(WidgetTester tester, Todo initial) async {
+      final result = await mount(tester, initialTodo: initial);
+
+      final saveBtn = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, '저장'),
+      );
+      saveBtn.onPressed?.call();
+      await tester.pumpAndSettle();
+
+      expect(result.updates.single, initial);
+    }
+
+    testWidgets('날짜 없음', (tester) async {
+      await expectRoundTrip(tester, makeInitial(description: '메모 한 줄'));
+    });
+
+    testWidgets('하루종일', (tester) async {
+      await expectRoundTrip(
+        tester,
+        makeInitial().copyWith(dueAt: DateTime(2026, 5, 27), isAllDay: true),
+      );
+    });
+
+    testWidgets('시작시간', (tester) async {
+      await expectRoundTrip(
+        tester,
+        makeInitial().copyWith(dueAt: DateTime(2026, 5, 27, 9, 30)),
+      );
+    });
+
+    testWidgets('마감시간', (tester) async {
+      await expectRoundTrip(
+        tester,
+        makeInitial().copyWith(
+          dueAt: DateTime(2026, 5, 27, 18),
+          timeAnchor: 'end',
+        ),
+      );
+    });
+
+    testWidgets('기간', (tester) async {
+      await expectRoundTrip(
+        tester,
+        makeInitial().copyWith(
+          dueAt: DateTime(2026, 5, 27),
+          endAt: DateTime(2026, 5, 30),
+          isAllDay: true,
+        ),
+      );
+    });
+  });
+
   testWidgets('edit 모드 — 제목 비우면 저장 비활성', (tester) async {
     final initial = makeInitial(title: '제목');
     await mount(tester, initialTodo: initial);
@@ -223,8 +279,16 @@ void main() {
     final u = result.updates.single;
     expect(u.type, TodoType.note);
     expect(u.doneAt, isNull, reason: 'note 는 체크 개념 없음 → doneAt 제거');
-    expect(u.calendarEventId, isNull, reason: 'note 는 일정 없음 → calendar 링크 제거');
     expect(u.dueAt, isNull, reason: 'note 는 일정 무관 → dueAt 제거');
+    // google-calendar-sync: 링크를 **여기서 지우지 않는다**. 예전엔 즉시 null 로
+    // 비웠는데, 그러면 저장소가 "지울 이벤트가 있다" 는 사실을 알 수 없어 구글
+    // 캘린더에 고아 이벤트가 그대로 남았다. 링크는 이벤트를 실제로 지운 뒤
+    // 동기화 서비스가 정리한다.
+    expect(
+      u.calendarEventId,
+      'evt-123',
+      reason: '삭제 작업을 만들 수 있도록 링크는 저장 시점까지 유지',
+    );
   });
 
   testWidgets('§14-C — note→task 전환 시 type=task', (tester) async {

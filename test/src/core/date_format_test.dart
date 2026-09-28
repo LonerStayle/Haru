@@ -112,4 +112,33 @@ void main() {
       );
     });
   });
+
+  group('KoDate — 캘린더 헤더 포맷 (v1.6)', () {
+    test('monthTitle 은 연도를 함께 낸다 — 달 넘김으로 해가 바뀌는 걸 놓치지 않도록', () {
+      expect(KoDate.monthTitle(DateTime(2026, 8, 15)), '2026년 8월');
+      // 같은 달이면 일(day)과 무관하게 동일한 라벨.
+      expect(KoDate.monthTitle(DateTime(2026, 8, 1)), '2026년 8월');
+      expect(KoDate.monthTitle(DateTime(2027, 1, 31)), '2027년 1월');
+    });
+
+    test('dayWithWeekday 는 "8월 15일 (토)" — 괄호 한 글자 요일로 폭을 아낀다', () {
+      // 2026-08-15 는 토요일.
+      expect(KoDate.dayWithWeekday(DateTime(2026, 8, 15)), '8월 15일 (토)');
+      // 2026-08-17 은 월요일.
+      expect(KoDate.dayWithWeekday(DateTime(2026, 8, 17)), '8월 17일 (월)');
+      // pretty 의 "…요일" 표기와 달리 접미사를 붙이지 않는다.
+      expect(
+        KoDate.dayWithWeekday(DateTime(2026, 8, 15)),
+        isNot(contains('요일')),
+      );
+    });
+
+    test('weekdayShort 는 DateTime.weekday 규약 (1=월 … 7=일)', () {
+      expect(KoDate.weekdayShort(DateTime.monday), '월');
+      expect(KoDate.weekdayShort(DateTime.saturday), '토');
+      expect(KoDate.weekdayShort(DateTime.sunday), '일');
+      // 실제 날짜의 weekday 로도 일치.
+      expect(KoDate.weekdayShort(DateTime(2026, 8, 15).weekday), '토');
+    });
+  });
 }

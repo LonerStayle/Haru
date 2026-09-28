@@ -99,6 +99,40 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _calendarIdMeta = const VerificationMeta(
+    'calendarId',
+  );
+  @override
+  late final GeneratedColumn<String> calendarId = GeneratedColumn<String>(
+    'calendar_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _calendarOriginMeta = const VerificationMeta(
+    'calendarOrigin',
+  );
+  @override
+  late final GeneratedColumn<String> calendarOrigin = GeneratedColumn<String>(
+    'calendar_origin',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('app'),
+  );
+  static const VerificationMeta _calendarProviderMeta = const VerificationMeta(
+    'calendarProvider',
+  );
+  @override
+  late final GeneratedColumn<String> calendarProvider = GeneratedColumn<String>(
+    'calendar_provider',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _parentIdMeta = const VerificationMeta(
     'parentId',
   );
@@ -239,6 +273,9 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
     createdAt,
     updatedAt,
     calendarEventId,
+    calendarId,
+    calendarOrigin,
+    calendarProvider,
     parentId,
     type,
     sortOrder,
@@ -324,6 +361,30 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
         calendarEventId.isAcceptableOrUnknown(
           data['calendar_event_id']!,
           _calendarEventIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('calendar_id')) {
+      context.handle(
+        _calendarIdMeta,
+        calendarId.isAcceptableOrUnknown(data['calendar_id']!, _calendarIdMeta),
+      );
+    }
+    if (data.containsKey('calendar_origin')) {
+      context.handle(
+        _calendarOriginMeta,
+        calendarOrigin.isAcceptableOrUnknown(
+          data['calendar_origin']!,
+          _calendarOriginMeta,
+        ),
+      );
+    }
+    if (data.containsKey('calendar_provider')) {
+      context.handle(
+        _calendarProviderMeta,
+        calendarProvider.isAcceptableOrUnknown(
+          data['calendar_provider']!,
+          _calendarProviderMeta,
         ),
       );
     }
@@ -450,6 +511,18 @@ class $TodosTable extends Todos with TableInfo<$TodosTable, TodoRow> {
         DriftSqlType.string,
         data['${effectivePrefix}calendar_event_id'],
       ),
+      calendarId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}calendar_id'],
+      ),
+      calendarOrigin: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}calendar_origin'],
+      )!,
+      calendarProvider: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}calendar_provider'],
+      ),
       parentId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}parent_id'],
@@ -513,6 +586,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? calendarEventId;
+  final String? calendarId;
+  final String calendarOrigin;
+  final String? calendarProvider;
   final String? parentId;
   final String type;
   final int sortOrder;
@@ -534,6 +610,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     required this.createdAt,
     required this.updatedAt,
     this.calendarEventId,
+    this.calendarId,
+    required this.calendarOrigin,
+    this.calendarProvider,
     this.parentId,
     required this.type,
     required this.sortOrder,
@@ -565,6 +644,13 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || calendarEventId != null) {
       map['calendar_event_id'] = Variable<String>(calendarEventId);
+    }
+    if (!nullToAbsent || calendarId != null) {
+      map['calendar_id'] = Variable<String>(calendarId);
+    }
+    map['calendar_origin'] = Variable<String>(calendarOrigin);
+    if (!nullToAbsent || calendarProvider != null) {
+      map['calendar_provider'] = Variable<String>(calendarProvider);
     }
     if (!nullToAbsent || parentId != null) {
       map['parent_id'] = Variable<String>(parentId);
@@ -611,6 +697,13 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       calendarEventId: calendarEventId == null && nullToAbsent
           ? const Value.absent()
           : Value(calendarEventId),
+      calendarId: calendarId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(calendarId),
+      calendarOrigin: Value(calendarOrigin),
+      calendarProvider: calendarProvider == null && nullToAbsent
+          ? const Value.absent()
+          : Value(calendarProvider),
       parentId: parentId == null && nullToAbsent
           ? const Value.absent()
           : Value(parentId),
@@ -652,6 +745,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       calendarEventId: serializer.fromJson<String?>(json['calendarEventId']),
+      calendarId: serializer.fromJson<String?>(json['calendarId']),
+      calendarOrigin: serializer.fromJson<String>(json['calendarOrigin']),
+      calendarProvider: serializer.fromJson<String?>(json['calendarProvider']),
       parentId: serializer.fromJson<String?>(json['parentId']),
       type: serializer.fromJson<String>(json['type']),
       sortOrder: serializer.fromJson<int>(json['sortOrder']),
@@ -678,6 +774,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'calendarEventId': serializer.toJson<String?>(calendarEventId),
+      'calendarId': serializer.toJson<String?>(calendarId),
+      'calendarOrigin': serializer.toJson<String>(calendarOrigin),
+      'calendarProvider': serializer.toJson<String?>(calendarProvider),
       'parentId': serializer.toJson<String?>(parentId),
       'type': serializer.toJson<String>(type),
       'sortOrder': serializer.toJson<int>(sortOrder),
@@ -702,6 +801,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<String?> calendarEventId = const Value.absent(),
+    Value<String?> calendarId = const Value.absent(),
+    String? calendarOrigin,
+    Value<String?> calendarProvider = const Value.absent(),
     Value<String?> parentId = const Value.absent(),
     String? type,
     int? sortOrder,
@@ -725,6 +827,11 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     calendarEventId: calendarEventId.present
         ? calendarEventId.value
         : this.calendarEventId,
+    calendarId: calendarId.present ? calendarId.value : this.calendarId,
+    calendarOrigin: calendarOrigin ?? this.calendarOrigin,
+    calendarProvider: calendarProvider.present
+        ? calendarProvider.value
+        : this.calendarProvider,
     parentId: parentId.present ? parentId.value : this.parentId,
     type: type ?? this.type,
     sortOrder: sortOrder ?? this.sortOrder,
@@ -754,6 +861,15 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
       calendarEventId: data.calendarEventId.present
           ? data.calendarEventId.value
           : this.calendarEventId,
+      calendarId: data.calendarId.present
+          ? data.calendarId.value
+          : this.calendarId,
+      calendarOrigin: data.calendarOrigin.present
+          ? data.calendarOrigin.value
+          : this.calendarOrigin,
+      calendarProvider: data.calendarProvider.present
+          ? data.calendarProvider.value
+          : this.calendarProvider,
       parentId: data.parentId.present ? data.parentId.value : this.parentId,
       type: data.type.present ? data.type.value : this.type,
       sortOrder: data.sortOrder.present ? data.sortOrder.value : this.sortOrder,
@@ -790,6 +906,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('calendarEventId: $calendarEventId, ')
+          ..write('calendarId: $calendarId, ')
+          ..write('calendarOrigin: $calendarOrigin, ')
+          ..write('calendarProvider: $calendarProvider, ')
           ..write('parentId: $parentId, ')
           ..write('type: $type, ')
           ..write('sortOrder: $sortOrder, ')
@@ -806,7 +925,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     title,
     category,
@@ -816,6 +935,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     createdAt,
     updatedAt,
     calendarEventId,
+    calendarId,
+    calendarOrigin,
+    calendarProvider,
     parentId,
     type,
     sortOrder,
@@ -827,7 +949,7 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
     recurrenceRule,
     recurrenceEndAt,
     isSeriesMaster,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -841,6 +963,9 @@ class TodoRow extends DataClass implements Insertable<TodoRow> {
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.calendarEventId == this.calendarEventId &&
+          other.calendarId == this.calendarId &&
+          other.calendarOrigin == this.calendarOrigin &&
+          other.calendarProvider == this.calendarProvider &&
           other.parentId == this.parentId &&
           other.type == this.type &&
           other.sortOrder == this.sortOrder &&
@@ -864,6 +989,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<String?> calendarEventId;
+  final Value<String?> calendarId;
+  final Value<String> calendarOrigin;
+  final Value<String?> calendarProvider;
   final Value<String?> parentId;
   final Value<String> type;
   final Value<int> sortOrder;
@@ -886,6 +1014,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.calendarEventId = const Value.absent(),
+    this.calendarId = const Value.absent(),
+    this.calendarOrigin = const Value.absent(),
+    this.calendarProvider = const Value.absent(),
     this.parentId = const Value.absent(),
     this.type = const Value.absent(),
     this.sortOrder = const Value.absent(),
@@ -909,6 +1040,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     required DateTime createdAt,
     required DateTime updatedAt,
     this.calendarEventId = const Value.absent(),
+    this.calendarId = const Value.absent(),
+    this.calendarOrigin = const Value.absent(),
+    this.calendarProvider = const Value.absent(),
     this.parentId = const Value.absent(),
     this.type = const Value.absent(),
     this.sortOrder = const Value.absent(),
@@ -936,6 +1070,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<String>? calendarEventId,
+    Expression<String>? calendarId,
+    Expression<String>? calendarOrigin,
+    Expression<String>? calendarProvider,
     Expression<String>? parentId,
     Expression<String>? type,
     Expression<int>? sortOrder,
@@ -959,6 +1096,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (calendarEventId != null) 'calendar_event_id': calendarEventId,
+      if (calendarId != null) 'calendar_id': calendarId,
+      if (calendarOrigin != null) 'calendar_origin': calendarOrigin,
+      if (calendarProvider != null) 'calendar_provider': calendarProvider,
       if (parentId != null) 'parent_id': parentId,
       if (type != null) 'type': type,
       if (sortOrder != null) 'sort_order': sortOrder,
@@ -984,6 +1124,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<String?>? calendarEventId,
+    Value<String?>? calendarId,
+    Value<String>? calendarOrigin,
+    Value<String?>? calendarProvider,
     Value<String?>? parentId,
     Value<String>? type,
     Value<int>? sortOrder,
@@ -1007,6 +1150,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       calendarEventId: calendarEventId ?? this.calendarEventId,
+      calendarId: calendarId ?? this.calendarId,
+      calendarOrigin: calendarOrigin ?? this.calendarOrigin,
+      calendarProvider: calendarProvider ?? this.calendarProvider,
       parentId: parentId ?? this.parentId,
       type: type ?? this.type,
       sortOrder: sortOrder ?? this.sortOrder,
@@ -1051,6 +1197,15 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
     }
     if (calendarEventId.present) {
       map['calendar_event_id'] = Variable<String>(calendarEventId.value);
+    }
+    if (calendarId.present) {
+      map['calendar_id'] = Variable<String>(calendarId.value);
+    }
+    if (calendarOrigin.present) {
+      map['calendar_origin'] = Variable<String>(calendarOrigin.value);
+    }
+    if (calendarProvider.present) {
+      map['calendar_provider'] = Variable<String>(calendarProvider.value);
     }
     if (parentId.present) {
       map['parent_id'] = Variable<String>(parentId.value);
@@ -1103,6 +1258,9 @@ class TodosCompanion extends UpdateCompanion<TodoRow> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('calendarEventId: $calendarEventId, ')
+          ..write('calendarId: $calendarId, ')
+          ..write('calendarOrigin: $calendarOrigin, ')
+          ..write('calendarProvider: $calendarProvider, ')
           ..write('parentId: $parentId, ')
           ..write('type: $type, ')
           ..write('sortOrder: $sortOrder, ')
@@ -2502,6 +2660,671 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxRow> {
   }
 }
 
+class $CalendarOpsTable extends CalendarOps
+    with TableInfo<$CalendarOpsTable, CalendarOpRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CalendarOpsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _todoIdMeta = const VerificationMeta('todoId');
+  @override
+  late final GeneratedColumn<String> todoId = GeneratedColumn<String>(
+    'todo_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _eventIdMeta = const VerificationMeta(
+    'eventId',
+  );
+  @override
+  late final GeneratedColumn<String> eventId = GeneratedColumn<String>(
+    'event_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _calendarIdMeta = const VerificationMeta(
+    'calendarId',
+  );
+  @override
+  late final GeneratedColumn<String> calendarId = GeneratedColumn<String>(
+    'calendar_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _providerMeta = const VerificationMeta(
+    'provider',
+  );
+  @override
+  late final GeneratedColumn<String> provider = GeneratedColumn<String>(
+    'provider',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _payloadMeta = const VerificationMeta(
+    'payload',
+  );
+  @override
+  late final GeneratedColumn<String> payload = GeneratedColumn<String>(
+    'payload',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _attemptsMeta = const VerificationMeta(
+    'attempts',
+  );
+  @override
+  late final GeneratedColumn<int> attempts = GeneratedColumn<int>(
+    'attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _lastErrorMeta = const VerificationMeta(
+    'lastError',
+  );
+  @override
+  late final GeneratedColumn<String> lastError = GeneratedColumn<String>(
+    'last_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nextAttemptAtMeta = const VerificationMeta(
+    'nextAttemptAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> nextAttemptAt =
+      GeneratedColumn<DateTime>(
+        'next_attempt_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    kind,
+    todoId,
+    eventId,
+    calendarId,
+    provider,
+    payload,
+    attempts,
+    lastError,
+    nextAttemptAt,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'calendar_ops';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CalendarOpRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('todo_id')) {
+      context.handle(
+        _todoIdMeta,
+        todoId.isAcceptableOrUnknown(data['todo_id']!, _todoIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_todoIdMeta);
+    }
+    if (data.containsKey('event_id')) {
+      context.handle(
+        _eventIdMeta,
+        eventId.isAcceptableOrUnknown(data['event_id']!, _eventIdMeta),
+      );
+    }
+    if (data.containsKey('calendar_id')) {
+      context.handle(
+        _calendarIdMeta,
+        calendarId.isAcceptableOrUnknown(data['calendar_id']!, _calendarIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_calendarIdMeta);
+    }
+    if (data.containsKey('provider')) {
+      context.handle(
+        _providerMeta,
+        provider.isAcceptableOrUnknown(data['provider']!, _providerMeta),
+      );
+    }
+    if (data.containsKey('payload')) {
+      context.handle(
+        _payloadMeta,
+        payload.isAcceptableOrUnknown(data['payload']!, _payloadMeta),
+      );
+    }
+    if (data.containsKey('attempts')) {
+      context.handle(
+        _attemptsMeta,
+        attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
+      );
+    }
+    if (data.containsKey('last_error')) {
+      context.handle(
+        _lastErrorMeta,
+        lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
+      );
+    }
+    if (data.containsKey('next_attempt_at')) {
+      context.handle(
+        _nextAttemptAtMeta,
+        nextAttemptAt.isAcceptableOrUnknown(
+          data['next_attempt_at']!,
+          _nextAttemptAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CalendarOpRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CalendarOpRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      todoId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}todo_id'],
+      )!,
+      eventId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}event_id'],
+      ),
+      calendarId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}calendar_id'],
+      )!,
+      provider: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}provider'],
+      ),
+      payload: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload'],
+      ),
+      attempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempts'],
+      )!,
+      lastError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error'],
+      ),
+      nextAttemptAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}next_attempt_at'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CalendarOpsTable createAlias(String alias) {
+    return $CalendarOpsTable(attachedDatabase, alias);
+  }
+}
+
+class CalendarOpRow extends DataClass implements Insertable<CalendarOpRow> {
+  final String id;
+  final String kind;
+  final String todoId;
+  final String? eventId;
+  final String calendarId;
+  final String? provider;
+  final String? payload;
+  final int attempts;
+  final String? lastError;
+  final DateTime? nextAttemptAt;
+  final DateTime createdAt;
+  const CalendarOpRow({
+    required this.id,
+    required this.kind,
+    required this.todoId,
+    this.eventId,
+    required this.calendarId,
+    this.provider,
+    this.payload,
+    required this.attempts,
+    this.lastError,
+    this.nextAttemptAt,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['kind'] = Variable<String>(kind);
+    map['todo_id'] = Variable<String>(todoId);
+    if (!nullToAbsent || eventId != null) {
+      map['event_id'] = Variable<String>(eventId);
+    }
+    map['calendar_id'] = Variable<String>(calendarId);
+    if (!nullToAbsent || provider != null) {
+      map['provider'] = Variable<String>(provider);
+    }
+    if (!nullToAbsent || payload != null) {
+      map['payload'] = Variable<String>(payload);
+    }
+    map['attempts'] = Variable<int>(attempts);
+    if (!nullToAbsent || lastError != null) {
+      map['last_error'] = Variable<String>(lastError);
+    }
+    if (!nullToAbsent || nextAttemptAt != null) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  CalendarOpsCompanion toCompanion(bool nullToAbsent) {
+    return CalendarOpsCompanion(
+      id: Value(id),
+      kind: Value(kind),
+      todoId: Value(todoId),
+      eventId: eventId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(eventId),
+      calendarId: Value(calendarId),
+      provider: provider == null && nullToAbsent
+          ? const Value.absent()
+          : Value(provider),
+      payload: payload == null && nullToAbsent
+          ? const Value.absent()
+          : Value(payload),
+      attempts: Value(attempts),
+      lastError: lastError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastError),
+      nextAttemptAt: nextAttemptAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(nextAttemptAt),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory CalendarOpRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CalendarOpRow(
+      id: serializer.fromJson<String>(json['id']),
+      kind: serializer.fromJson<String>(json['kind']),
+      todoId: serializer.fromJson<String>(json['todoId']),
+      eventId: serializer.fromJson<String?>(json['eventId']),
+      calendarId: serializer.fromJson<String>(json['calendarId']),
+      provider: serializer.fromJson<String?>(json['provider']),
+      payload: serializer.fromJson<String?>(json['payload']),
+      attempts: serializer.fromJson<int>(json['attempts']),
+      lastError: serializer.fromJson<String?>(json['lastError']),
+      nextAttemptAt: serializer.fromJson<DateTime?>(json['nextAttemptAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'kind': serializer.toJson<String>(kind),
+      'todoId': serializer.toJson<String>(todoId),
+      'eventId': serializer.toJson<String?>(eventId),
+      'calendarId': serializer.toJson<String>(calendarId),
+      'provider': serializer.toJson<String?>(provider),
+      'payload': serializer.toJson<String?>(payload),
+      'attempts': serializer.toJson<int>(attempts),
+      'lastError': serializer.toJson<String?>(lastError),
+      'nextAttemptAt': serializer.toJson<DateTime?>(nextAttemptAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  CalendarOpRow copyWith({
+    String? id,
+    String? kind,
+    String? todoId,
+    Value<String?> eventId = const Value.absent(),
+    String? calendarId,
+    Value<String?> provider = const Value.absent(),
+    Value<String?> payload = const Value.absent(),
+    int? attempts,
+    Value<String?> lastError = const Value.absent(),
+    Value<DateTime?> nextAttemptAt = const Value.absent(),
+    DateTime? createdAt,
+  }) => CalendarOpRow(
+    id: id ?? this.id,
+    kind: kind ?? this.kind,
+    todoId: todoId ?? this.todoId,
+    eventId: eventId.present ? eventId.value : this.eventId,
+    calendarId: calendarId ?? this.calendarId,
+    provider: provider.present ? provider.value : this.provider,
+    payload: payload.present ? payload.value : this.payload,
+    attempts: attempts ?? this.attempts,
+    lastError: lastError.present ? lastError.value : this.lastError,
+    nextAttemptAt: nextAttemptAt.present
+        ? nextAttemptAt.value
+        : this.nextAttemptAt,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  CalendarOpRow copyWithCompanion(CalendarOpsCompanion data) {
+    return CalendarOpRow(
+      id: data.id.present ? data.id.value : this.id,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      todoId: data.todoId.present ? data.todoId.value : this.todoId,
+      eventId: data.eventId.present ? data.eventId.value : this.eventId,
+      calendarId: data.calendarId.present
+          ? data.calendarId.value
+          : this.calendarId,
+      provider: data.provider.present ? data.provider.value : this.provider,
+      payload: data.payload.present ? data.payload.value : this.payload,
+      attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      lastError: data.lastError.present ? data.lastError.value : this.lastError,
+      nextAttemptAt: data.nextAttemptAt.present
+          ? data.nextAttemptAt.value
+          : this.nextAttemptAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CalendarOpRow(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('todoId: $todoId, ')
+          ..write('eventId: $eventId, ')
+          ..write('calendarId: $calendarId, ')
+          ..write('provider: $provider, ')
+          ..write('payload: $payload, ')
+          ..write('attempts: $attempts, ')
+          ..write('lastError: $lastError, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    todoId,
+    eventId,
+    calendarId,
+    provider,
+    payload,
+    attempts,
+    lastError,
+    nextAttemptAt,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CalendarOpRow &&
+          other.id == this.id &&
+          other.kind == this.kind &&
+          other.todoId == this.todoId &&
+          other.eventId == this.eventId &&
+          other.calendarId == this.calendarId &&
+          other.provider == this.provider &&
+          other.payload == this.payload &&
+          other.attempts == this.attempts &&
+          other.lastError == this.lastError &&
+          other.nextAttemptAt == this.nextAttemptAt &&
+          other.createdAt == this.createdAt);
+}
+
+class CalendarOpsCompanion extends UpdateCompanion<CalendarOpRow> {
+  final Value<String> id;
+  final Value<String> kind;
+  final Value<String> todoId;
+  final Value<String?> eventId;
+  final Value<String> calendarId;
+  final Value<String?> provider;
+  final Value<String?> payload;
+  final Value<int> attempts;
+  final Value<String?> lastError;
+  final Value<DateTime?> nextAttemptAt;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const CalendarOpsCompanion({
+    this.id = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.todoId = const Value.absent(),
+    this.eventId = const Value.absent(),
+    this.calendarId = const Value.absent(),
+    this.provider = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CalendarOpsCompanion.insert({
+    required String id,
+    required String kind,
+    required String todoId,
+    this.eventId = const Value.absent(),
+    required String calendarId,
+    this.provider = const Value.absent(),
+    this.payload = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       kind = Value(kind),
+       todoId = Value(todoId),
+       calendarId = Value(calendarId),
+       createdAt = Value(createdAt);
+  static Insertable<CalendarOpRow> custom({
+    Expression<String>? id,
+    Expression<String>? kind,
+    Expression<String>? todoId,
+    Expression<String>? eventId,
+    Expression<String>? calendarId,
+    Expression<String>? provider,
+    Expression<String>? payload,
+    Expression<int>? attempts,
+    Expression<String>? lastError,
+    Expression<DateTime>? nextAttemptAt,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (kind != null) 'kind': kind,
+      if (todoId != null) 'todo_id': todoId,
+      if (eventId != null) 'event_id': eventId,
+      if (calendarId != null) 'calendar_id': calendarId,
+      if (provider != null) 'provider': provider,
+      if (payload != null) 'payload': payload,
+      if (attempts != null) 'attempts': attempts,
+      if (lastError != null) 'last_error': lastError,
+      if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CalendarOpsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? kind,
+    Value<String>? todoId,
+    Value<String?>? eventId,
+    Value<String>? calendarId,
+    Value<String?>? provider,
+    Value<String?>? payload,
+    Value<int>? attempts,
+    Value<String?>? lastError,
+    Value<DateTime?>? nextAttemptAt,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return CalendarOpsCompanion(
+      id: id ?? this.id,
+      kind: kind ?? this.kind,
+      todoId: todoId ?? this.todoId,
+      eventId: eventId ?? this.eventId,
+      calendarId: calendarId ?? this.calendarId,
+      provider: provider ?? this.provider,
+      payload: payload ?? this.payload,
+      attempts: attempts ?? this.attempts,
+      lastError: lastError ?? this.lastError,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (todoId.present) {
+      map['todo_id'] = Variable<String>(todoId.value);
+    }
+    if (eventId.present) {
+      map['event_id'] = Variable<String>(eventId.value);
+    }
+    if (calendarId.present) {
+      map['calendar_id'] = Variable<String>(calendarId.value);
+    }
+    if (provider.present) {
+      map['provider'] = Variable<String>(provider.value);
+    }
+    if (payload.present) {
+      map['payload'] = Variable<String>(payload.value);
+    }
+    if (attempts.present) {
+      map['attempts'] = Variable<int>(attempts.value);
+    }
+    if (lastError.present) {
+      map['last_error'] = Variable<String>(lastError.value);
+    }
+    if (nextAttemptAt.present) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CalendarOpsCompanion(')
+          ..write('id: $id, ')
+          ..write('kind: $kind, ')
+          ..write('todoId: $todoId, ')
+          ..write('eventId: $eventId, ')
+          ..write('calendarId: $calendarId, ')
+          ..write('provider: $provider, ')
+          ..write('payload: $payload, ')
+          ..write('attempts: $attempts, ')
+          ..write('lastError: $lastError, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2509,10 +3332,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $CategoriesTable categories = $CategoriesTable(this);
   late final $GroupsTable groups = $GroupsTable(this);
   late final $OutboxEntriesTable outboxEntries = $OutboxEntriesTable(this);
+  late final $CalendarOpsTable calendarOps = $CalendarOpsTable(this);
   late final TodosDao todosDao = TodosDao(this as AppDatabase);
   late final CategoriesDao categoriesDao = CategoriesDao(this as AppDatabase);
   late final GroupsDao groupsDao = GroupsDao(this as AppDatabase);
   late final OutboxDao outboxDao = OutboxDao(this as AppDatabase);
+  late final CalendarOpsDao calendarOpsDao = CalendarOpsDao(
+    this as AppDatabase,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2522,6 +3349,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     categories,
     groups,
     outboxEntries,
+    calendarOps,
   ];
 }
 
@@ -2536,6 +3364,9 @@ typedef $$TodosTableCreateCompanionBuilder =
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<String?> calendarEventId,
+      Value<String?> calendarId,
+      Value<String> calendarOrigin,
+      Value<String?> calendarProvider,
       Value<String?> parentId,
       Value<String> type,
       Value<int> sortOrder,
@@ -2560,6 +3391,9 @@ typedef $$TodosTableUpdateCompanionBuilder =
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<String?> calendarEventId,
+      Value<String?> calendarId,
+      Value<String> calendarOrigin,
+      Value<String?> calendarProvider,
       Value<String?> parentId,
       Value<String> type,
       Value<int> sortOrder,
@@ -2624,6 +3458,21 @@ class $$TodosTableFilterComposer extends Composer<_$AppDatabase, $TodosTable> {
 
   ColumnFilters<String> get calendarEventId => $composableBuilder(
     column: $table.calendarEventId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get calendarOrigin => $composableBuilder(
+    column: $table.calendarOrigin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get calendarProvider => $composableBuilder(
+    column: $table.calendarProvider,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2737,6 +3586,21 @@ class $$TodosTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get calendarOrigin => $composableBuilder(
+    column: $table.calendarOrigin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get calendarProvider => $composableBuilder(
+    column: $table.calendarProvider,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get parentId => $composableBuilder(
     column: $table.parentId,
     builder: (column) => ColumnOrderings(column),
@@ -2831,6 +3695,21 @@ class $$TodosTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get calendarOrigin => $composableBuilder(
+    column: $table.calendarOrigin,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get calendarProvider => $composableBuilder(
+    column: $table.calendarProvider,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get parentId =>
       $composableBuilder(column: $table.parentId, builder: (column) => column);
 
@@ -2912,6 +3791,9 @@ class $$TodosTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<String?> calendarEventId = const Value.absent(),
+                Value<String?> calendarId = const Value.absent(),
+                Value<String> calendarOrigin = const Value.absent(),
+                Value<String?> calendarProvider = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
                 Value<String> type = const Value.absent(),
                 Value<int> sortOrder = const Value.absent(),
@@ -2934,6 +3816,9 @@ class $$TodosTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 calendarEventId: calendarEventId,
+                calendarId: calendarId,
+                calendarOrigin: calendarOrigin,
+                calendarProvider: calendarProvider,
                 parentId: parentId,
                 type: type,
                 sortOrder: sortOrder,
@@ -2958,6 +3843,9 @@ class $$TodosTableTableManager
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<String?> calendarEventId = const Value.absent(),
+                Value<String?> calendarId = const Value.absent(),
+                Value<String> calendarOrigin = const Value.absent(),
+                Value<String?> calendarProvider = const Value.absent(),
                 Value<String?> parentId = const Value.absent(),
                 Value<String> type = const Value.absent(),
                 Value<int> sortOrder = const Value.absent(),
@@ -2980,6 +3868,9 @@ class $$TodosTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 calendarEventId: calendarEventId,
+                calendarId: calendarId,
+                calendarOrigin: calendarOrigin,
+                calendarProvider: calendarProvider,
                 parentId: parentId,
                 type: type,
                 sortOrder: sortOrder,
@@ -3729,6 +4620,324 @@ typedef $$OutboxEntriesTableProcessedTableManager =
       OutboxRow,
       PrefetchHooks Function()
     >;
+typedef $$CalendarOpsTableCreateCompanionBuilder =
+    CalendarOpsCompanion Function({
+      required String id,
+      required String kind,
+      required String todoId,
+      Value<String?> eventId,
+      required String calendarId,
+      Value<String?> provider,
+      Value<String?> payload,
+      Value<int> attempts,
+      Value<String?> lastError,
+      Value<DateTime?> nextAttemptAt,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$CalendarOpsTableUpdateCompanionBuilder =
+    CalendarOpsCompanion Function({
+      Value<String> id,
+      Value<String> kind,
+      Value<String> todoId,
+      Value<String?> eventId,
+      Value<String> calendarId,
+      Value<String?> provider,
+      Value<String?> payload,
+      Value<int> attempts,
+      Value<String?> lastError,
+      Value<DateTime?> nextAttemptAt,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$CalendarOpsTableFilterComposer
+    extends Composer<_$AppDatabase, $CalendarOpsTable> {
+  $$CalendarOpsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get todoId => $composableBuilder(
+    column: $table.todoId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get eventId => $composableBuilder(
+    column: $table.eventId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get provider => $composableBuilder(
+    column: $table.provider,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CalendarOpsTableOrderingComposer
+    extends Composer<_$AppDatabase, $CalendarOpsTable> {
+  $$CalendarOpsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get todoId => $composableBuilder(
+    column: $table.todoId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get eventId => $composableBuilder(
+    column: $table.eventId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get provider => $composableBuilder(
+    column: $table.provider,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payload => $composableBuilder(
+    column: $table.payload,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CalendarOpsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CalendarOpsTable> {
+  $$CalendarOpsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get todoId =>
+      $composableBuilder(column: $table.todoId, builder: (column) => column);
+
+  GeneratedColumn<String> get eventId =>
+      $composableBuilder(column: $table.eventId, builder: (column) => column);
+
+  GeneratedColumn<String> get calendarId => $composableBuilder(
+    column: $table.calendarId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get provider =>
+      $composableBuilder(column: $table.provider, builder: (column) => column);
+
+  GeneratedColumn<String> get payload =>
+      $composableBuilder(column: $table.payload, builder: (column) => column);
+
+  GeneratedColumn<int> get attempts =>
+      $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<String> get lastError =>
+      $composableBuilder(column: $table.lastError, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$CalendarOpsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CalendarOpsTable,
+          CalendarOpRow,
+          $$CalendarOpsTableFilterComposer,
+          $$CalendarOpsTableOrderingComposer,
+          $$CalendarOpsTableAnnotationComposer,
+          $$CalendarOpsTableCreateCompanionBuilder,
+          $$CalendarOpsTableUpdateCompanionBuilder,
+          (
+            CalendarOpRow,
+            BaseReferences<_$AppDatabase, $CalendarOpsTable, CalendarOpRow>,
+          ),
+          CalendarOpRow,
+          PrefetchHooks Function()
+        > {
+  $$CalendarOpsTableTableManager(_$AppDatabase db, $CalendarOpsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CalendarOpsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CalendarOpsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CalendarOpsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<String> todoId = const Value.absent(),
+                Value<String?> eventId = const Value.absent(),
+                Value<String> calendarId = const Value.absent(),
+                Value<String?> provider = const Value.absent(),
+                Value<String?> payload = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CalendarOpsCompanion(
+                id: id,
+                kind: kind,
+                todoId: todoId,
+                eventId: eventId,
+                calendarId: calendarId,
+                provider: provider,
+                payload: payload,
+                attempts: attempts,
+                lastError: lastError,
+                nextAttemptAt: nextAttemptAt,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String kind,
+                required String todoId,
+                Value<String?> eventId = const Value.absent(),
+                required String calendarId,
+                Value<String?> provider = const Value.absent(),
+                Value<String?> payload = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CalendarOpsCompanion.insert(
+                id: id,
+                kind: kind,
+                todoId: todoId,
+                eventId: eventId,
+                calendarId: calendarId,
+                provider: provider,
+                payload: payload,
+                attempts: attempts,
+                lastError: lastError,
+                nextAttemptAt: nextAttemptAt,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CalendarOpsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CalendarOpsTable,
+      CalendarOpRow,
+      $$CalendarOpsTableFilterComposer,
+      $$CalendarOpsTableOrderingComposer,
+      $$CalendarOpsTableAnnotationComposer,
+      $$CalendarOpsTableCreateCompanionBuilder,
+      $$CalendarOpsTableUpdateCompanionBuilder,
+      (
+        CalendarOpRow,
+        BaseReferences<_$AppDatabase, $CalendarOpsTable, CalendarOpRow>,
+      ),
+      CalendarOpRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3741,4 +4950,6 @@ class $AppDatabaseManager {
       $$GroupsTableTableManager(_db, _db.groups);
   $$OutboxEntriesTableTableManager get outboxEntries =>
       $$OutboxEntriesTableTableManager(_db, _db.outboxEntries);
+  $$CalendarOpsTableTableManager get calendarOps =>
+      $$CalendarOpsTableTableManager(_db, _db.calendarOps);
 }

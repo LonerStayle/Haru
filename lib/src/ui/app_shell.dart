@@ -9,39 +9,54 @@ import '../data/providers.dart';
 import '../data/remote/supabase_realtime_sync.dart';
 import '../domain/category.dart';
 import '../domain/group.dart';
+import '../domain/todo.dart';
 import '../features/add_todo/add_todo_controller.dart';
 import '../features/add_todo/add_todo_default_category.dart';
-import '../features/add_todo/add_todo_sheet.dart';
 import '../features/auth/auth_providers.dart';
-import '../features/category/add_category_dialog.dart';
-import '../features/category/add_group_dialog.dart';
+import '../features/calendar/calendar_providers.dart';
 import '../features/category/categories_controller.dart';
 import '../features/category/groups_controller.dart';
+import '../features/calendar_view/calendar_providers.dart'
+    show calendarSelectionProvider;
+import '../features/calendar_view/calendar_screen.dart';
 import '../features/category/category_view.dart';
-import '../features/group/group_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/home/today_providers.dart';
-import '../features/manage/manage_drawer.dart';
+import '../features/manage/category_list_screen.dart';
+import '../features/category/category_actions.dart';
+import '../core/ui_prefs.dart';
 import '../features/outline/outline_screen.dart';
+import '../features/search/search_screen.dart';
+import '../features/settings/app_preferences.dart';
+import '../features/todo_actions/todo_row_actions.dart';
+import '../features/settings/archive_screen.dart';
 import '../features/settings/settings_sheet.dart';
 import '../features/system/tray_service.dart';
-import '../features/timeline/timeline_screen.dart';
+import '../features/system/window_service.dart';
+import '../features/todo_actions/todo_actions_controller.dart';
 import 'destination.dart';
+import 'inspector.dart';
+import 'shell_state.dart';
+import 'widgets/group_scope_chips.dart';
 import 'widgets/undo_snackbar.dart';
+import 'widgets/add_entity_buttons.dart';
 
-/// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + 1~5 카테고리 단축키.
+/// 폼팩터 분기 컨테이너 + FAB (빠른 추가 트리거) + destination 숫자 단축키.
 ///
-/// 단축키: `0` = Today, `1` = work, `2` = personalDev, `3` = daily, `4` = longterm, `5` = idea.
-/// macOS 데스크탑 global Cmd+N 은 phase 6 의 hotkey_manager task 에서 연결.
+/// 단축키: `0` = 오늘, `1` = 전체보기, `2` = 캘린더, `3~9` = 카테고리 앞 7개
+/// ([AppDestination.buildAll] 이 단일 출처).
+///
+/// **새 할 일 단축키** (2026-09-24 대표님 결정):
+///   - 전역(OS 어디서든) = **⌘⇧N** (`hotkey_manager`, [HotKeyScope.system]).
+///     예전엔 전역 ⌘N 이라 하루가 켜져 있으면 Finder·브라우저·에디터의 "새 창/새 파일"
+///     ⌘N 을 가로챘다.
+///   - 앱 안 = **⌘N** (Flutter [Shortcuts]) — 하루 창이 앞에 있을 때만.
 ///
 /// **시스템 단축키 비충돌 점검** (macOS):
-///   - 우리가 잡는 modifier+key 조합은 **Cmd+N (글로벌)** 뿐. Cmd+W (Close window) /
-///     Cmd+Q (Quit) / Cmd+M (Minimize) / Cmd+H (Hide) / Cmd+, (Preferences) 등은
-///     macOS 가 그대로 처리하도록 둠.
-///   - 0~5 는 modifier 없는 plain digit — TextField focus 시 [isFocusInEditableText] 가드로
-///     숫자 입력에 양보 (text 입력 가능).
-///   - Esc 는 AddTodoSheet 의 _DismissIntent (sheet 닫기) — macOS 의 dialog 닫기와
-///     관행 일치, 충돌 없음.
+///   - Cmd+W / Cmd+Q / Cmd+M / Cmd+H / Cmd+, 등은 macOS 가 그대로 처리하도록 둠.
+///   - 숫자키는 modifier 없는 plain digit — TextField focus 시 [isFocusInEditableText]
+///     가드로 숫자 입력에 양보.
+///   - Esc 는 AddTodoSheet 의 _DismissIntent (sheet 닫기) — macOS 관행과 일치.
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -50,33 +65,29 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
-  int _index = 0;
-
-  /// A안 — 선택된 그룹 id. non-null 이면 main area 에 그룹 화면([GroupScreen],
-  /// 오늘/전체보기 탭)을 띄운다. today/category/outline destination 을 고르면 null 로
-  /// 리셋된다. 선택한 그룹이 삭제되면 build 단계에서 자동으로 null fallback.
-  String? _selectedGroupId;
-
   HotKey? _cmdN;
   TrayService? _tray;
 
-  /// 모바일 Drawer 를 NavigationBar '카테고리' 슬롯에서 열기 위한 키.
-  /// (NavigationBar 는 Scaffold 의 형제라 Scaffold.of 로 접근 불가 → key 사용.)
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  /// 모바일 Drawer 열림 여부 — 시스템 뒤로가기([PopScope]) 판정에 쓰인다.
-  /// `Scaffold.onDrawerChanged` 로 갱신 → build 재실행 → [_mobileHasBackTarget] 재평가.
-  bool _drawerOpen = false;
+  /// 데스크탑 오른쪽 인스펙터(할 일 상세 패널) 스택.
+  final InspectorController _inspector = InspectorController();
 
   @override
   void initState() {
     super.initState();
     _registerGlobalHotkey();
     _initTray();
+    _inspector.addListener(_onInspectorChanged);
+  }
+
+  void _onInspectorChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _inspector
+      ..removeListener(_onInspectorChanged)
+      ..dispose();
     _unregisterGlobalHotkey();
     _tray?.dispose();
     super.dispose();
@@ -85,9 +96,16 @@ class _AppShellState extends ConsumerState<AppShell> {
   Future<void> _initTray() async {
     if (!AppPlatform.isDesktop) return;
     final tray = TrayService(
-      onAddTodo: () {
+      onOpen: () => const WindowService().showMainWindow(),
+      onAddTodo: () async {
+        await const WindowService().showMainWindow();
         if (mounted) _openAddTodo();
       },
+      onOpenSettings: () async {
+        await const WindowService().showMainWindow();
+        if (mounted) _openSettings();
+      },
+      onToggleTodo: _toggleFromTray,
       onQuit: () {
         if (mounted) _confirmQuit();
       },
@@ -98,6 +116,34 @@ class _AppShellState extends ConsumerState<AppShell> {
       return;
     }
     _tray = tray;
+    _pushTrayState();
+  }
+
+  /// 트레이에서 할 일 완료 — 창을 띄우지 않고 바로 체크. 되돌리려면 앱에서 다시
+  /// 체크를 풀면 된다(트레이엔 되돌리기 스낵바가 없다).
+  Future<void> _toggleFromTray(String id) async {
+    final todo = ref
+        .read(undoneTodayTodosProvider)
+        .where((t) => t.id == id)
+        .firstOrNull;
+    if (todo == null) return;
+    await ref.read(todoActionsProvider).toggle(todo);
+  }
+
+  void _pushTrayState() {
+    final tray = _tray;
+    if (tray == null) return;
+    final undone = ref.read(undoneTodayTodosProvider);
+    tray.update(
+      TrayState(
+        top: [
+          for (final t in undone.take(trayTopLimit))
+            TrayTodo(id: t.id, title: t.title, inProgress: t.isInProgress),
+        ],
+        undoneCount: undone.length,
+        pendingSync: ref.read(outboxCountProvider).value ?? 0,
+      ),
+    );
   }
 
   /// tray menu 의 "종료" — outbox 가 비어 있으면 즉시 종료, pending 이 있으면 confirm dialog.
@@ -142,9 +188,11 @@ class _AppShellState extends ConsumerState<AppShell> {
       // `unregisterAll()` 은 hotkey_manager 의 process-scope 모든 hotkey 를 제거한다.
       // 다른 앱 영향은 없지만, 만약 향후 우리 앱이 hotkey 를 추가하면 함께 날아갈 위험이
       // 있어 **정확히 우리 단축키만** unregister 후 register 하는 형태로 안전화.
+      // 전역은 ⌘⇧N — 다른 앱의 ⌘N(새 창/새 파일)을 가로채지 않는다 (대표님 결정
+      // 2026-09-24). 앱 안의 ⌘N 은 _ShortcutsHost 가 따로 처리한다.
       final hotkey = HotKey(
         key: PhysicalKeyboardKey.keyN,
-        modifiers: const [HotKeyModifier.meta],
+        modifiers: const [HotKeyModifier.meta, HotKeyModifier.shift],
         scope: HotKeyScope.system,
       );
       try {
@@ -154,14 +202,16 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
       await hotKeyManager.register(
         hotkey,
-        keyDownHandler: (_) {
-          if (mounted) _openAddMenu();
+        keyDownHandler: (_) async {
+          // 창이 다른 앱 뒤에 있으면 시트가 안 보인다 — 먼저 앞으로.
+          await const WindowService().showMainWindow();
+          if (mounted) _openAddTodo();
         },
       );
       _cmdN = hotkey;
     } catch (e) {
       // 글로벌 단축키 등록 실패 (test 환경 / 권한 거부) — FAB 으로 대체 가능하므로 fatal X.
-      debugPrint('[solo_todo] Cmd+N 글로벌 단축키 등록 실패: $e');
+      debugPrint('[haru] ⌘⇧N 전역 단축키 등록 실패: $e');
     }
   }
 
@@ -179,425 +229,229 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// _selectByDigit / _openAddTodo 가 참조한다.
   List<AppDestination> _destinations = AppDestination.all;
 
+  ShellLocationNotifier get _nav => ref.read(shellLocationProvider.notifier);
+
+  void _go(ShellLocation location) => _nav.go(location);
+
+  /// destination index → 이동 (사이드바 · 하단 네비 · 숫자키).
+  ///
+  /// 지금 보고 있는 오늘/전체보기를 **다시** 고르면 그룹 필터를 푼다 — "전체보기" 를
+  /// 눌렀는데 한 그룹만 보이는 막다른 길을 없앤다. (오늘↔전체보기 사이 이동은 필터
+  /// 유지 — 두 화면이 같은 그룹을 공유한다.)
   void _select(int i) {
-    // destination 선택은 그룹 화면을 빠져나간다 (A안).
-    setState(() {
-      _index = i;
-      _selectedGroupId = null;
-    });
+    if (i < 0 || i >= _destinations.length) return;
+    final next = ShellLocation.of(_destinations[i]);
+    final scoped =
+        next.page == ShellPage.today || next.page == ShellPage.outline;
+    if (scoped && ref.read(shellLocationProvider) == next) {
+      ref.read(groupScopeProvider.notifier).set(null);
+    }
+    _go(next);
   }
 
-  /// A안 — 사이드바/Drawer 에서 그룹 헤더 탭 → 그 그룹 화면(오늘/전체보기 탭) 진입.
-  void _selectGroup(String groupId) {
-    setState(() => _selectedGroupId = groupId);
+  /// 사이드바 그룹 머리 탭 → 전체보기 + 그 그룹 필터 (예전 그룹 화면 대체).
+  /// 이미 그 그룹을 보고 있으면 필터를 푼다(토글).
+  void _openGroup(String groupId) {
+    final scope = ref.read(groupScopeProvider.notifier);
+    final location = ref.read(shellLocationProvider);
+    final onScoped =
+        location.page == ShellPage.today || location.page == ShellPage.outline;
+    if (onScoped && ref.read(groupScopeProvider) == groupId) {
+      scope.set(null);
+      return;
+    }
+    scope.set(groupId);
+    _go(ShellLocation.outline);
+  }
+
+  /// 카테고리 화면의 상위 — 들어온 곳(전체보기) 또는 카테고리 목록.
+  ShellLocation get _categoryParent =>
+      _nav.returnTo ??
+      (AppPlatform.isMobile ? ShellLocation.categories : ShellLocation.today);
+
+  /// 지금 위치가 가리키는 destination 의 index. 카테고리가 사라졌으면 -1.
+  int _indexOf(ShellLocation location) {
+    if (location.page == ShellPage.categories) return -1;
+    return _destinations.indexWhere(location.matches);
   }
 
   /// 모바일 시스템 뒤로가기(백버튼/제스처)로 "가로챌 것" 이 있는지.
   ///
   /// true 면 [PopScope.canPop] = false 로 두어 OS 에 "이 back 은 내가 처리한다" 를 알리고
   /// (predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅됨), [_handleMobileBack]
-  /// 이 계단식으로 소비한다. 계단 우선순위: Drawer 열림 > 그룹 화면 > 비-오늘 탭.
+  /// 이 계단식으로 소비한다. 오늘이 아니면 전부 가로챈다.
   ///
   /// 데스크탑은 시스템 뒤로가기가 없으므로 항상 false (PopScope 무력화).
-  bool get _mobileHasBackTarget {
-    if (!AppPlatform.isMobile) return false;
-    if (_drawerOpen) return true;
-    if (_selectedGroupId != null) return true;
-    if (_destinations.isEmpty) return false;
-    final safeIndex = _index < _destinations.length ? _index : 0;
-    return !_destinations[safeIndex].isToday;
-  }
+  bool _mobileHasBackTarget(ShellLocation location) =>
+      AppPlatform.isMobile && location.page != ShellPage.today;
 
-  /// 모바일 시스템 뒤로가기 계단식 처리 — [_mobileHasBackTarget] 이 true 일 때만 호출된다.
-  ///   1) Drawer 열림 → 닫기
-  ///   2) 그룹 화면 진입 → 원래 탭으로 복귀
-  ///   3) 비-오늘 탭 → '오늘' 탭으로 복귀
-  /// (셋 다 아니면 canPop=true 라 여기 오지 않음 → 그때만 OS 가 앱을 종료.)
+  /// 모바일 시스템 뒤로가기 계단:
+  ///   1) 카테고리 화면 → 들어온 곳(전체보기) 또는 카테고리 목록
+  ///   2) 그 밖의 비-오늘 화면 → 오늘
+  /// (오늘이면 canPop=true 라 여기 오지 않음 → 그때만 OS 가 앱을 종료.)
   void _handleMobileBack() {
-    if (_drawerOpen) {
-      _scaffoldKey.currentState?.closeDrawer();
+    final location = ref.read(shellLocationProvider);
+    if (location.page == ShellPage.category) {
+      _go(_categoryParent);
       return;
     }
-    if (_selectedGroupId != null) {
-      setState(() => _selectedGroupId = null);
-      return;
-    }
-    final todayIndex = _destinations.indexWhere((d) => d.isToday);
-    if (todayIndex >= 0 && _index != todayIndex) {
-      _select(todayIndex);
-    }
+    if (location.page != ShellPage.today) _go(ShellLocation.today);
   }
 
-  /// 모바일 Drawer 에서 그룹 탭 → 그룹 화면 진입 + Drawer 닫기.
-  void _selectGroupFromDrawer(Group group) {
-    _selectGroup(group.id);
-    Navigator.of(context).pop();
-  }
-
-  /// 단축키 digit (0~9) → destination index 매핑. 0 Today, 1~min(9,N) 카테고리,
-  /// N+1 (N<9 일 때) outline. 매칭 못 하면 no-op.
+  /// 단축키 digit (0~9) → destination. 매칭 못 하면 no-op.
   void _selectByDigit(int digit) {
     final idx = _destinations.indexWhere((d) => d.shortcutDigit == digit);
-    if (idx >= 0 && idx != _index) _select(idx);
+    if (idx >= 0) _select(idx);
   }
 
-  /// 카테고리 삭제 — confirm dialog 후 controller 호출. blocked 면 안내 dialog.
-  /// today / outline destination 은 무시.
-  Future<void> _deleteCategory(AppDestination dest) async {
-    final category = dest.category;
-    if (category == null) return;
+  /// 검색이 떠 있는 중 — ⌘K 를 연달아 눌러도 한 장만.
+  bool _searchOpen = false;
 
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('${category.label} 카테고리 삭제'),
-            content: const Text('이 카테고리를 정말 삭제할까요? 되돌릴 수 없어요.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('취소'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Theme.of(ctx).colorScheme.error,
-                ),
-                child: const Text('삭제'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
-
-    final result = await ref
-        .read(categoriesControllerProvider)
-        .delete(category.id);
-    if (!mounted) return;
-    if (result.isOk) {
-      // _index 가 삭제된 카테고리에 가 있었다면 다음 build 에서 safeIndex 가 today 로
-      // fallback. _index 자체도 안전 reset.
-      setState(() {
-        if (_index >= _destinations.length - 1) _index = 0;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${category.label} 카테고리가 삭제되었어요.'),
-          behavior: SnackBarBehavior.floating,
-        ),
+  /// 전역 검색 열기 — 사이드바/앱바 버튼과 ⌘K·⌘F 가 공유하는 단일 진입점.
+  ///
+  /// 데스크탑 오버레이에서 결과를 열면 그 카테고리 화면으로 가서 오른쪽 인스펙터에
+  /// 띄운다(목록 속 위치와 내용을 함께 보게). ⌘↩ 는 편집 시트.
+  Future<void> _openSearch() async {
+    if (!mounted || _searchOpen) return;
+    _searchOpen = true;
+    try {
+      await SearchScreen.show(
+        context,
+        onReveal: (todo) {
+          ref
+              .read(shellLocationProvider.notifier)
+              .openCategory(todo.category.id);
+          _inspector.open(todo);
+        },
+        onEdit: (todo) {
+          if (mounted) openTodoEdit(context, ref, todo);
+        },
       );
-      return;
+    } finally {
+      _searchOpen = false;
     }
-
-    // blockedByTodos — 안 todos 가 있어 차단됨. 안내 dialog.
-    final count = await ref
-        .read(categoriesRepositoryProvider)
-        .countTodosOfCategory(category.id);
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('삭제할 수 없어요'),
-        content: Text(
-          '이 카테고리에 할 일이 $count건 있어요. 먼저 다른 카테고리로 옮기거나 todos 부터 삭제해 주세요.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('확인'),
-          ),
-        ],
-      ),
-    );
   }
 
-  /// 그룹 삭제 — confirm dialog 후 controller 호출. 차단 없음: 속한 카테고리는
-  /// '미분류'로 이동되고 그룹만 사라진다 (todos / 카테고리 데이터 무손실).
-  Future<void> _deleteGroup(Group group) async {
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text("'${group.label}' 그룹 삭제"),
-            content: const Text(
-              '그룹을 삭제하면 속한 카테고리는 \'미분류\'로 이동돼요. 카테고리와 할 일은 그대로 남아요.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('취소'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Theme.of(ctx).colorScheme.error,
-                ),
-                child: const Text('삭제'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) return;
+  /// FAB / Cmd+N / 트레이 공통 진입점 — **곧바로 새 할 일 시트**를 연다.
+  ///
+  /// 기본 카테고리 = "지금 보고 있는 화면" 기준: 카테고리 화면이면 그 카테고리,
+  /// 오늘·전체보기에서 그룹 필터가 켜져 있으면 그 그룹의 첫 카테고리.
+  /// 추가 시트가 떠 있는 중 — 전역 ⌘⇧N·메뉴바·트레이를 연달아 눌러도 한 장만.
+  bool _addSheetOpen = false;
 
-    await ref.read(groupsControllerProvider).delete(group.id);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("'${group.label}' 그룹이 삭제됐어요. 카테고리는 미분류로 이동했어요."),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
+  /// 설정 시트가 떠 있는 중 — ⌘, · 메뉴바 · 버튼을 연달아 눌러도 한 장만.
+  bool _settingsOpen = false;
 
-  /// 데스크탑 사이드바 — 카테고리 보관 (할 일 포함 숨김). 되돌리기 스낵바.
-  Future<void> _archiveCategory(AppDestination dest) async {
-    final category = dest.category;
-    if (category == null) return;
-    await ref.read(categoriesControllerProvider).archive(category.id);
-    if (!mounted) return;
-    showUndoSnackbar(
-      context,
-      message: '${category.label} 카테고리를 보관했어요.',
-      onUndo: () =>
-          ref.read(categoriesControllerProvider).unarchive(category.id),
-    );
-  }
-
-  /// 데스크탑 사이드바 — 그룹 보관 (소속 카테고리·할 일 cascade 숨김). 되돌리기 스낵바.
-  Future<void> _archiveGroup(Group group) async {
-    await ref.read(groupsControllerProvider).archive(group.id);
-    if (!mounted) return;
-    showUndoSnackbar(
-      context,
-      message: "'${group.label}' 그룹을 보관했어요. (카테고리·할 일 포함)",
-      onUndo: () => ref.read(groupsControllerProvider).unarchive(group.id),
-    );
-  }
-
-  /// 그룹 이름/색 수정 — 프리필된 다이얼로그(upsert). 같은 id 라 카테고리 소속 유지.
-  Future<void> _editGroup(Group group) =>
-      AddGroupDialog.showEdit(context, group);
-
-  /// 드래그→드롭으로 카테고리를 그룹(또는 미분류=null)으로 직접 이동. (사이드바 E)
-  Future<void> _dropCategoryToGroup(Category category, String? groupId) async {
-    if (category.groupId == groupId) return;
-    await ref
-        .read(categoriesControllerProvider)
-        .moveToGroup(category.id, groupId);
-  }
-
-  /// 카테고리 '그룹 이동' — 그룹 선택 bottom sheet 후 controller.moveToGroup 호출.
-  /// 선택지: 미분류(null) + 현재 그룹들. today / outline 은 무시.
-  Future<void> _moveCategoryToGroup(AppDestination dest) async {
-    final category = dest.category;
-    if (category == null) return;
-
-    final groups =
-        ref.read(activeGroupsProvider).asData?.value ?? const <Group>[];
-    final picked = await showModalBottomSheet<_GroupChoice>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.layers_clear_outlined),
-              title: const Text('미분류'),
-              selected: category.groupId == null,
-              onTap: () => Navigator.of(ctx).pop(const _GroupChoice(null)),
-            ),
-            for (final g in groups)
-              ListTile(
-                leading: Icon(Icons.circle, size: 14, color: g.color),
-                title: Text(g.label),
-                selected: category.groupId == g.id,
-                onTap: () => Navigator.of(ctx).pop(_GroupChoice(g.id)),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (picked == null || !mounted) return;
-    await ref
-        .read(categoriesControllerProvider)
-        .moveToGroup(category.id, picked.groupId);
-  }
-
-  /// 그룹 순서 변경 (사이드바 그룹 헤더의 드래그 핸들 ⠿). groups 전체를 재배열해
-  /// sortOrder 갱신 (GroupsController.reorder 가 바뀐 그룹만 upsert).
-  Future<void> _reorderGroups(
-    List<Group> groups,
-    int oldIndex,
-    int newIndex,
-  ) async {
-    await ref
-        .read(groupsControllerProvider)
-        .reorder(groups, oldIndex, newIndex);
-  }
-
-  /// 드래그→드롭(⠿/본문) 통합 — 카테고리를 대상 그룹의 특정 위치로 이동/순서변경.
-  Future<void> _moveCategoryInto(
-    Category dragged,
-    String? targetGroupId,
-    List<Category> orderedSiblings,
-    int insertIndex,
-  ) async {
-    await ref
-        .read(categoriesControllerProvider)
-        .moveCategoryInto(dragged, targetGroupId, orderedSiblings, insertIndex);
-  }
-
-  /// FAB / Cmd+N 진입점 — 바로 새 할일을 띄우지 않고 **추가 선택 시트**를 먼저 연다.
-  /// 새 할일 / 카테고리 / 그룹 중 하나를 고르는 단일 추가 동선 (대표님 요청).
-  Future<void> _openAddMenu() async {
-    final choice = await showModalBottomSheet<_AddAction>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => const _AddActionSheet(),
-    );
-    if (choice == null || !mounted) return;
-    switch (choice) {
-      case _AddAction.todo:
-        await _openAddTodo();
-      case _AddAction.category:
-        await AddCategoryDialog.show(context);
-      case _AddAction.group:
-        await AddGroupDialog.show(context);
+  Future<void> _openSettings() async {
+    if (_settingsOpen) return;
+    _settingsOpen = true;
+    try {
+      await SettingsSheet.show(context);
+    } finally {
+      _settingsOpen = false;
     }
   }
 
   Future<void> _openAddTodo() async {
-    // 기본 카테고리 = "지금 보고 있는 화면" 과 동일한 규칙으로 결정 (build 표시 로직과 일치).
-    //
-    // ⚠️ RISK(side-effect): 과거엔 raw `_index` 만 봐서 (a) 그룹 화면(_selectedGroupId)을
-    // 무시하고, (b) 비동기 카테고리 리로드로 `_index` 가 범위를 벗어나면 오늘로 폴백해
-    // "보던 카테고리와 다른 기본값" 이 되었다. resolveAddTodoDefaultCategory 로 build 의
-    // selectedGroup + safeIndex 와 동일 규칙을 공유해 화면과 항상 일치시킨다.
-    // — by _openAddTodo (기본 카테고리 어긋남 수정)
+    if (_addSheetOpen) return;
     final categories =
         ref.read(activeCategoriesProvider).asData?.value ??
         Category.builtinSeeds;
     final groups =
         ref.read(activeGroupsProvider).asData?.value ?? const <Group>[];
+    final location = ref.read(shellLocationProvider);
+    final scoped =
+        location.page == ShellPage.today || location.page == ShellPage.outline;
     final initialCategory = resolveAddTodoDefaultCategory(
       categories: categories,
       groups: groups,
       destinations: _destinations,
-      index: _index,
-      selectedGroupId: _selectedGroupId,
+      index: _indexOf(location),
+      selectedGroupId: scoped ? ref.read(groupScopeProvider) : null,
+      preferredCategoryId: ref.read(defaultCategoryIdProvider),
+      lastUsedId: ref.read(lastUsedCategoryProvider),
     );
 
-    // sheet 가 닫힌 후 controller 를 호출해 결과(Calendar 경고 등)를 처리한다.
-    AddTodoSubmission? submitted;
-    await AddTodoSheet.show(
-      context,
-      initialCategory: initialCategory,
-      onSubmit: (s) => submitted = s,
-    );
-    if (submitted == null || !mounted) return;
+    // 기본 날짜 — 캘린더 화면이면 거기서 고른 날, 오늘 화면이면 오늘.
+    // '오늘' 은 날짜가 있는 항목만 보여 주므로(v1.5), 오늘 화면에서 날짜 없이 추가하면
+    // 방금 추가한 항목이 곧바로 사라져 보였다(Phase 4 기기 테스트에서 발견).
+    final now = ref.read(nowProvider)();
+    final calendarDay = switch (location.page) {
+      ShellPage.calendar => ref.read(calendarSelectionProvider).selectedDay,
+      ShellPage.today => DateTime(now.year, now.month, now.day),
+      _ => null,
+    };
 
-    final result = await ref.read(addTodoControllerProvider).add(submitted!);
-    if (!mounted) return;
-    final warning = result.calendarWarning;
-    if (warning != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(warning), behavior: SnackBarBehavior.floating),
+    _addSheetOpen = true;
+    try {
+      await showNewTodoSheet(
+        context,
+        ref,
+        initialCategory: initialCategory,
+        initialDueAt: calendarDay,
       );
+    } finally {
+      _addSheetOpen = false;
     }
   }
 
-  /// Drawer 에서 카테고리 탭 → 그 카테고리 destination 으로 이동 + Drawer 닫기.
-  /// destinations 에서 같은 category id 의 index 를 찾아 _select.
-  void _selectCategoryDestination(Category category) {
-    final idx = _destinations.indexWhere(
-      (d) =>
-          d.kind == DestinationKind.category && d.category?.id == category.id,
-    );
-    if (idx >= 0) _select(idx);
-    Navigator.of(context).pop(); // drawer 닫기
-  }
-
-  /// 모바일 하단 바 (옵션 1) — `[오늘, 전체보기, 카테고리]` 3 슬롯 고정.
+  /// 모바일 하단 바 — `[오늘, 전체보기, 캘린더, 카테고리]` 4칸 고정.
   ///
-  /// selectedIndex 는 **가상 인덱스** (destinations 의 실제 index 와 분리):
-  ///   - today → 0, outline → 1, 그 외(어느 카테고리든) → 2 (카테고리 슬롯).
-  /// 탭:
-  ///   - 0 → today destination 으로 _select
-  ///   - 1 → outline destination 으로 _select
-  ///   - 2 → 관리 Drawer 열기 (카테고리 선택은 Drawer 안에서)
-  /// 카테고리 슬롯 라벨/아이콘은 현재 카테고리에 있으면 그 카테고리, 아니면 기본값.
-  Widget _buildMobileNavBar(AppDestination current, Group? selectedGroup) {
-    // 그룹 화면일 땐 '카테고리' 슬롯(관리 Drawer 진입점)을 선택 상태로 — 그룹은 그
-    // Drawer 에서 고르므로 일관적이다. 슬롯 라벨/아이콘도 그룹명/폴더로 바꿔 표시.
-    final groupActive = selectedGroup != null;
-    final onCategory = current.kind == DestinationKind.category;
-    // 슬롯: 0=오늘 1=전체보기 2=타임라인 3=카테고리(관리 Drawer 진입점).
-    final navSelected = groupActive
-        ? 3
-        : current.isToday
-        ? 0
-        : current.isOutline
-        ? 1
-        : current.isTimeline
-        ? 2
-        : 3;
-
-    final todayDest = _destinations.firstWhere((d) => d.isToday);
-    final outlineDest = _destinations.firstWhere((d) => d.isOutline);
-    final timelineDest = _destinations.firstWhere((d) => d.isTimeline);
-
-    final categoryIcon = groupActive
-        ? Icons.folder_outlined
-        : onCategory
-        ? current.icon
-        : Icons.category_outlined;
-    final categoryLabel = groupActive
-        ? selectedGroup.label
-        : onCategory
-        ? current.label
-        : '카테고리';
+  /// 4번째 칸은 카테고리 **목록 화면**이다(예전엔 관리 Drawer 를 열었다). 카테고리
+  /// 화면에 들어가 있으면 그 칸이 선택된 채 라벨·아이콘이 그 카테고리로 바뀐다.
+  Widget _buildMobileNavBar(ShellLocation location, AppDestination? current) {
+    // 전체보기에서 들어온 카테고리 화면은 전체보기 칸을 유지한다(돌아갈 곳과 일치).
+    final fromOutline =
+        location.page == ShellPage.category &&
+        _nav.returnTo == ShellLocation.outline;
+    final navSelected = switch (location.page) {
+      ShellPage.today => 0,
+      ShellPage.outline => 1,
+      ShellPage.calendar => 2,
+      ShellPage.category when fromOutline => 1,
+      ShellPage.categories || ShellPage.category => 3,
+    };
+    final onCategory =
+        location.page == ShellPage.category && current != null && !fromOutline;
 
     return NavigationBar(
       selectedIndex: navSelected,
-      onDestinationSelected: (i) {
-        switch (i) {
-          case 0:
-            _selectByDestination(todayDest);
-            break;
-          case 1:
-            _selectByDestination(outlineDest);
-            break;
-          case 2:
-            _selectByDestination(timelineDest);
-            break;
-          case 3:
-            _scaffoldKey.currentState?.openDrawer();
-            break;
-        }
-      },
+      onDestinationSelected: (i) => _go(switch (i) {
+        0 => ShellLocation.today,
+        1 => ShellLocation.outline,
+        2 => ShellLocation.calendar,
+        _ => ShellLocation.categories,
+      }),
       destinations: [
-        NavigationDestination(icon: Icon(todayDest.icon), label: '오늘'),
-        NavigationDestination(icon: Icon(outlineDest.icon), label: '전체보기'),
-        NavigationDestination(icon: Icon(timelineDest.icon), label: '타임라인'),
-        NavigationDestination(icon: Icon(categoryIcon), label: categoryLabel),
+        const NavigationDestination(
+          icon: Icon(Icons.today_outlined),
+          label: '오늘',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.account_tree_outlined),
+          label: '전체보기',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.calendar_month_outlined),
+          label: '캘린더',
+        ),
+        NavigationDestination(
+          icon: Icon(onCategory ? current.icon : Icons.category_outlined),
+          label: onCategory ? current.label : '카테고리',
+        ),
       ],
     );
-  }
-
-  /// destination 객체 → 그 index 로 _select.
-  void _selectByDestination(AppDestination dest) {
-    final idx = _destinations.indexOf(dest);
-    if (idx >= 0) _select(idx);
   }
 
   @override
   Widget build(BuildContext context) {
     // 미체크 카운트가 바뀌면 tray title 갱신 (macOS 만 실효).
-    ref.listen<int>(undoneTodayCountProvider, (_, next) {
-      _tray?.updateUndoneCount(next);
-    });
+    // 오늘 남은 할 일·동기화 대기가 바뀌면 트레이 제목·메뉴 갱신 (macOS 만 실효).
+    ref.listen<List<Todo>>(
+      undoneTodayTodosProvider,
+      (_, _) => _pushTrayState(),
+    );
+    ref.listen(outboxCountProvider, (_, _) => _pushTrayState());
 
     // Supabase realtime sync — 인증된 user 가 있을 때만 활성. lifecycle 은 provider 가 관리.
     ref.watch(supabaseRealtimeSyncProvider);
@@ -605,168 +459,368 @@ class _AppShellState extends ConsumerState<AppShell> {
     // user 가 다른 계정으로 바뀌면 옛 todos/outbox 자동 정리 (side-effect listener).
     ref.watch(userChangeCleanupProvider);
 
+    // Google Calendar 자동 동기화 — 앱 시작·포그라운드 복귀·5분 주기.
+    // 연동이 꺼져 있거나 OAuth 키가 없으면 scheduler 자체가 null 이라 아무 일도 없다.
+    ref.watch(calendarSyncSchedulerProvider)?.start();
+
     // v1.2 — 활성 카테고리 stream 에 따라 destinations 동적 build (보관 카테고리 제외).
     // loading / error 시 fallback 으로 builtin 5종 기준의 default 사용.
-    final categories =
-        ref.watch(activeCategoriesProvider).asData?.value ??
-        Category.builtinSeeds;
-    _destinations = AppDestination.buildAll(categories);
+    // ⌘N 기본값(마지막에 쓴 카테고리)을 앱 시작 때 미리 복원해 둔다 — 값이 바뀌어도
+    // 셸을 다시 그릴 필요는 없어 listen 으로 살려 두기만 한다.
+    ref.listen(lastUsedCategoryProvider, (_, _) {});
+    // "마지막에 쓴" = 새 할 일을 추가한 카테고리 + 마지막으로 연 카테고리 화면(대표님 결정,
+    // 2026-09-25). Bxg 를 보다가 오늘로 와서 ⌘N 해도 Bxg 로 열린다.
+    ref.listen(shellLocationProvider, (_, next) {
+      final id = next.categoryId;
+      if (next.page == ShellPage.category && id != null) {
+        ref.read(lastUsedCategoryProvider.notifier).record(id);
+      }
+    });
+    final categoriesAsync = ref.watch(activeCategoriesProvider);
+    final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
 
     // v1.3 — 활성 그룹 stream. 사이드바가 그룹 헤더 + 미분류 섹션으로 카테고리를 묶는다.
     final groups =
         ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
+    // 목적지 순서 = 사이드바에 보이는 순서(그룹 → 카테고리, 미분류는 아래). 숫자 단축키
+    // 3~9 도 이 순서로 붙는다 — 카테고리 sortOrder 만 쓰면 그룹이 생긴 뒤 맨 위 카테고리가
+    // 9번이 되는 식으로 보이는 순서와 번호가 뒤섞였다.
+    _destinations = AppDestination.buildAll(
+      categoriesInSidebarOrder(categories, groups),
+    );
 
-    // _index 가 destinations.length 초과 (카테고리 삭제 직후 등) 면 Today (0) 으로 안전 fallback.
-    final safeIndex = _index < _destinations.length ? _index : 0;
-    final destination = _destinations[safeIndex];
-
-    // A안 — 선택된 그룹 resolve. 삭제됐으면 null (→ destination 화면으로 fallback).
-    Group? selectedGroup;
-    if (_selectedGroupId != null) {
-      for (final g in groups) {
-        if (g.id == _selectedGroupId) {
-          selectedGroup = g;
-          break;
-        }
-      }
+    var location = ref.watch(shellLocationProvider);
+    // 데스크탑엔 카테고리 목록 화면이 없다(사이드바가 그 역할) → 오늘로.
+    if (location.page == ShellPage.categories && AppPlatform.isDesktop) {
+      location = ShellLocation.today;
     }
+    var index = _indexOf(location);
+    // 보고 있던 카테고리가 삭제·보관되면 — 모바일은 카테고리 목록, 데스크탑은 오늘로.
+    // (로딩 중 fallback 목록에서 못 찾은 경우는 제외 — 실제 목록이 올 때까지 기다린다.)
+    if (location.page == ShellPage.category && index < 0) {
+      final fallback = AppPlatform.isMobile
+          ? ShellLocation.categories
+          : ShellLocation.today;
+      if (categoriesAsync.hasValue) {
+        final gone = location;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && ref.read(shellLocationProvider) == gone) {
+            _go(fallback);
+          }
+        });
+      }
+      location = fallback;
+      index = _indexOf(location);
+    }
+    final AppDestination? destination = index >= 0
+        ? _destinations[index]
+        : null;
 
-    // main area 에 띄울 화면 — 그룹 선택 시 그룹 화면, 아니면 destination 화면.
-    final Widget mainContent = selectedGroup != null
-        ? GroupScreen(
-            key: ValueKey('group-${selectedGroup.id}'),
-            group: selectedGroup,
-          )
-        : _MainArea(destination: destination);
+    final scopedGroupId = ref.watch(scopedGroupProvider)?.id;
 
-    // 모바일은 NavigationBar 를 가리지 않도록 컴팩트한 원형 FAB (endFloat 가 바 위로 띄움).
-    // 데스크탑은 nav bar 가 없어 넓은 extended FAB 유지.
-    final fab = AppPlatform.isDesktop
-        ? FloatingActionButton.extended(
-            key: const ValueKey('add-todo-fab'),
-            onPressed: _openAddMenu,
-            icon: const Icon(Icons.add),
-            label: const Text('추가'),
-            tooltip: '추가 (Cmd+N)',
-          )
+    final Widget mainContent = switch (location.page) {
+      ShellPage.categories => CategoryListScreen(
+        onSelectCategory: (c) => _go(ShellLocation.category(c.id)),
+        onOpenGroup: (g) => _openGroup(g.id),
+      ),
+      _ => _MainArea(destination: destination ?? _destinations.first),
+    };
+
+    // 모바일만 떠 있는 원형 버튼 (endFloat 가 네비 바 위로 띄움). 데스크탑은 오른쪽
+    // 인스펙터를 가리지 않도록 떠 있는 버튼 없이 사이드바 위 "새 할 일" + ⌘N (Phase 3).
+    final Widget? fab = AppPlatform.isDesktop
+        ? null
         : FloatingActionButton(
             key: const ValueKey('add-todo-fab'),
-            onPressed: _openAddMenu,
-            tooltip: '추가',
+            onPressed: _openAddTodo,
+            tooltip: '새 할 일',
             child: const Icon(Icons.add),
           );
 
     final Widget body;
     if (AppPlatform.isDesktop) {
+      final onScopedPage =
+          location.page == ShellPage.today ||
+          location.page == ShellPage.outline;
       body = Row(
         children: [
           _Sidebar(
             destinations: _destinations,
             groups: groups,
-            selectedIndex: safeIndex,
-            selectedGroupId: selectedGroup?.id,
+            selectedIndex: index,
+            selectedGroupId: onScopedPage ? scopedGroupId : null,
             onSelect: _select,
-            onSelectGroup: _selectGroup,
-            onDeleteCategory: _deleteCategory,
-            onMoveCategory: _moveCategoryToGroup,
-            onArchiveCategory: _archiveCategory,
-            onDeleteGroup: _deleteGroup,
-            onArchiveGroup: _archiveGroup,
-            onEditGroup: _editGroup,
-            onDropCategoryToGroup: _dropCategoryToGroup,
-            onMoveCategoryInto: _moveCategoryInto,
-            onReorderGroups: _reorderGroups,
+            onSelectGroup: _openGroup,
+            onAddTodo: _openAddTodo,
+            onOpenSearch: _openSearch,
+            onOpenSettings: _openSettings,
+            onMoveCategoryInto: (dragged, gid, siblings, at) => ref
+                .read(categoriesControllerProvider)
+                .moveCategoryInto(dragged, gid, siblings, at),
+            onReorderGroups: (list, o, n) =>
+                ref.read(groupsControllerProvider).reorder(list, o, n),
           ),
           const VerticalDivider(width: AppTokens.hairline),
-          Expanded(child: mainContent),
+          Expanded(
+            child: InspectorScope(
+              controller: _inspector,
+              // 넓은 창에서 목록이 한없이 늘어나 눈이 좌우로 멀리 오가지 않게 최대 폭.
+              // 캘린더는 폭이 곧 정보량이라 제외.
+              child: location.page == ShellPage.calendar
+                  ? mainContent
+                  : _ReadableWidth(child: mainContent),
+            ),
+          ),
+          if (_inspector.isOpen) ...[
+            const VerticalDivider(width: AppTokens.hairline),
+            SizedBox(
+              width: InspectorPanel.widthFor(MediaQuery.sizeOf(context).width),
+              child: InspectorPanel(controller: _inspector),
+            ),
+          ],
         ],
       );
     } else {
       body = SafeArea(child: mainContent);
     }
 
-    return _ShortcutsHost(
+    final title = switch (location.page) {
+      ShellPage.categories => '카테고리',
+      _ => destination?.label ?? '오늘',
+    };
+
+    final shell = _ShortcutsHost(
       destinations: _destinations,
       onSelect: _selectByDigit,
-      // 모바일 시스템 뒤로가기 계단식 처리 — Drawer 닫기 / 그룹 나가기 / 오늘 복귀.
+      onOpenSearch: _openSearch,
+      onAddTodo: _openAddTodo,
+      onOpenSettings: _openSettings,
+      onCloseInspector: () {
+        if (!_inspector.isOpen) return false;
+        _inspector.close();
+        return true;
+      },
+      isInspectorOpen: () => _inspector.isOpen,
+      // 모바일 시스템 뒤로가기 계단식 처리 — 카테고리→목록 / 그 밖→오늘.
       // canPop=false 로 두면 predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅된다.
       child: PopScope(
-        canPop: !_mobileHasBackTarget,
+        canPop: !_mobileHasBackTarget(location),
         onPopInvokedWithResult: (didPop, _) {
           if (didPop) return;
           _handleMobileBack();
         },
         child: Scaffold(
-          key: _scaffoldKey,
-          // Drawer 열림/닫힘 → canPop 재평가를 위해 상태 반영.
-          onDrawerChanged: (isOpen) {
-            if (_drawerOpen != isOpen) setState(() => _drawerOpen = isOpen);
-          },
-          // 모바일만 상단 앱바 — ☰ 로 그룹/카테고리 관리 Drawer 를 연다 (Task A).
-          // 데스크탑은 좌측 _Sidebar 가 모든 관리/네비를 담당하므로 앱바 없음.
-          appBar: AppPlatform.isDesktop
+          // 모바일만 상단 앱바. 데스크탑은 좌측 _Sidebar 가 네비를 담당하므로 앱바 없음.
+          //
+          // 캘린더 화면도 앱바를 안 쓴다 — 달력은 세로 높이가 곧 정보량이라
+          // "캘린더" 제목 한 줄에 56dp 를 내주면 주 행이 눈에 띄게 눌린다.
+          // 검색·설정은 캘린더 헤더의 ⋮ 메뉴가 그대로 맡는다.
+          appBar: AppPlatform.isDesktop || location.page == ShellPage.calendar
               ? null
               : AppBar(
-                  title: Text(selectedGroup?.label ?? destination.label),
-                  leading: Builder(
-                    builder: (ctx) => IconButton(
-                      key: const ValueKey('manage-drawer-button'),
-                      icon: const Icon(Icons.menu),
-                      tooltip: '그룹/카테고리 관리',
-                      onPressed: () => Scaffold.of(ctx).openDrawer(),
-                    ),
-                  ),
+                  title: Text(title),
+                  // 카테고리 화면은 목록(4번째 칸)의 하위 화면 — 앱바 ← 로도 돌아간다.
+                  leading: location.page == ShellPage.category
+                      ? IconButton(
+                          key: const ValueKey('category-back-button'),
+                          icon: const Icon(Icons.arrow_back),
+                          tooltip: _nav.returnTo == ShellLocation.outline
+                              ? '전체보기'
+                              : '카테고리 목록',
+                          onPressed: () => _go(_categoryParent),
+                        )
+                      : null,
+                  automaticallyImplyLeading: false,
                   actions: [
+                    IconButton(
+                      key: const ValueKey('search-button'),
+                      icon: const Icon(Icons.search),
+                      tooltip: '검색',
+                      onPressed: _openSearch,
+                    ),
                     IconButton(
                       key: const ValueKey('settings-button'),
                       icon: const Icon(Icons.settings_outlined),
                       tooltip: '설정',
-                      onPressed: () => SettingsSheet.show(context),
+                      onPressed: _openSettings,
                     ),
                   ],
                 ),
-          drawer: AppPlatform.isDesktop
+          // 카테고리 목록 화면은 할 일이 아니라 카테고리를 다루는 곳이라 FAB 을 숨긴다
+          // (하단의 '카테고리 추가 · 그룹 추가' 와 헷갈리지 않게).
+          floatingActionButton: location.page == ShellPage.categories
               ? null
-              : ManageDrawer(
-                  onSelectCategory: _selectCategoryDestination,
-                  onSelectGroup: _selectGroupFromDrawer,
-                ),
-          floatingActionButton: fab,
+              : fab,
           // endFloat — Scaffold 가 FAB 를 bottomNavigationBar **위로** 띄워 네비를 가리지 않음.
-          // (이전 endContained 는 nav bar 에 도킹돼 6개 destination 항목을 덮는 문제가 있었다.)
           floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
           body: body,
           // desktop 은 좌측 _Sidebar 가 네비게이션을 담당해 bottomNavigationBar 가 의도적으로
-          // null. mobile 만 NavigationBar 노출 — 오늘/전체보기/카테고리 3 슬롯 고정 (옵션 1).
+          // null. mobile 만 NavigationBar 노출 — 4칸 고정.
           bottomNavigationBar: AppPlatform.isDesktop
               ? null
-              : _buildMobileNavBar(destination, selectedGroup),
+              : _buildMobileNavBar(location, destination),
         ),
       ),
     );
+    if (!AppPlatform.useNativeMenuBar) return shell;
+    return PlatformMenuBar(menus: _menus(), child: shell);
+  }
+
+  /// macOS 메뉴바 — 단축키를 메뉴에서 찾을 수 있게(발견성). 동작은 앱 안 단축키와 같다.
+  List<PlatformMenuItem> _menus() {
+    PlatformMenuItem item(
+      String label,
+      VoidCallback onSelected, [
+      MenuSerializableShortcut? shortcut,
+    ]) => PlatformMenuItem(
+      label: label,
+      onSelected: onSelected,
+      shortcut: shortcut,
+    );
+    final views = <PlatformMenuItem>[
+      for (final d in _destinations)
+        if (d.shortcutDigit >= 0 && d.shortcutDigit <= 9)
+          item(
+            d.label,
+            () => _selectByDigit(d.shortcutDigit),
+            SingleActivator(
+              _ShortcutsHost._digitKeys[d.shortcutDigit]!,
+              meta: true,
+            ),
+          ),
+    ];
+    return [
+      PlatformMenu(
+        label: '하루',
+        menus: [
+          const PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.about,
+          ),
+          PlatformMenuItemGroup(
+            members: [
+              item(
+                '설정…',
+                _openSettings,
+                const SingleActivator(LogicalKeyboardKey.comma, meta: true),
+              ),
+            ],
+          ),
+          const PlatformMenuItemGroup(
+            members: [
+              PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+              PlatformProvidedMenuItem(
+                type: PlatformProvidedMenuItemType.hideOtherApplications,
+              ),
+            ],
+          ),
+          const PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.quit,
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: '파일',
+        menus: [
+          item(
+            '새 할 일',
+            _openAddTodo,
+            const SingleActivator(LogicalKeyboardKey.keyN, meta: true),
+          ),
+          item(
+            '검색',
+            _openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true),
+          ),
+        ],
+      ),
+      PlatformMenu(
+        label: '편집',
+        menus: [
+          // ⌘Z 는 입력 중이면 글자 되돌리기가 먼저 받는다(앱 안 단축키가 양보).
+          item('되돌리기', runLatestUndo),
+        ],
+      ),
+      PlatformMenu(
+        label: '보기',
+        menus: [
+          PlatformMenuItemGroup(members: views),
+          PlatformMenuItemGroup(members: [item('상세 패널 닫기', _inspector.close)]),
+        ],
+      ),
+      const PlatformMenu(
+        label: '윈도우',
+        menus: [
+          PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.minimizeWindow,
+          ),
+          PlatformProvidedMenuItem(
+            type: PlatformProvidedMenuItemType.zoomWindow,
+          ),
+        ],
+      ),
+    ];
   }
 }
 
 class _SelectDestinationIntent extends Intent {
   const _SelectDestinationIntent(this.digit);
 
-  /// 0~6 단축키 digit. AppDestination.all 의 shortcutDigit 과 매핑.
+  /// 0~9 단축키 digit. [AppDestination.shortcutDigit] 과 매핑.
   final int digit;
 }
 
+class _OpenSearchIntent extends Intent {
+  const _OpenSearchIntent();
+}
+
+class _NewTodoIntent extends Intent {
+  const _NewTodoIntent();
+}
+
+class _OpenSettingsIntent extends Intent {
+  const _OpenSettingsIntent();
+}
+
+class _UndoIntent extends Intent {
+  const _UndoIntent();
+}
+
+class _CloseInspectorIntent extends Intent {
+  const _CloseInspectorIntent();
+}
+
+/// 앱 안 단축키 (macOS 관례, UX 개선 Phase 3).
+///
+/// - `0~9` / `⌘0~9` — destination (0 오늘 · 1 전체보기 · 2 캘린더 · 3~9 카테고리).
+///   숫자만 누르는 것은 입력 중엔 꺼진다. ⌘ 조합은 입력 중에도 동작.
+/// - `⌘N` 새 할 일 · `⌘F`/`⌘K` 검색 · `⌘,` 설정
+/// - `⌘Z` — 화면에 떠 있는 되돌리기(스낵바)를 실행. 입력 중이면 글자 되돌리기에 양보.
+/// - `Esc` — 오른쪽 인스펙터 닫기 (입력 중이 아닐 때).
 class _ShortcutsHost extends StatelessWidget {
   const _ShortcutsHost({
     required this.destinations,
     required this.onSelect,
+    required this.onOpenSearch,
+    required this.onAddTodo,
+    required this.onOpenSettings,
+    required this.onCloseInspector,
+    required this.isInspectorOpen,
     required this.child,
   });
 
   final List<AppDestination> destinations;
   final void Function(int digit) onSelect;
+  final VoidCallback onOpenSearch;
+
+  /// ⌘N — 앱 안 새 할 일. (전역은 ⌘⇧N, hotkey_manager 가 담당)
+  final VoidCallback onAddTodo;
+  final VoidCallback onOpenSettings;
+
+  /// Esc — 인스펙터가 열려 있으면 닫고 true.
+  final bool Function() onCloseInspector;
+  final bool Function() isInspectorOpen;
   final Widget child;
 
-  /// 단축키 digit (0~9) ↔ LogicalKeyboardKey 매핑. destinations 의 shortcutDigit
-  /// 이 동적이라 매 build 마다 활성 키만 추려서 Shortcuts map 만든다.
   static const _digitKeys = <int, LogicalKeyboardKey>{
     0: LogicalKeyboardKey.digit0,
     1: LogicalKeyboardKey.digit1,
@@ -789,7 +843,22 @@ class _ShortcutsHost extends StatelessWidget {
       final key = _digitKeys[digit];
       if (key == null) continue;
       shortcuts[SingleActivator(key)] = _SelectDestinationIntent(digit);
+      shortcuts[SingleActivator(key, meta: true)] = _SelectDestinationIntent(
+        digit,
+      );
     }
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyF, meta: true)] =
+        const _OpenSearchIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyK, meta: true)] =
+        const _OpenSearchIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyN, meta: true)] =
+        const _NewTodoIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.comma, meta: true)] =
+        const _OpenSettingsIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.keyZ, meta: true)] =
+        const _UndoIntent();
+    shortcuts[const SingleActivator(LogicalKeyboardKey.escape)] =
+        const _CloseInspectorIntent();
 
     return Shortcuts(
       shortcuts: shortcuts,
@@ -798,6 +867,32 @@ class _ShortcutsHost extends StatelessWidget {
           _SelectDestinationIntent: _SelectDestinationAction(
             onSelect: onSelect,
           ),
+          _OpenSearchIntent: CallbackAction<_OpenSearchIntent>(
+            onInvoke: (_) {
+              onOpenSearch();
+              return null;
+            },
+          ),
+          _NewTodoIntent: CallbackAction<_NewTodoIntent>(
+            onInvoke: (_) {
+              onAddTodo();
+              return null;
+            },
+          ),
+          _OpenSettingsIntent: CallbackAction<_OpenSettingsIntent>(
+            onInvoke: (_) {
+              onOpenSettings();
+              return null;
+            },
+          ),
+          _UndoIntent: _NotWhileTypingAction<_UndoIntent>(
+            (_) => runLatestUndo(),
+            when: hasLatestUndo,
+          ),
+          _CloseInspectorIntent: _NotWhileTypingAction<_CloseInspectorIntent>(
+            (_) => onCloseInspector(),
+            when: isInspectorOpen,
+          ),
         },
         child: Focus(autofocus: true, child: child),
       ),
@@ -805,21 +900,45 @@ class _ShortcutsHost extends StatelessWidget {
   }
 }
 
-/// 0~6 키 destination 전환 Action. **TextField focus 시 disabled** 되어 사용자가 todo
-/// 제목에 숫자를 입력할 때 의도치 않은 전환이 발생하지 않게 한다.
+/// 숫자 단축키 Action. **입력 중엔 숫자만 누른 것은 꺼진다**(제목에 숫자 입력).
+/// ⌘ 조합은 오타로 눌릴 일이 없어 입력 중에도 동작한다.
 class _SelectDestinationAction extends Action<_SelectDestinationIntent> {
   _SelectDestinationAction({required this.onSelect});
 
   final void Function(int digit) onSelect;
 
   @override
-  bool isEnabled(_SelectDestinationIntent intent) => !isFocusInEditableText();
+  bool isEnabled(_SelectDestinationIntent intent) {
+    if (!isFocusInEditableText()) return true;
+    return HardwareKeyboard.instance.isMetaPressed;
+  }
 
   @override
   Object? invoke(_SelectDestinationIntent intent) {
     onSelect(intent.digit);
     return null;
   }
+}
+
+/// 입력 중이면 꺼지는 Action — 키가 입력칸(글자 되돌리기·Esc)으로 그대로 간다.
+/// [run] 이 false 를 돌려주면 처리하지 않은 것으로 보고 키를 흘려보낸다.
+class _NotWhileTypingAction<T extends Intent> extends Action<T> {
+  _NotWhileTypingAction(this.run, {this.when});
+
+  final bool Function(T intent) run;
+
+  /// 추가 조건 — false 면 꺼져서 키가 다른 곳으로 간다.
+  final bool Function()? when;
+
+  @override
+  bool isEnabled(T intent) =>
+      !isFocusInEditableText() && (when?.call() ?? true);
+
+  @override
+  bool consumesKey(T intent) => true;
+
+  @override
+  Object? invoke(T intent) => run(intent);
 }
 
 /// primaryFocus 가 [EditableText] (TextField 의 내부) 안에 있는지. 위 Action 의 isEnabled 가
@@ -834,17 +953,11 @@ bool isFocusInEditableText() {
   return ctx.findAncestorWidgetOfExactType<EditableText>() != null;
 }
 
-/// 사이드바의 카테고리 그룹 선택 결과 (미분류 = null).
-class _GroupChoice {
-  const _GroupChoice(this.groupId);
-  final String? groupId;
-}
-
-/// v1.3 — 데스크탑 사이드바. 그룹 헤더(접힘 가능) → 그 그룹의 카테고리 + 최상단
-/// '미분류' 섹션 (groupId == null 카테고리). Today / Outline / 단축키 매핑은
-/// [destinations] 의 index 를 그대로 사용 — 시각적 재배치일 뿐 selection 인덱싱은
-/// 보존된다.
-class _Sidebar extends StatefulWidget {
+/// v1.3 — 데스크탑 사이드바. 오늘·전체보기·캘린더 → 미분류 → 그룹(접힘 가능) 순.
+///
+/// 메뉴·다이얼로그는 [CategoryActions] (모바일 카테고리 목록과 공용).
+/// 그룹 머리 탭 = 전체보기 + 그 그룹 필터, chevron = 펼치기/접기(여러 그룹 동시, 저장).
+class _Sidebar extends ConsumerStatefulWidget {
   const _Sidebar({
     required this.destinations,
     required this.groups,
@@ -852,43 +965,32 @@ class _Sidebar extends StatefulWidget {
     required this.selectedGroupId,
     required this.onSelect,
     required this.onSelectGroup,
-    required this.onDeleteCategory,
-    required this.onMoveCategory,
-    required this.onArchiveCategory,
-    required this.onDeleteGroup,
-    required this.onArchiveGroup,
-    required this.onEditGroup,
-    required this.onDropCategoryToGroup,
+    required this.onAddTodo,
+    required this.onOpenSearch,
+    required this.onOpenSettings,
     required this.onMoveCategoryInto,
     required this.onReorderGroups,
   });
 
   final List<AppDestination> destinations;
   final List<Group> groups;
+
+  /// 선택된 destination index (없으면 -1).
   final int selectedIndex;
 
-  /// A안 — 선택된 그룹 id (없으면 null). non-null 이면 그 그룹 헤더가 강조되고
-  /// today/category destination 의 선택 강조는 해제된다.
+  /// 오늘·전체보기에서 켜진 그룹 필터 — 그 그룹 머리를 강조한다.
   final String? selectedGroupId;
   final ValueChanged<int> onSelect;
 
-  /// 그룹 헤더 탭 → 그 그룹 화면 진입.
+  /// 그룹 머리 탭 → 전체보기 + 그 그룹 필터.
   final ValueChanged<String> onSelectGroup;
-  final ValueChanged<AppDestination> onDeleteCategory;
-  final ValueChanged<AppDestination> onMoveCategory;
 
-  /// 카테고리 메뉴 '보관' — 활성 화면에서 숨김 (할 일 포함).
-  final ValueChanged<AppDestination> onArchiveCategory;
-  final ValueChanged<Group> onDeleteGroup;
+  /// 사이드바 위 "새 할 일" — 데스크탑의 추가 진입점(⌘N 과 같음).
+  final VoidCallback onAddTodo;
 
-  /// 그룹 메뉴 '보관' — 소속 카테고리·할 일까지 cascade 숨김.
-  final ValueChanged<Group> onArchiveGroup;
-
-  /// 그룹 헤더 메뉴 '이름·색 수정'.
-  final ValueChanged<Group> onEditGroup;
-
-  /// 드래그→드롭으로 카테고리를 그룹(groupId)/미분류(null)로 이동 (그룹 헤더/미분류 드롭).
-  final void Function(Category category, String? groupId) onDropCategoryToGroup;
+  /// 검색·설정 — ⌘K·⌘, 와 같은 경로(중복 열림 방지·인스펙터 연결 포함).
+  final VoidCallback onOpenSearch;
+  final VoidCallback onOpenSettings;
 
   /// 드래그→드롭(⠿/본문)을 다른 카테고리 행 위로 — [dragged] 를 [targetGroupId] 그룹의
   /// [orderedSiblings] 중 [insertIndex] 위치로 이동/순서변경.
@@ -904,15 +1006,14 @@ class _Sidebar extends StatefulWidget {
   final void Function(List<Group> groups, int oldIndex, int newIndex)
   onReorderGroups;
 
+  /// 접힌 그룹 id 집합의 저장 키.
+  static const collapsedKey = 'sidebar.collapsedGroups';
+
   @override
-  State<_Sidebar> createState() => _SidebarState();
+  ConsumerState<_Sidebar> createState() => _SidebarState();
 }
 
-class _SidebarState extends State<_Sidebar> {
-  /// 아코디언 — 펼쳐진 그룹은 **한 번에 하나뿐**. null 이면 모두 접힘 (대표님 요청).
-  /// 그룹 본문 탭(상세 진입) 또는 chevron 으로 그룹을 열면 나머지는 자동으로 접힌다.
-  String? _expandedGroupId;
-
+class _SidebarState extends ConsumerState<_Sidebar> {
   /// 드래그 중인 카테고리가 hover 중인 drop target. group id(String) 또는
   /// 미분류 센티넬 [_ungroupedTargetKey]. 시각 피드백용.
   Object? _hoverTarget;
@@ -920,12 +1021,10 @@ class _SidebarState extends State<_Sidebar> {
   /// '미분류' drop target 의 hover 키 (groupId == null 과 구분).
   static const Object _ungroupedTargetKey = Object();
 
-  void _toggle(String groupId) {
-    setState(() {
-      // 이미 열린 그룹을 다시 누르면 닫고, 아니면 그 그룹만 열어 나머지를 닫는다.
-      _expandedGroupId = _expandedGroupId == groupId ? null : groupId;
-    });
-  }
+  PersistedIdSet get _collapsed =>
+      ref.read(persistedIdSetProvider(_Sidebar.collapsedKey).notifier);
+
+  CategoryActions get _actions => CategoryActions.of(context);
 
   /// 그룹 순서 변경 (그룹 헤더의 드래그 핸들 ⠿). groups 전체를 재배열해 sortOrder 갱신.
   /// 백엔드(GroupsController.reorder)가 (oldIndex,newIndex) 규약을 그대로 처리한다.
@@ -941,7 +1040,9 @@ class _SidebarState extends State<_Sidebar> {
     Map<String, List<int>> byGroup,
   ) {
     final cats = byGroup[g.id] ?? const <int>[];
-    final expanded = _expandedGroupId == g.id;
+    final expanded = !ref
+        .watch(persistedIdSetProvider(_Sidebar.collapsedKey))
+        .contains(g.id);
     return Column(
       key: ValueKey('sidebar-group-${g.id}'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -952,38 +1053,48 @@ class _SidebarState extends State<_Sidebar> {
           reorderIndex: reorderIndex,
           collapsed: !expanded,
           selected: widget.selectedGroupId == g.id,
-          // 본문 탭 — 그 그룹만 펼치고(나머지는 닫힘) 상세 진입.
+          // 본문 탭 — 전체보기 + 이 그룹 필터 (접혀 있으면 펼친다).
           onSelect: () {
-            setState(() => _expandedGroupId = g.id);
+            _collapsed.set(g.id, false);
             widget.onSelectGroup(g.id);
           },
-          onToggleCollapse: () => _toggle(g.id),
+          onToggleCollapse: () => _collapsed.toggle(g.id),
           hovering: _hoverTarget == g.id,
-          onLongPress: () => _showGroupMenu(g),
+          onMenu: (position) => _actions.showGroupMenu(
+            g,
+            position: position,
+            onOpen: () => widget.onSelectGroup(g.id),
+          ),
           onWillAccept: () => setState(() => _hoverTarget = g.id),
           onLeave: () => setState(() => _hoverTarget = null),
           onAccept: (cat) {
             setState(() => _hoverTarget = null);
-            widget.onDropCategoryToGroup(cat, g.id);
+            _actions.moveCategoryToGroup(cat, g.id);
           },
         ),
-        if (expanded && cats.isNotEmpty) _categorySection(cats),
+        // 그룹 안 카테고리는 들여써서 소속이 눈에 보이게.
+        if (expanded && cats.isNotEmpty) _categorySection(cats, indent: true),
       ],
     );
   }
 
   /// destination index → SidebarItem 위젯. 카테고리만 삭제/이동 컨텍스트 메뉴 + 드래그.
-  Widget _item(int index, {Key? key}) {
+  Widget _item(int index, {Key? key, bool indent = false}) {
     final dest = widget.destinations[index];
     final isCategory = dest.kind == DestinationKind.category;
     return SidebarItem(
       key: key,
       destination: dest,
-      // 그룹 화면이 떠 있는 동안엔 destination 강조를 끈다.
-      selected: widget.selectedGroupId == null && index == widget.selectedIndex,
+      indent: indent,
+      // "오늘" 옆 남은 할 일 수 — 사이드바만 봐도 오늘 얼마 남았는지.
+      badge: dest.isToday ? ref.watch(undoneTodayCountProvider) : 0,
+      selected: index == widget.selectedIndex,
       onTap: () => widget.onSelect(index),
-      // 카테고리만 우클릭 / (드래그 불가 시) long-press 로 컨텍스트 메뉴 (삭제 / 그룹 이동).
-      onLongPress: isCategory ? () => _showCategoryMenu(dest) : null,
+      // 카테고리만 우클릭 → 커서 위치 메뉴 (수정 · 그룹 이동 · 보관 · 삭제).
+      onContextMenu: isCategory
+          ? (position) =>
+                _actions.showCategoryMenu(dest.category!, position: position)
+          : null,
       // 카테고리만 본문 길게누름 / ⠿ 로 드래그 이동·순서변경 가능 (E/K 통합).
       dragData: isCategory ? dest.category : null,
     );
@@ -992,7 +1103,7 @@ class _SidebarState extends State<_Sidebar> {
   /// 같은 그룹/미분류 섹션 — 각 행을 DragTarget 으로 감싸, 다른 카테고리를 그 행 위로
   /// 드롭하면 그 위치(앞)로 이동/순서변경(K, E 통합). 드래그 소스는 행 본문 길게누름
   /// 또는 ⠿ 핸들(SidebarItem 내부). 그룹 이동은 그룹 헤더/미분류 DragTarget 이 처리.
-  Widget _categorySection(List<int> indices) {
+  Widget _categorySection(List<int> indices, {bool indent = false}) {
     final siblings = [
       for (final i in indices) widget.destinations[i].category!,
     ];
@@ -1004,93 +1115,10 @@ class _SidebarState extends State<_Sidebar> {
             target: siblings[i],
             sectionSiblings: siblings,
             onMoveInto: widget.onMoveCategoryInto,
-            child: _item(indices[i]),
+            child: _item(indices[i], indent: indent),
           ),
       ],
     );
-  }
-
-  /// 카테고리 long-press / 우클릭 메뉴 — 삭제 / 그룹 이동.
-  Future<void> _showCategoryMenu(AppDestination dest) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.drive_file_move_outlined),
-              title: const Text('그룹 이동'),
-              onTap: () => Navigator.of(ctx).pop('move'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.inventory_2_outlined),
-              title: const Text('보관'),
-              subtitle: const Text('할 일과 함께 숨겨요'),
-              onTap: () => Navigator.of(ctx).pop('archive'),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.delete_outline,
-                color: Theme.of(ctx).colorScheme.error,
-              ),
-              title: const Text('삭제'),
-              onTap: () => Navigator.of(ctx).pop('delete'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (action == 'move') {
-      widget.onMoveCategory(dest);
-    } else if (action == 'archive') {
-      widget.onArchiveCategory(dest);
-    } else if (action == 'delete') {
-      widget.onDeleteCategory(dest);
-    }
-  }
-
-  /// 그룹 헤더 long-press / 우클릭 메뉴 — 이름·색 수정 / 삭제. (그룹 삭제 시 속한
-  /// 카테고리는 '미분류'로 이동되며 차단되지 않는다 — repo deleteById 의 detach 로직.)
-  Future<void> _showGroupMenu(Group group) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('이름·색 수정'),
-              onTap: () => Navigator.of(ctx).pop('edit'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.inventory_2_outlined),
-              title: const Text('보관'),
-              subtitle: const Text('카테고리·할 일까지 함께 숨겨요'),
-              onTap: () => Navigator.of(ctx).pop('archive'),
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.delete_outline,
-                color: Theme.of(ctx).colorScheme.error,
-              ),
-              title: Text("'${group.label}' 그룹 삭제"),
-              onTap: () => Navigator.of(ctx).pop('delete'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (action == 'edit') {
-      widget.onEditGroup(group);
-    } else if (action == 'archive') {
-      widget.onArchiveGroup(group);
-    } else if (action == 'delete') {
-      widget.onDeleteGroup(group);
-    }
   }
 
   /// 미분류 섹션 — DragTarget(드롭하면 그룹에서 빼 미분류로) + 라벨 + 그 안의 카테고리.
@@ -1106,7 +1134,7 @@ class _SidebarState extends State<_Sidebar> {
       onLeave: (_) => setState(() => _hoverTarget = null),
       onAcceptWithDetails: (details) {
         setState(() => _hoverTarget = null);
-        widget.onDropCategoryToGroup(details.data, null);
+        _actions.moveCategoryToGroup(details.data, null);
       },
       builder: (context, candidate, rejected) {
         return Container(
@@ -1135,10 +1163,9 @@ class _SidebarState extends State<_Sidebar> {
                     AppTokens.space8,
                   ),
                   child: Text(
-                    '여기로 드래그하면 그룹에서 빼요',
+                    '여기로 끌어 놓으면 그룹에서 빠져요',
                     style: textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.4),
-                      fontStyle: FontStyle.italic,
+                      color: scheme.onSurface.withValues(alpha: 0.55),
                     ),
                   ),
                 ),
@@ -1153,13 +1180,16 @@ class _SidebarState extends State<_Sidebar> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final archivedCount =
+        (ref.watch(archivedCategoriesProvider).asData?.value.length ?? 0) +
+        (ref.watch(archivedGroupsProvider).asData?.value.length ?? 0);
 
     // 카테고리 destination 들을 groupId 별로 분류 (index 보존).
     final ungrouped = <int>[];
     final byGroup = <String, List<int>>{};
     int? outlineIndex;
     int? todayIndex;
-    int? timelineIndex;
+    int? calendarIndex;
     for (var i = 0; i < widget.destinations.length; i++) {
       final d = widget.destinations[i];
       switch (d.kind) {
@@ -1169,8 +1199,8 @@ class _SidebarState extends State<_Sidebar> {
         case DestinationKind.outline:
           outlineIndex = i;
           break;
-        case DestinationKind.timeline:
-          timelineIndex = i;
+        case DestinationKind.calendar:
+          calendarIndex = i;
           break;
         case DestinationKind.category:
           final gid = d.category?.groupId;
@@ -1202,25 +1232,64 @@ class _SidebarState extends State<_Sidebar> {
               ),
             ),
             IconButton(
+              key: const ValueKey('search-button'),
+              icon: const Icon(Icons.search, size: 20),
+              tooltip: '검색 (⌘F · ⌘K)',
+              visualDensity: VisualDensity.compact,
+              onPressed: widget.onOpenSearch,
+            ),
+            IconButton(
               key: const ValueKey('settings-button'),
               icon: const Icon(Icons.settings_outlined, size: 20),
-              tooltip: '설정',
+              tooltip: '설정 (⌘,)',
               visualDensity: VisualDensity.compact,
-              onPressed: () => SettingsSheet.show(context),
+              onPressed: widget.onOpenSettings,
             ),
           ],
+        ),
+      ),
+      // 새 할 일 — 항상 같은 자리(떠 있는 버튼은 인스펙터를 가려서 뺐다).
+      Padding(
+        padding: const EdgeInsets.fromLTRB(
+          AppTokens.space12,
+          0,
+          AppTokens.space12,
+          AppTokens.space12,
+        ),
+        child: Tooltip(
+          message: '새 할 일 (⌘N · 다른 앱에서 ⌘⇧N)',
+          child: FilledButton.tonal(
+            key: const ValueKey('sidebar-new-todo'),
+            onPressed: widget.onAddTodo,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(40),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.space12,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.add, size: 18),
+                const SizedBox(width: AppTokens.space8),
+                const Expanded(child: Text('새 할 일')),
+                Text(
+                  '⌘N',
+                  style: textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSecondaryContainer.withValues(
+                      alpha: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
       if (todayIndex != null) _item(todayIndex),
       // v1.4 (Task G) — 전체보기를 '오늘' 바로 다음으로 (카테고리/그룹 섹션 앞).
       if (outlineIndex != null) _item(outlineIndex),
-      // v1.5 — 타임라인 (날짜 지정 항목 전역 뷰). 전체보기 다음.
-      if (timelineIndex != null) _item(timelineIndex),
-      // 미분류 섹션 — 그룹이 있으면 DragTarget(그룹 빼기)+라벨, 없으면 평면 리스트.
-      if (widget.groups.isEmpty) ...[
-        if (ungrouped.isNotEmpty) _categorySection(ungrouped),
-      ] else
-        _ungroupedSection(ungrouped, textTheme),
+      // v1.6 — 캘린더 (월 달력 + 선택일 목록). 전체보기 다음, v1.5 타임라인 자리.
+      if (calendarIndex != null) _item(calendarIndex),
       // 그룹별 섹션 — 헤더의 드래그 핸들(⠿)로 그룹 순서 변경(ReorderableListView).
       // 바깥 ListView 안에 들어가므로 shrinkWrap + NeverScrollable. 각 섹션은
       // 헤더(탭=그룹 화면 진입, chevron=접힘 토글, 드롭 타겟) + 펼침 시 카테고리.
@@ -1237,7 +1306,34 @@ class _SidebarState extends State<_Sidebar> {
               _buildGroupSection(i, widget.groups[i], byGroup),
           ],
         ),
-      // v1.5 — 카테고리/그룹 추가는 FAB(+) 의 "추가" 시트로 일원화됨 (대표님 요청).
+      // 미분류 — 그룹들 **아래** (전체보기·카테고리 목록과 같은 순서, Phase 2).
+      // 그룹이 있으면 DragTarget(그룹 빼기)+라벨, 없으면 평면 리스트.
+      if (widget.groups.isEmpty) ...[
+        if (ungrouped.isNotEmpty) _categorySection(ungrouped),
+      ] else
+        _ungroupedSection(ungrouped, textTheme),
+      // 카테고리/그룹 추가 — 목록 바로 아래 (FAB/Cmd+N 은 새 할 일 전용, Phase 0).
+      const SizedBox(height: AppTokens.space8),
+      const AddEntityButtons(),
+      // 보관함 — 숨긴 그룹·카테고리가 있을 때만 (설정 안에 묻혀 있던 입구).
+      if (archivedCount > 0)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
+          child: TextButton.icon(
+            key: const ValueKey('sidebar-archive'),
+            style: TextButton.styleFrom(
+              foregroundColor: colorScheme.onSurface.withValues(alpha: 0.72),
+              alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.space12,
+                vertical: AppTokens.space8,
+              ),
+            ),
+            onPressed: () => ArchiveScreen.show(context),
+            icon: const Icon(Icons.inventory_2_outlined, size: 18),
+            label: Text('보관함 ($archivedCount)'),
+          ),
+        ),
       const SizedBox(height: AppTokens.space12),
     ];
 
@@ -1298,7 +1394,7 @@ class _GroupHeader extends StatelessWidget {
     required this.selected,
     required this.onSelect,
     required this.onToggleCollapse,
-    this.onLongPress,
+    this.onMenu,
     this.hovering = false,
     this.onWillAccept,
     this.onLeave,
@@ -1318,8 +1414,8 @@ class _GroupHeader extends StatelessWidget {
   /// chevron 탭 — 접힘 토글.
   final VoidCallback onToggleCollapse;
 
-  /// long-press / 우클릭 — 그룹 컨텍스트 메뉴 (수정 / 삭제). 카테고리 아이템과 동일 패턴.
-  final VoidCallback? onLongPress;
+  /// long-press(위치 null → 시트) / 우클릭(커서 위치 → 팝업) — 그룹 메뉴.
+  final void Function(Offset? position)? onMenu;
 
   /// 카테고리 드래그가 이 헤더 위에 hover 중인지 — 색/테두리 피드백.
   final bool hovering;
@@ -1351,8 +1447,10 @@ class _GroupHeader extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTokens.radiusM),
           onTap: onSelect,
-          onLongPress: onLongPress,
-          onSecondaryTap: onLongPress,
+          onLongPress: onMenu == null ? null : () => onMenu!(null),
+          onSecondaryTapUp: onMenu == null
+              ? null
+              : (d) => onMenu!(d.globalPosition),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppTokens.radiusM),
@@ -1511,8 +1609,11 @@ class SidebarItem extends StatefulWidget {
     required this.selected,
     required this.onTap,
     this.onLongPress,
+    this.onContextMenu,
     this.autofocus = false,
     this.dragData,
+    this.indent = false,
+    this.badge = 0,
   });
 
   final AppDestination destination;
@@ -1521,6 +1622,15 @@ class SidebarItem extends StatefulWidget {
 
   /// 우클릭 / (드래그 불가 시) long-press — 카테고리 컨텍스트 메뉴 진입점. null 이면 비활성.
   final VoidCallback? onLongPress;
+
+  /// 우클릭 — 커서 위치(global)를 받아 그 자리에 메뉴. 있으면 [onLongPress] 대신 쓴다.
+  final void Function(Offset globalPosition)? onContextMenu;
+
+  /// 그룹 안 카테고리 — 12px 들여쓰기.
+  final bool indent;
+
+  /// 오른쪽 숫자 배지(0 이면 없음) — "오늘" 의 남은 할 일 수.
+  final int badge;
 
   /// 테스트 결정성 — true 면 mount 직후 InkWell 이 focus 를 잡는다.
   final bool autofocus;
@@ -1538,6 +1648,9 @@ class SidebarItemState extends State<SidebarItem> {
   /// 키보드 focus 가 이 item 에 들어와 있는지. true 면 outline ring 표시 — 마우스 사용자
   /// 에게도 영향 X (InkWell.onFocusChange 는 키보드 traversal 에서만 true 가 됨).
   bool _focused = false;
+
+  /// 마우스가 올라와 있는지 — ⠿ 는 이때만 보인다(평소엔 목록이 조용하게).
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1560,9 +1673,11 @@ class SidebarItemState extends State<SidebarItem> {
     final draggable = widget.dragData != null;
 
     final tile = Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.space8,
-        vertical: AppTokens.space2,
+      padding: EdgeInsets.only(
+        left: AppTokens.space8 + (widget.indent ? AppTokens.space12 : 0),
+        right: AppTokens.space8,
+        top: AppTokens.space2,
+        bottom: AppTokens.space2,
       ),
       child: Tooltip(
         message: widget.destination.tooltipWithShortcut,
@@ -1575,8 +1690,13 @@ class SidebarItemState extends State<SidebarItem> {
             onTap: widget.onTap,
             // 드래그 가능하면 long-press 는 드래그 전용 → 메뉴는 우클릭으로만.
             onLongPress: draggable ? null : widget.onLongPress,
-            // 데스크탑의 우클릭은 항상 컨텍스트 메뉴 (삭제 / 그룹 이동 진입점).
-            onSecondaryTap: widget.onLongPress,
+            // 데스크탑의 우클릭은 항상 컨텍스트 메뉴 (수정 · 그룹 이동 · 보관 · 삭제).
+            onSecondaryTap: widget.onContextMenu == null
+                ? widget.onLongPress
+                : null,
+            onSecondaryTapUp: widget.onContextMenu == null
+                ? null
+                : (d) => widget.onContextMenu!(d.globalPosition),
             autofocus: widget.autofocus,
             // 키보드 focus 가 들어왔다 나갔다 할 때 outline ring 토글.
             onFocusChange: (f) => setState(() => _focused = f),
@@ -1607,24 +1727,37 @@ class SidebarItemState extends State<SidebarItem> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  if (widget.badge > 0)
+                    Text(
+                      '${widget.badge}',
+                      key: const ValueKey('sidebar-badge'),
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: scheme.onSurface.withValues(alpha: 0.6),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   if (draggable)
-                    Draggable<Category>(
-                      // ⠿ 를 잡고 → 그룹 헤더/미분류에 놓으면 그룹 이동, 다른 행에 놓으면
-                      // 순서변경(상위 DragTarget 들이 처리). 마우스로 바로 끌림(즉시 드래그).
-                      data: widget.dragData!,
-                      dragAnchorStrategy: pointerDragAnchorStrategy,
-                      feedback: _CategoryDragFeedback(
-                        destination: widget.destination,
-                      ),
-                      childWhenDragging: Icon(
-                        Icons.drag_indicator,
-                        size: 16,
-                        color: scheme.onSurface.withValues(alpha: 0.2),
-                      ),
-                      child: Icon(
-                        Icons.drag_indicator,
-                        size: 16,
-                        color: scheme.onSurface.withValues(alpha: 0.4),
+                    AnimatedOpacity(
+                      opacity: _hovered || _focused ? 1 : 0,
+                      duration: AppTokens.motionFast,
+                      child: Draggable<Category>(
+                        // ⠿ 를 잡고 → 그룹 헤더/미분류에 놓으면 그룹 이동, 다른 행에 놓으면
+                        // 순서변경(상위 DragTarget 들이 처리). 마우스로 바로 끌림(즉시 드래그).
+                        data: widget.dragData!,
+                        dragAnchorStrategy: pointerDragAnchorStrategy,
+                        feedback: _CategoryDragFeedback(
+                          destination: widget.destination,
+                        ),
+                        childWhenDragging: Icon(
+                          Icons.drag_indicator,
+                          size: 16,
+                          color: scheme.onSurface.withValues(alpha: 0.2),
+                        ),
+                        child: Icon(
+                          Icons.drag_indicator,
+                          size: 16,
+                          color: scheme.onSurface.withValues(alpha: 0.4),
+                        ),
                       ),
                     ),
                 ],
@@ -1635,14 +1768,19 @@ class SidebarItemState extends State<SidebarItem> {
       ),
     );
 
-    if (!draggable) return tile;
+    final hoverable = MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: tile,
+    );
+    if (!draggable) return hoverable;
     // 길게 눌러 그룹 헤더/미분류로 드롭 → 그룹 이동(E). ⠿ 순서변경과 별개 제스처.
     return LongPressDraggable<Category>(
       data: widget.dragData!,
       dragAnchorStrategy: pointerDragAnchorStrategy,
       feedback: _CategoryDragFeedback(destination: widget.destination),
       childWhenDragging: Opacity(opacity: 0.4, child: tile),
-      child: tile,
+      child: hoverable,
     );
   }
 }
@@ -1693,6 +1831,26 @@ class _CategoryDragFeedback extends StatelessWidget {
   }
 }
 
+/// 데스크탑 본문 최대 폭 — 넓은 창에서 가운데 정렬.
+class _ReadableWidth extends StatelessWidget {
+  const _ReadableWidth({required this.child});
+
+  final Widget child;
+
+  static const double maxWidth = 960;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: maxWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
 class _MainArea extends StatelessWidget {
   const _MainArea({required this.destination});
 
@@ -1702,168 +1860,8 @@ class _MainArea extends StatelessWidget {
   Widget build(BuildContext context) {
     if (destination.isToday) return const HomeScreen();
     if (destination.isOutline) return const OutlineScreen();
-    if (destination.isTimeline) return const TimelineScreen();
+    // v1.6 — 캘린더. 흡수된 타임라인 목록은 이 화면의 `[목록]` 세그먼트에 있다.
+    if (destination.isCalendar) return const CalendarScreen();
     return CategoryView(category: destination.category!);
-  }
-}
-
-/// FAB / Cmd+N 추가 선택 시트의 결과.
-enum _AddAction { todo, category, group }
-
-/// FAB / Cmd+N 진입 시 먼저 뜨는 "무엇을 추가할까요?" 하단 시트 (대표님 요청).
-/// 새 할일 / 카테고리 / 그룹 3 동선을 한곳에 모은다 — Drawer 의 추가 버튼들은 제거됨.
-class _AddActionSheet extends StatelessWidget {
-  const _AddActionSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppTokens.space12,
-          AppTokens.space8,
-          AppTokens.space12,
-          AppTokens.space16,
-        ),
-        child: Material(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(AppTokens.radiusL),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 드래그 핸들
-              Container(
-                margin: const EdgeInsets.only(top: AppTokens.space8),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.onSurface.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(AppTokens.radiusFull),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space16,
-                  AppTokens.space8,
-                ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '무엇을 추가할까요?',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-todo',
-                icon: Icons.check_circle_outline,
-                color: scheme.primary,
-                title: '새 할 일',
-                subtitle: '할 일을 추가합니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.todo),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-category',
-                icon: Icons.label_outline,
-                color: const Color(0xFFF97316),
-                title: '카테고리 추가',
-                subtitle: '새 분류를 만듭니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.category),
-              ),
-              _AddActionTile(
-                valueKey: 'add-action-group',
-                icon: Icons.create_new_folder_outlined,
-                color: const Color(0xFF8B5CF6),
-                title: '그룹 추가',
-                subtitle: '카테고리를 묶는 그룹을 만듭니다',
-                onTap: () => Navigator.of(context).pop(_AddAction.group),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AddActionTile extends StatelessWidget {
-  const _AddActionTile({
-    required this.valueKey,
-    required this.icon,
-    required this.color,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final String valueKey;
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return InkWell(
-      key: ValueKey(valueKey),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppTokens.space16,
-          vertical: AppTokens.space12,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(AppTokens.radiusM),
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(width: AppTokens.space16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: AppTokens.space2),
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurface.withValues(alpha: 0.6),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.chevron_right,
-              color: scheme.onSurface.withValues(alpha: 0.3),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

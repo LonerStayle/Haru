@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/providers.dart';
 import '../../data/todo_repository.dart';
+import '../../domain/category.dart';
+import '../../domain/policies/move_policy.dart';
 import '../../domain/todo.dart';
 
 /// Todo 한 건에 대한 도메인 액션 (체크 토글 / 삭제 / 카테고리 변경 등).
@@ -39,9 +41,60 @@ class TodoActionsController {
   /// id 기준 삭제. 호출자가 [restore] 로 되돌릴 수 있도록 원본은 호출자가 보관.
   Future<void> delete(Todo todo) => _repo.deleteById(todo.id);
 
+  /// 항목과 그 **모든 하위 항목**을 지운다. 되돌리기용 스냅샷(본인 먼저)을 돌려준다.
+  ///
+  /// [delete] 는 한 줄만 지워 하위 항목이 부모 없는 채 남았다(어느 목록에도 안 보이지만
+  /// 카테고리 건수엔 잡히는 유령). 목록의 삭제는 이쪽을 쓴다. 되돌리기 = [restoreAll].
+  ///
+  /// [all] 이 있으면 그 목록으로 자손을 찾는다(화면이 이미 들고 있는 전체 목록).
+  Future<List<Todo>> deleteTree(Todo todo, {List<Todo>? all}) async {
+    final everything = all ?? await _repo.watchAll().first;
+    var root = todo;
+    for (final t in everything) {
+      if (t.id == todo.id) {
+        root = t;
+        break;
+      }
+    }
+    final snapshot = [root, ...MovePolicy.descendants(todo.id, everything)];
+    // 부모부터 지운다 — 목록에서 그 줄이 첫 갱신에 바로 사라진다(밀어서 지운 행이
+    // 자식 삭제마다 다시 그려지면 Dismissible 이 "이미 지운 행" 오류를 낸다).
+    for (final t in snapshot) {
+      await _repo.deleteById(t.id);
+    }
+    return snapshot;
+  }
+
+  /// 삭제 되돌리기 — [restoreAll] 과 같되 **캘린더 연결은 끊고** 되살린다.
+  ///
+  /// 삭제할 때 연결된 캘린더 일정도 지우기로 예약됐으므로, 옛 일정 id 를 그대로 두면
+  /// 이후 수정이 없는 일정으로 간다. 연결을 비워 두면 저장 규칙(기본 캘린더 등록 설정)에
+  /// 따라 새 일정으로 다시 만들어진다.
+  Future<void> restoreDeleted(List<Todo> snapshot) async {
+    for (final t in snapshot) {
+      await _repo.upsert(
+        t.calendarEventId == null
+            ? t
+            : t.copyWith(
+                calendarEventId: null,
+                calendarId: null,
+                calendarProvider: null,
+              ),
+      );
+    }
+  }
+
   /// [delete] 로 지워진 Todo 를 그대로 복원 (id 동일, updatedAt 보존).
   /// Undo SnackBar 의 "되돌리기" 액션이 호출한다.
   Future<void> restore(Todo todo) => _repo.upsert(todo);
+
+  /// [restore] 의 다건 버전 — 이동 직전 스냅샷(본인 + 자손)을 그대로 되돌려 쓴다.
+  /// parentId / category / sortOrder / updatedAt 이 모두 원본 값으로 복구된다.
+  Future<void> restoreAll(List<Todo> snapshot) async {
+    for (final t in snapshot) {
+      await _repo.upsert(t);
+    }
+  }
 
   /// v1.2 — 기존 todo 의 필드 수정 (title / description / category / dueAt / type).
   /// updatedAt 은 자동으로 [_now] 의 호출 시점 값으로 갱신 — LWW 동기화 호환.
@@ -49,15 +102,211 @@ class TodoActionsController {
   /// Task B — 대표님 요구: 시트 편집 시 그 항목을 **맨 위로** (수정 기준 최신 위로).
   /// 같은 형제(현재 category+parentId) min sortOrder - 1 로 bump. 형제가 자기 자신뿐이면
   /// 그대로 유지된다 (min == 자기 sortOrder → min-1 로 살짝 위, 무해).
+  ///
+  /// **단, 진짜 바뀐 게 있을 때만 올린다.** 목록에서 항목을 탭하면 편집 시트가 열리므로
+  /// (= 열람 경로), 아무것도 고치지 않고 저장만 눌러도 bump 되면 조회만으로 자리가 튄다.
+  /// 내용이 그대로면 [_isUnchanged] 가 잡아내 아무것도 쓰지 않는다 (updatedAt 도 보존).
   Future<Todo> update(Todo updated) async {
+    final current = await _repo.getById(updated.id);
+    if (current != null && _isUnchanged(current, updated)) return current;
+
     final minSibling = await _repo.minSiblingSortOrder(
       categoryId: updated.category.id,
       parentId: updated.parentId,
     );
     final bumped = (minSibling ?? updated.sortOrder) - 1;
-    final synced = updated.copyWith(updatedAt: _now(), sortOrder: bumped);
+    final now = _now();
+    final synced = updated.copyWith(updatedAt: now, sortOrder: bumped);
+    await _repo.upsert(synced);
+    // 카테고리를 바꿨으면 자손도 통째로 따라간다. 이 앱은 자식이 부모 카테고리를
+    // 상속하는 구조라, 본인만 옮기면 자손이 옛 카테고리 화면·집계에 남아 "카테고리를
+    // 바꿨는데 절반만 옮겨간" 상태가 된다.
+    if (current != null && current.category.id != synced.category.id) {
+      await _syncSubtreeCategory(synced, now);
+    }
+    return synced;
+  }
+
+  /// **sortOrder 를 보존해야 하는 저장 경로 일반.**
+  ///
+  /// 이 앱의 확립된 불변식은 "순서는 명시적 조작으로만 바뀐다" 이다. [update] 만
+  /// 예외로 "시트에서 편집하면 맨 위로" 규칙이라 sortOrder 를 형제 min-1 로 bump
+  /// 하는데, 그건 **제목·내용을 고쳤을 때**의 규칙이다. 내용 편집이 아닌 변경에
+  /// 그 bump 가 새면 사용자가 시키지 않은 자리 이동이 된다. 그런 변경은 전부 이
+  /// 경로로 저장한다:
+  ///  - 달력에서 항목을 다른 날짜 칸으로 끌기 (v1.6) — *일정* 조작이지 *순서* 조작이
+  ///    아니다. bump 가 새면 날짜만 옮겼는데 '오늘'/'전체보기' 맨 위로 튀어오른다.
+  ///  - 편집 시트의 3-상태(□/△/◯) 탭 — 의미상 목록 타일의 체크·세모 토글과 같은
+  ///    행위다. [toggle] / [toggleInProgress] 가 자리를 안 바꾸므로 이쪽도 안 바꾼다.
+  ///
+  /// [updated] 는 원본에서 **의도한 필드만** 바꾼 값이어야 한다 (예: `applyDateDrop`
+  /// 의 결과, [Todo.withStatus] 의 결과). 저장된 값과 내용이 같으면 아무것도 쓰지
+  /// 않는다 — updatedAt 도 보존된다.
+  ///
+  /// 저장된 sortOrder 를 우선 쓰는 이유: 화면이 들고 있는 Todo 는 스트림 지연으로
+  /// 살짝 옛 값일 수 있는데, 그걸 그대로 되쓰면 다른 화면의 재정렬을 되돌릴 수 있다.
+  Future<Todo> updatePreservingOrder(Todo updated) async {
+    final current = await _repo.getById(updated.id);
+    if (current != null && _isUnchanged(current, updated)) return current;
+    final synced = updated.copyWith(
+      updatedAt: _now(),
+      sortOrder: current?.sortOrder ?? updated.sortOrder,
+    );
     await _repo.upsert(synced);
     return synced;
+  }
+
+  /// 체크 되돌리기 — [before] 의 3-상태(doneAt / startedAt)만 **지금 저장된 행**에
+  /// 되돌려 쓴다. 되돌리기 전에 제목 등을 고쳤어도 그 편집은 살리고, 진행중이던
+  /// 항목은 원래 시작 시각 그대로 돌아간다. 순서는 [updatePreservingOrder] 가 보존.
+  Future<void> restoreStatus(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(doneAt: before.doneAt, startedAt: before.startedAt),
+    );
+  }
+
+  /// 날짜 되돌리기 — [before] 의 일정(dueAt / endAt / 종일 / 시각 기준)만 **지금 저장된
+  /// 행**에 되돌려 쓴다. 캘린더 드래그의 되돌리기용. 그사이 고친 제목 등은 살린다.
+  Future<void> restoreSchedule(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(
+        dueAt: before.dueAt,
+        endAt: before.endAt,
+        isAllDay: before.isAllDay,
+        timeAnchor: before.timeAnchor,
+      ),
+    );
+  }
+
+  /// 저장 대상이 현재 저장된 값과 **내용상 동일**한지.
+  ///
+  /// 순서·동기화 메타(sortOrder / updatedAt)는 비교에서 제외한다 — 판정의 목적이
+  /// "이 둘을 갱신할지" 이기 때문. 카테고리는 **id 만** 본다 (label/색/아이콘은 조회
+  /// 시점의 categories join 으로 복원되는 표시 속성이라 내용 변경이 아니다).
+  bool _isUnchanged(Todo current, Todo updated) {
+    if (updated.category.id != current.category.id) return false;
+    return updated.copyWith(
+          sortOrder: current.sortOrder,
+          updatedAt: current.updatedAt,
+          category: current.category,
+        ) ==
+        current;
+  }
+
+  /// 할 일 이동 — [item] 을 [newParent] 의 하위로, [newParent] 가 null 이면
+  /// [targetCategory] 의 최상위(root)로 옮긴다. 자손은 [Todo.parentId] 로 딸려오므로
+  /// 서브트리가 통째로 따라간다.
+  ///
+  /// 지원 경로 (모두 이 한 메서드):
+  ///  - 하위 → 다른 항목의 하위, 상위 → 다른 항목의 하위 ([newParent] 지정)
+  ///  - 하위 → 상위 ([newParent] = null)
+  ///
+  /// [all] 은 사이클 판정·자손 수집용 전체 todo (호출자가 `allTodosProvider` 로 전달).
+  /// 이동 후 위치는 새 형제들의 **맨 위** (min sortOrder - 1) — 방금 옮긴 항목을 바로
+  /// 찾을 수 있게. 사이클이 되거나 위치 변화가 없으면 아무것도 쓰지 않고 false.
+  Future<bool> moveTo(
+    Todo item, {
+    required Todo? newParent,
+    required Category targetCategory,
+    required List<Todo> all,
+  }) async {
+    final newParentId = newParent?.id;
+    // 자식은 부모 카테고리를 상속 — 부모 밑으로 가면 부모의 카테고리가 곧 목적지다.
+    final category = newParent?.category ?? targetCategory;
+    if (!MovePolicy.canMove(item: item, newParentId: newParentId, all: all)) {
+      return false;
+    }
+    if (MovePolicy.isNoop(
+      item: item,
+      newParentId: newParentId,
+      newCategoryId: category.id,
+    )) {
+      return false;
+    }
+
+    final minSibling = await _repo.minSiblingSortOrder(
+      categoryId: category.id,
+      parentId: newParentId,
+    );
+    final now = _now();
+    final moved = item.copyWith(
+      parentId: newParentId,
+      category: category,
+      sortOrder: (minSibling ?? 0) - 1,
+      updatedAt: now,
+    );
+    await _repo.upsert(moved);
+    await _syncSubtreeCategory(moved, now, all: all);
+    return true;
+  }
+
+  /// [root] 의 자손 category 를 root 와 일치시킨다. 이미 같은 자손은 건너뛰어
+  /// 불필요한 upsert(= outbox row)를 만들지 않는다.
+  Future<void> _syncSubtreeCategory(
+    Todo root,
+    DateTime now, {
+    List<Todo>? all,
+  }) async {
+    final snapshot = all ?? await _repo.watchAll().first;
+    for (final d in MovePolicy.descendants(root.id, snapshot)) {
+      if (d.category.id == root.category.id) continue;
+      await _repo.upsert(d.copyWith(category: root.category, updatedAt: now));
+    }
+  }
+
+  /// 오늘 화면의 **섹션 간 드래그** — [item] 을 [target] 카테고리의
+  /// [targetSiblings] 중 [insertIndex] 자리로 옮긴다.
+  ///
+  /// [reorderSiblings] 와 [moveTo] 의 중간 경로다. 순서만 바꾸는 것도 아니고
+  /// 부모를 고르는 것도 아니라, "다른 카테고리의 이 자리" 를 한 번에 처리한다:
+  ///
+  ///  - **부모에서 분리** — 카테고리가 바뀌면 부모에서 떼어 root 로 올린다. 이 앱은
+  ///    자식이 부모 카테고리를 상속하는 구조라, 안 떼면 다른 카테고리 부모 밑에
+  ///    남아 화면상 그 자리에 그대로 보인다 (편집 시트의 카테고리 변경과 같은 규칙).
+  ///  - **자손 동기화** — 서브트리 category 를 함께 맞춘다. 안 맞추면 자손이 옛
+  ///    카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다.
+  ///  - **자리 배치** — 대상 형제들에 삽입한 뒤 연속 sortOrder 를 재부여한다.
+  ///
+  /// 같은 카테고리로의 호출은 아무것도 하지 않는다(그건 [reorderSiblings] 몫).
+  Future<bool> moveToCategoryAt(
+    Todo item, {
+    required Category target,
+    required List<Todo> targetSiblings,
+    required int insertIndex,
+    List<Todo>? all,
+  }) async {
+    if (item.category.id == target.id) return false;
+
+    final moved = item.copyWith(parentId: null, category: target);
+    final placed = [...targetSiblings.where((t) => t.id != item.id)];
+    var at = insertIndex;
+    if (at < 0) at = 0;
+    if (at > placed.length) at = placed.length;
+    placed.insert(at, moved);
+
+    // 기준 min — 대상 집합의 최소 sortOrder (섹션의 맨 위 위치 유지).
+    var base = 0;
+    if (targetSiblings.isNotEmpty) {
+      base = targetSiblings.first.sortOrder;
+      for (final s in targetSiblings) {
+        if (s.sortOrder < base) base = s.sortOrder;
+      }
+    }
+
+    final now = _now();
+    for (var i = 0; i < placed.length; i++) {
+      final t = placed[i];
+      final desired = base + i;
+      // 옮겨온 항목은 category/parentId 도 바뀌므로 sortOrder 동률이어도 저장한다.
+      if (t.id != moved.id && t.sortOrder == desired) continue;
+      await _repo.upsert(t.copyWith(sortOrder: desired, updatedAt: now));
+    }
+    await _syncSubtreeCategory(moved.copyWith(category: target), now, all: all);
+    return true;
   }
 
   /// Task B — 같은 부모의 형제들 사이 순서 재정렬 (within-sibling).
@@ -99,6 +348,73 @@ class TodoActionsController {
         await _repo.upsert(t.copyWith(sortOrder: desired, updatedAt: now));
       }
     }
+  }
+
+  /// 설명 속 목록 → 하위 항목 (2026-09-25). [items] 를 입력 순서 그대로 [parent] 의
+  /// 하위로 만들고, 부모 설명은 [remainingDescription] 으로 바꾼다.
+  ///
+  /// 새 하위들은 기존 하위들 **위**에 입력 순서대로 놓인다(일괄 추가와 같은 규칙).
+  /// 되돌리기용으로 만든 하위 목록과 바꾸기 전 부모를 돌려준다 — [undoChecklist] 에 넘긴다.
+  Future<({List<Todo> created, Todo parentBefore})> checklistToChildren(
+    Todo parent, {
+    required List<({String title, bool done})> items,
+    required String? remainingDescription,
+  }) async {
+    final minSibling = await _repo.minSiblingSortOrder(
+      categoryId: parent.category.id,
+      parentId: parent.id,
+    );
+    final min = minSibling ?? 0;
+    final n = items.length;
+    final created = <Todo>[];
+    for (var i = 0; i < n; i++) {
+      var child = Todo.create(
+        title: items[i].title,
+        category: parent.category,
+        dueAt: null,
+        now: _now,
+        parentId: parent.id,
+        sortOrder: min - (n - i),
+      );
+      if (items[i].done) child = child.copyWith(doneAt: _now());
+      await _repo.upsert(child);
+      created.add(child);
+    }
+    await updatePreservingOrder(
+      parent.copyWith(description: remainingDescription),
+    );
+    return (created: created, parentBefore: parent);
+  }
+
+  /// [checklistToChildren] 되돌리기 — 만든 하위를 지우고 부모 **설명만** 되살린다.
+  /// 그사이 제목·상태를 고쳤으면 그 편집은 살린다([restoreStatus] 와 같은 관례).
+  Future<void> undoChecklist(List<Todo> created, Todo parentBefore) async {
+    for (final c in created) {
+      await _repo.deleteById(c.id);
+    }
+    final current = await _repo.getById(parentBefore.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(description: parentBefore.description),
+    );
+  }
+
+  /// 날짜 되돌리기 — [before] 의 날짜 필드만 **지금 저장된 행**에 되돌려 쓴다.
+  ///
+  /// 스냅샷을 통째로 upsert 하면 예전 updatedAt 이 써져 다른 기기의 LWW 에서 무시되고,
+  /// 그사이 붙은 캘린더 링크(calendarEventId)도 지워져 일정이 고아가 된다. 여기서는
+  /// updatedAt 을 새로 찍고 링크를 보존하므로, 날짜가 빠지면 저장소가 일정 삭제를 큐잉한다.
+  Future<void> restoreDates(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(
+        dueAt: before.dueAt,
+        endAt: before.endAt,
+        isAllDay: before.isAllDay,
+        timeAnchor: before.timeAnchor,
+      ),
+    );
   }
 }
 

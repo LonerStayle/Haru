@@ -126,6 +126,62 @@ void main() {
       expect(list.map((t) => t.id).first, 'c', reason: '편집한 항목이 맨 위로');
     });
 
+    test('진행중 토글 — sortOrder 동률 그룹 안에서도 순서가 안 바뀐다', () async {
+      // 마이그레이션 이전 데이터는 sortOrder 가 전부 0 이라 동률 그룹이 크다.
+      final a = make('a');
+      final b = make('b');
+      final c = make('c');
+      for (final t in [a, b, c]) {
+        await repo.upsert(t);
+      }
+      final before = (await repo.watchByCategory(Category.work).first)
+          .map((t) => t.id)
+          .toList();
+
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      await controller.toggleInProgress(c);
+
+      final after = (await repo.watchByCategory(Category.work).first)
+          .map((t) => t.id)
+          .toList();
+      expect(after, before, reason: '세모 토글은 updatedAt 만 건드림 → 자리 유지');
+    });
+
+    test('update — 바뀐 게 없으면 자리 유지 (열어보고 저장만 눌러도 안 움직임)', () async {
+      await repo.upsert(make('a', sortOrder: 0));
+      await repo.upsert(make('b', sortOrder: 1));
+      final c = make('c', sortOrder: 2);
+      await repo.upsert(c);
+
+      // 편집 시트를 열었다가 아무것도 고치지 않고 저장한 상황.
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      final result = await controller.update(c);
+
+      expect(result.sortOrder, 2, reason: '내용 동일 → bump 없음');
+      expect(result.updatedAt, created, reason: '내용 동일 → updatedAt 도 보존');
+
+      final list = await repo.watchByCategory(Category.work).first;
+      expect(list.map((t) => t.id).toList(), ['a', 'b', 'c']);
+    });
+
+    test('update — 카테고리 id 가 같으면 label/색 차이는 변경으로 보지 않는다', () async {
+      final t = make('a', sortOrder: 3);
+      await repo.upsert(t);
+
+      // 같은 id 인데 표시용 label/색만 다른 Category 객체 (join 복원 편차).
+      final restyled = t.copyWith(
+        category: Category.work.copyWith(label: '업무', colorValue: 0xFF112233),
+      );
+      final later = DateTime.utc(2026, 5, 27, 12);
+      controller = TodoActionsController(repo, () => later);
+      final result = await controller.update(restyled);
+
+      expect(result.sortOrder, 3);
+      expect(result.updatedAt, created);
+    });
+
     test('reorderSiblings — 새 순서대로 연속 sortOrder 재부여 (min 기준)', () async {
       // 시각 순서 [a(0), b(1), c(2)] 에서 c 를 맨 앞으로.
       final a = make('a', sortOrder: 0);
@@ -210,6 +266,233 @@ void main() {
 
       expect((await repo.getById('c1'))!.parentId, 'p');
       expect((await repo.getById('p'))!.type, TodoType.task);
+    });
+  });
+
+  group('updatePreservingOrder — sortOrder 보존 저장 경로 (v1.6 캘린더 드래그 외)', () {
+    Todo dated({
+      String id = 'a',
+      DateTime? dueAt,
+      DateTime? endAt,
+      int sortOrder = 0,
+      bool isAllDay = false,
+    }) => Todo(
+      id: id,
+      title: '회의',
+      category: Category.work,
+      dueAt: dueAt ?? DateTime(2026, 8, 15, 14, 30),
+      endAt: endAt,
+      isAllDay: isAllDay,
+      sortOrder: sortOrder,
+      createdAt: created,
+      updatedAt: created,
+    );
+
+    test('날짜만 바꾸고 sortOrder 는 그대로 — update 처럼 맨 위로 튀지 않는다', () async {
+      final original = dated(sortOrder: 7);
+      await repo.upsert(original);
+      // 같은 형제에 더 위(작은 sortOrder)가 있어도 bump 되면 안 된다.
+      await repo.upsert(dated(id: 'top', sortOrder: 1));
+
+      final later = DateTime.utc(2026, 8, 20, 10);
+      controller = TodoActionsController(repo, () => later);
+
+      final moved = await controller.updatePreservingOrder(
+        original.copyWith(dueAt: DateTime(2026, 8, 20, 14, 30)),
+      );
+
+      expect(moved.sortOrder, 7);
+      expect(moved.dueAt, DateTime(2026, 8, 20, 14, 30));
+      expect(moved.updatedAt, later);
+      expect((await repo.getById('a'))!.sortOrder, 7);
+    });
+
+    test('같은 조건에서 update 는 여전히 맨 위로 bump 한다 (기존 동작 회귀 없음)', () async {
+      final original = dated(sortOrder: 7);
+      await repo.upsert(original);
+      await repo.upsert(dated(id: 'top', sortOrder: 1));
+
+      final bumped = await controller.update(
+        original.copyWith(dueAt: DateTime(2026, 8, 20, 14, 30)),
+      );
+
+      expect(bumped.sortOrder, 0); // min(1) - 1
+    });
+
+    test('내용이 그대로면 아무것도 쓰지 않는다 (updatedAt 보존)', () async {
+      final original = dated();
+      await repo.upsert(original);
+
+      final later = DateTime.utc(2026, 8, 20, 10);
+      controller = TodoActionsController(repo, () => later);
+
+      final same = await controller.updatePreservingOrder(original);
+      expect(same.updatedAt, created);
+      expect((await repo.getById('a'))!.updatedAt, created);
+    });
+
+    test('저장된 sortOrder 를 우선한다 — 스트림 지연으로 옛 값을 들고 와도 되돌리지 않는다', () async {
+      await repo.upsert(dated(sortOrder: 3));
+      // 화면이 들고 있던 옛 스냅샷(sortOrder 99)으로 날짜만 옮긴다.
+      final stale = dated(sortOrder: 99, dueAt: DateTime(2026, 8, 22, 14, 30));
+
+      final moved = await controller.updatePreservingOrder(stale);
+
+      expect(moved.sortOrder, 3);
+      expect((await repo.getById('a'))!.sortOrder, 3);
+    });
+
+    test('기간 항목의 endAt 도 함께 저장된다', () async {
+      final original = dated(
+        dueAt: DateTime(2026, 8, 15),
+        endAt: DateTime(2026, 8, 18),
+        isAllDay: true,
+      );
+      await repo.upsert(original);
+
+      await controller.updatePreservingOrder(
+        original.copyWith(
+          dueAt: DateTime(2026, 8, 20),
+          endAt: DateTime(2026, 8, 23),
+        ),
+      );
+
+      final fromDb = (await repo.getById('a'))!;
+      expect(fromDb.dueAt, DateTime(2026, 8, 20));
+      expect(fromDb.endAt, DateTime(2026, 8, 23));
+      expect(fromDb.dateMode, TodoDateMode.range);
+    });
+
+    test('DB 에 없던 항목(방금 실체화된 반복 회차)도 그대로 저장된다', () async {
+      final fresh = dated(id: 'series#20260820', sortOrder: 5);
+      final saved = await controller.updatePreservingOrder(fresh);
+      expect(saved.sortOrder, 5);
+      expect(await repo.getById('series#20260820'), isNotNull);
+    });
+  });
+
+  test('restoreStatus: 체크 전 상태(진행중·시작 시각)만 되돌리고 그 사이 편집·순서는 보존', () async {
+    final started = DateTime.utc(2026, 5, 27, 8);
+    final before = seed().copyWith(startedAt: started, sortOrder: 4);
+    await repo.upsert(before);
+    await controller.toggle(before); // 완료
+    // 되돌리기 전에 제목을 고쳤다.
+    final done = (await repo.getById('a'))!;
+    await repo.upsert(done.copyWith(title: '회의 (수정)'));
+
+    await controller.restoreStatus(before);
+
+    final row = (await repo.getById('a'))!;
+    expect(row.status, TodoStatus.inProgress);
+    expect(row.startedAt, started, reason: '원래 시작 시각 그대로');
+    expect(row.doneAt, isNull);
+    expect(row.title, '회의 (수정)', reason: '되돌리기는 상태만 — 편집은 살린다');
+    expect(row.sortOrder, 4);
+  });
+
+  group('restoreSchedule — 캘린더 드래그 되돌리기 (Phase 4)', () {
+    test('날짜 없던 항목을 되돌리면 다시 날짜 없음, 제목 편집·순서는 보존', () async {
+      final before = seed().copyWith(sortOrder: 7);
+      await repo.upsert(before);
+      await controller.updatePreservingOrder(
+        before.copyWith(dueAt: DateTime(2026, 8, 20), isAllDay: true),
+      );
+      final moved = (await repo.getById('a'))!;
+      await repo.upsert(moved.copyWith(title: '회의 (수정)'));
+
+      await controller.restoreSchedule(before);
+
+      final row = (await repo.getById('a'))!;
+      expect(row.dueAt, isNull);
+      expect(row.title, '회의 (수정)');
+      expect(row.sortOrder, 7);
+    });
+
+    test('기간·시각 항목은 원래 시작·끝·종일 여부로', () async {
+      final before = seed().copyWith(
+        dueAt: DateTime(2026, 8, 10, 9),
+        endAt: DateTime(2026, 8, 12, 18),
+        isAllDay: false,
+      );
+      await repo.upsert(before);
+      await controller.updatePreservingOrder(
+        before.copyWith(
+          dueAt: DateTime(2026, 8, 17, 9),
+          endAt: DateTime(2026, 8, 19, 18),
+        ),
+      );
+
+      await controller.restoreSchedule(before);
+
+      final row = (await repo.getById('a'))!;
+      expect(row.dueAt, DateTime(2026, 8, 10, 9));
+      expect(row.endAt, DateTime(2026, 8, 12, 18));
+      expect(row.isAllDay, isFalse);
+    });
+
+    test('그사이 지워졌으면 아무것도 되살리지 않는다', () async {
+      await controller.restoreSchedule(seed());
+      expect(await repo.getById('a'), isNull);
+    });
+  });
+
+  group('deleteTree — 하위 포함 삭제 (Phase 2)', () {
+    Todo node(String id, {String? parentId}) => Todo(
+      id: id,
+      title: id,
+      category: Category.work,
+      createdAt: created,
+      updatedAt: created,
+      parentId: parentId,
+    );
+
+    test('부모를 지우면 자손까지 지워지고 스냅샷은 부모 먼저', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      final g = node('g', parentId: 'c');
+      final other = node('o');
+      for (final t in [p, c, g, other]) {
+        await repo.upsert(t);
+      }
+
+      final snapshot = await controller.deleteTree(p);
+
+      expect(snapshot.first.id, 'p');
+      expect(snapshot.map((t) => t.id).toSet(), {'p', 'c', 'g'});
+      expect(await repo.getById('p'), isNull);
+      expect(await repo.getById('c'), isNull);
+      expect(await repo.getById('g'), isNull);
+      expect(await repo.getById('o'), isNotNull, reason: '다른 가지는 그대로');
+    });
+
+    test('되돌리기(restoreAll) — 트리 전체 복원', () async {
+      final p = node('p');
+      final c = node('c', parentId: 'p');
+      await repo.upsert(p);
+      await repo.upsert(c);
+
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreAll(snapshot);
+
+      expect(await repo.getById('p'), p);
+      expect(await repo.getById('c'), c);
+    });
+
+    test('restoreDeleted — 캘린더 연결은 끊고 되살린다', () async {
+      final p = node('p').copyWith(
+        calendarEventId: 'evt-1',
+        calendarId: 'primary',
+        calendarProvider: 'google',
+      );
+      await repo.upsert(p);
+      final snapshot = await controller.deleteTree(p);
+      await controller.restoreDeleted(snapshot);
+
+      final back = await repo.getById('p');
+      expect(back, isNotNull);
+      expect(back!.calendarEventId, isNull);
+      expect(back.calendarId, isNull);
+      expect(back.title, p.title);
     });
   });
 }

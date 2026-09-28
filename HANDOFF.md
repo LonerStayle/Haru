@@ -2,7 +2,7 @@
 
 > ralph 자동 루프 + 사람 reader 모두 이 파일 하나로 컨텍스트 복원 가능하게 작성.
 > 매 iter 시작 시 CLAUDE.md / PROMPT.md / IMPLEMENTATION_PLAN.md 와 함께 이 파일도 읽는다.
-> 마지막 업데이트: **2026-07-18 (진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 + 완료율 링 진행중 세그먼트 + 카테고리 미완료/진행중/완료 3칩. drift v8→9 started_at)**
+> 마지막 업데이트: **2026-08-29 (Microsoft 365(Teams) 캘린더 양방향 연동 + 캘린더 계층 provider 중립화. ⚠️ DB 스키마 변경됨 — § 2 참조)**
 
 ---
 
@@ -33,6 +33,9 @@
 | **배치2 — 중첩 체크리스트 + 모바일 관리 + 정렬 + 전체보기 탭 + 카테고리 동기화 (`ca27c79`)** | ✅ 종료 | 402/402 PASS. **스키마 변경 없음**. 아래 "배치2 내역" 참조. 카테고리/그룹 cross-device 동기화 버그 수정 포함 |
 | **브랜딩 — 앱 이름 '하루' + 볼드 체크 아이콘 + macOS 로그인 자동실행 토글** | ✅ 종료 | 561/561 PASS. **스키마 변경 없음**. 아래 "브랜딩 내역" 참조. 대표님 직접 요청(아이콘·이름·자동실행) |
 | **진행중 3-상태 — 완료 체크 옆 세모(진행중) 버튼 (2026-07-18)** | ✅ 종료 | 602/602 PASS. **DB 스키마 변경됨 (drift v8→9 `todos.started_at`) → Supabase schema.sql 재실행 필요.** 아래 "진행중 3-상태 내역" 참조. 대표님 직접 요청 |
+| **상태별 보기 — 카테고리·상세 5칩 필터 (2026-08-09)** | ✅ 종료 (워크트리 `상태별보기`, 미커밋) | 625/625 PASS. **스키마 변경 없음**. 아래 "상태별 보기 내역" 참조. 대표님 직접 요청 |
+| **§15 앱 내 캘린더 화면 (2026-08-15)** | ✅ 종료 (워크트리 `앱내캘린더`, 미머지) | 896/896 PASS. **스키마 변경 없음 (drift v9 유지)**. 아래 "앱 내 캘린더 내역" 참조. 대표님 직접 요청 |
+| **Microsoft 365(Teams) 캘린더 양방향 연동 (2026-08-29)** | ✅ 종료 (워크트리 `worktree-agent-a21e7d257f63a4c10`) | 1283/1283 PASS. **DB 스키마 변경됨 (drift v10→11 + Supabase `todos.calendar_provider`) → schema.sql 재실행 필요.** + **대표님 Azure 앱 등록 필요.** 아래 "Microsoft 365 연동 내역" 참조 |
 
 ### 현 상태 (2026-06-06)
 
@@ -40,6 +43,18 @@
 - analyze clean / format clean / **flutter test 561/561 PASS** / **macOS 디버그 빌드 성공**
 - **데스크탑 ↔ 폰 Supabase 동기화 정상 작동 확인됨** (대표님 실기기에서 검증 완료)
 - 갤럭시 S24 (SM S921N) 에 release APK 설치 완료
+
+### 상태별 보기 내역 (카테고리·상세 5칩 필터) — 2026-08-09
+
+대표님 직접 요청: "카테고리마다 미완료별 / 할일별 / 메모별 / 완료별로 나뉘고, 버튼 누르면 맞는 목록만".
+
+- **필터 축**: `TodoStatusFilter` (`lib/src/ui/widgets/todo_status_filter.dart`) — `all / undone / inProgress / done / note`. 3-상태(미완료·진행중·완료)와 타입(메모)을 한 축으로 합쳤다. `undone` 은 note 를 타입으로 차단 (note 는 isDone 이 항상 false 라 그냥 두면 '미완료'로 샌다).
+- **UI**: 기존 카테고리 헤더의 통계 칩(미완료/진행중/완료/메모)을 **그대로 클릭 가능한 필터 버튼으로 승격** + '전체' 추가 → 5칩(`TodoStatusFilterBar`, 메모 0건이면 메모 칩 생략). 선택 칩은 진한 색 + 1.5px 테두리 + w700 (색 외 형태 신호 병행). 미선택도 같은 두께 투명 테두리라 선택 시 크기가 튀지 않는다.
+- **적용 화면**: 카테고리 화면(`category_view.dart`) + 상세/하위목록(`todo_detail_screen.dart` → `ConsumerStatefulWidget` 전환). **오늘·전체보기는 미적용**(대표님 확정 — 전체보기는 이미 체크리스트/메모 탭 보유).
+- **필터 렌더 규칙** (`TodoDrillListSliver.filter` / `filterPool`): 필터가 걸리면 트리를 접고 **스코프의 자손까지 평탄한 한 겹**으로 나열한다. 칩 카운트도 자손 기준이라 "완료 3" → 정확히 3건. root 만 거르면 자손 완료가 안 보여 카운트와 어긋나는 문제 회피. 평탄 뷰에선 재정렬·완료접기 행을 끄고, 각 타일에 **부모 경로(breadcrumb)** 를 얹는다(`TodoTile.breadcrumb`). 상세 화면은 `breadcrumbRootId` 로 화면 제목인 parent 를 경로에서 제외.
+- **상태 보존**: 선택 필터는 위젯 State (세션 비영속) — 화면 나가면 '전체'로 초기화. 저장 계층을 건드리지 않는다.
+- **검증**: analyze 0 / format 0 / **flutter test 625/625 PASS** (신규 23: 필터 enum·카운트·칩바 / 드릴리스트 필터 6 / 카테고리 5 / 상세 3).
+- ⚠️ 대표님 액션 없음 (스키마·빌드 설정 무변경). 워크트리 `상태별보기` 브랜치에 **미커밋 상태**로 있다.
 
 ### 진행중 3-상태 내역 (완료 체크 + 진행중 세모) — 2026-07-18
 
@@ -121,6 +136,86 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 
 ---
 
+### Microsoft 365(Teams) 연동 내역 — 2026-08-29
+
+대표님 직접 요청 (fast-tasks Task 2): "Teams 캘린더도 구글과 같은 수준으로 양방향".
+
+**대표님 작업 가이드**: `docs/features/2026-08-29-fast-tasks-detail-status-teams-drag/teams-연동-대표님-작업-가이드.md`
+**코드 설계 메모**: 같은 폴더의 `teams-연동-설계메모.md`
+
+**무엇이 바뀌었나**
+- 캘린더 계층이 **provider 중립**이 됐다. 게이트웨이가 주고받는 타입은 `CalEvent`
+  하나이고, `gcal.Event` 는 `google_calendar_gateway.dart` 안에서만 존재한다.
+  동기화 로직(큐 flush · 증분 수신 · echo 차단 · LWW · 삭제 규칙)은 두 서비스가 공유한다.
+- 신규 `MicrosoftGraphGateway` (Microsoft Graph) + `MicrosoftCalendarAuth`
+  (순수 Dart OAuth2 + PKCE, macOS·Android 공통 loopback 리다이렉트).
+- 설정 화면 **한 개가 두 서비스를 담당**한다 (`CalendarSettingsScreen(provider:)`).
+  설정 시트에 `Google Calendar` / `Microsoft 365` 두 항목.
+- 할 일마다 `calendarProvider` 로 어느 서비스에 묶였는지 기록. **null = 구글**(하위호환).
+- 동기화 서비스·코디네이터가 서비스별로 하나씩, 스케줄러가 둘을 순차로 돈다.
+
+**⚠️ 대표님 액션 (둘 다 해야 동작합니다)**
+1. **Supabase `schema.sql` 재실행** — `make sql` → SQL Editor 붙여넣고 Run.
+   `todos.calendar_provider` 컬럼이 추가된다. **이걸 안 하면 PGRST204 로 todos
+   동기화 전체가 멈춘다** (과거 같은 원인으로 며칠 멈춘 사고 있음).
+   미실행분(fast-tasks / started_at / calendar_id·origin)도 **한 번에 같이 적용**된다.
+2. **Azure 앱 등록** — 위 작업 가이드의 STEP 1~5 를 따라 `MS_OAUTH_CLIENT_ID` /
+   `MS_OAUTH_TENANT` 를 `.env.local` 에 넣는다. 키가 없으면 설정에서 Microsoft
+   항목 자체가 숨겨지고, 구글 연동만 이전과 동일하게 동작한다.
+3. 배포 빌드 전 **`flutter clean`** — 증분 빌드는 옛 env 값을 쓴다.
+
+**알아둘 함정**
+- **큐·링크·토큰이 전부 provider 로 갈린다.** `dueOps(now, provider:)`,
+  `pull` 의 `byEventId` 필터, 코디네이터의 `_persist` 가 자기 칸만 건드린다.
+  하나라도 놓치면 구글 이벤트 id 가 그래프로 날아가 404 만 반복하거나, 한쪽 수신이
+  다른 쪽 링크를 지운다.
+- **그래프 증분 응답에는 앱 서명이 안 실릴 수 있다.** 그래서 병합에 "내용이 같으면
+  echo" 규칙과 "연결된 할 일의 날짜 모드를 형태 힌트로" 규칙을 넣었다. 이 둘을
+  제거하면 서명 없는 서비스에서 push↔pull 루프 또는 날짜 모드 변질이 재발한다.
+- **그래프 시각은 소수점 7자리다.** Dart `DateTime.parse` 는 6자리까지만 받는다.
+  자르는 코드를 지우면 모든 일정이 조용히 사라진다.
+- **연결 해제는 `clearProvider`** — `clear()` 는 다른 서비스 대기열까지 날린다.
+- Outlook 은 완료 표시(색)를 반영하지 않는다. 의도된 범위 밖이다.
+
+**신규 의존성**: `crypto`(PKCE SHA-256), `url_launcher`(Android 동의 화면).
+둘 다 이미 transitive 였던 공식 패키지를 직접 의존으로 승격한 것이다.
+Android 매니페스트에 `<queries>` VIEW/https 선언 추가 (Android 11+ 브라우저 탐색).
+
+---
+
+### 앱 내 캘린더 내역 — 2026-08-15 (워크트리 `앱내캘린더`)
+
+요구사항 / 기술설계: `docs/features/2026-08-15-앱내캘린더/`
+
+**무엇이 생겼나**
+- `DestinationKind.timeline` → `calendar` **교체**. 모바일 nav 4슬롯·단축키 digit 2 그대로.
+  기존 타임라인 버킷 목록은 캘린더 화면의 `[목록]` 세그먼트로 살아 있다 (기능 손실 0).
+- 신규 디렉터리 `lib/src/features/calendar_view/` — 앱 내 캘린더 화면 전부.
+  (기존 `lib/src/features/calendar/` 는 **구글 연동 전용**이라 이름을 분리했다.)
+- 월 6행 42칸 그리드 / 선택일 패널 / "날짜 없음" 서랍 / 기간 막대 / 드래그로 날짜 변경.
+- 구글 이벤트 **읽기 전용** 표시 — 신규 파일 `features/calendar/google_events_service.dart` 만 추가.
+
+**외부 작업 없음** — Drift `schemaVersion` 9 유지, Supabase `schema.sql` 재실행 불필요,
+구글 스코프 변경 없음 (`calendar.events` 가 읽기까지 포함).
+
+**형제 워크트리와의 경계 (중요)**
+- `구글캘린더동기화` 워크트리가 `calendar_service.dart` / `google_auth_service.dart` 를 담당한다.
+  이 작업은 그 두 파일을 **한 줄도 수정하지 않았다**. 인증(`calendarAuthProvider`)만 재사용.
+- 머지 시 충돌 표면은 `calendar_view/` 신규 파일들 + `app_shell.dart` 3지점 + `destination.dart`.
+
+**알아둘 함정**
+- **반복은 하이브리드다.** `RecurrenceMaterializer` 가 오늘까지만 인스턴스를 만들어
+  미래 회차는 DB 에 없다. 캘린더는 그걸 런타임 고스트로 그리고, 사용자가 건드리면
+  `materializeOne` 으로 그 회차만 실체화한다. 고스트를 실체 row 로 착각하고
+  체크·드래그 경로를 붙이면 조용히 아무 일도 안 일어난다.
+- **드래그 저장은 `setDueAt` 이지 `update` 가 아니다.** `update()` 는 sortOrder 를
+  형제 min-1 로 bump 하므로, 날짜만 옮겼는데 목록 맨 위로 튄다.
+- `allTodosProvider` 는 `isSeriesMaster` 를 걸러주지 않는다 (타임라인·전체보기도 안 거른다).
+  캘린더는 직접 거른다 — 안 그러면 anchor 날짜에 유령 항목이 하나 더 뜬다.
+- 달력 격자는 **항상 6행**. 5/6행이 오가면 스와이프 때 높이가 튄다.
+
+---
+
 ## 2. 외부 환경 상태 (대표님이 이미 셋업한 것)
 
 | 항목 | 상태 |
@@ -134,13 +229,17 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 | Supabase **Exposed schemas** 에 `solo_todo` 추가 | ✅ |
 | Supabase Email Templates (`Confirm signup` + `Magic Link`) 가 `{{ .Token }}` 표시 | ✅ |
 | `.env.local` (SUPABASE_URL / ANON / GOOGLE OAuth desktop + Android) | ✅ |
-| Android debug SHA-1 | `F8:EC:9C:48:5D:79:DB:8B:D3:41:42:4C:65:33:14:EB:71:35:AE:DC` |
+| Android debug SHA-1 | `76:EC:F3:83:39:76:2F:86:E8:1E:A9:8A:C3:F3:A3:1D:51:9C:3F:B2` (2026-08-09 확인. 옛 기록 `F8:EC:9C:...:AE:DC` 는 keystore 재생성 전 지문 — 콘솔 불일치의 원인이었음) |
 | Supabase OTP length | 8자리 (앱은 6~10 가변 허용) |
 | **Supabase v1.1+v1.2 마이그레이션 (parent_id/type/sort_order/description + categories)** | ✅ 완료 — schema.sql 실행 + 동기화 검증됨 (`b246b64` 수정본 기준) |
 | **Supabase fast-tasks 마이그레이션 (todos.end_at/is_all_day/time_anchor + groups + categories.group_id)** | ⚠️ **대표님 액션 필요** — `make sql` → Supabase SQL Editor 에 schema.sql 재실행. 전체 idempotent. 미실행 시 신규 필드 동기화에서 PGRST204. |
 | **Supabase 진행중 3-상태 마이그레이션 (todos.started_at)** | ⚠️ **대표님 액션 필요 (2026-07-18)** — `make sql` → schema.sql 재실행(§21 started_at + notify pgrst). idempotent. 미실행 시 진행중 상태가 기기 간 동기화 안 됨. |
-| **Google Cloud Console — Android OAuth client + calendar scope + 테스트 사용자** | ⚠️ **대표님 액션 필요** (Task 3). 아래 § 3 참조. 미설정 시 갤S24 캘린더 동의 차단. |
-| `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ⚠️ Android OAuth client id 채워야 Calendar provider 활성 (실제 매칭은 SHA-1). |
+| **Google Cloud Console — Android OAuth client + calendar scope** | ✅ **완료 (2026-08-09)** — `SoloTodo - 안드로이드` 클라이언트의 SHA-1 을 현 keystore 지문(`76:EC:F3:...`)으로 교체 저장. calendar/calendar.events 범위 등록 확인. 게시 상태 프로덕션(외부)이라 테스트 사용자 불필요 — 동의 시 "확인되지 않은 앱" 경고는 고급→이동으로 통과. SHA-1 반영까지 최대 몇 시간 걸릴 수 있음. |
+| `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` | ✅ 채워짐 (`431288523948-6u98...`). serverClientId(`-n9pn...` 웹) 도 있음. |
+| **Supabase 캘린더 양방향 마이그레이션 (todos.calendar_id / calendar_origin)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — schema.sql 재실행. 위 fast-tasks·started_at 미실행분도 **같이 적용**되니 한 번만 돌리면 된다. 미실행 시 PGRST204 로 todos 동기화 전체 정지. |
+| **Supabase Microsoft 병존 마이그레이션 (todos.calendar_provider)** | ⚠️ **대표님 액션 필요 (2026-08-29)** — schema.sql 재실행. 위 미실행분도 **같이 적용**되니 한 번만 돌리면 된다. 미실행 시 PGRST204 로 todos 동기화 전체 정지. |
+| **Azure 앱 등록 (Microsoft 365 / Teams 캘린더)** | ⚠️ **대표님 액션 필요 (2026-08-29)** — `docs/features/2026-08-29-fast-tasks-detail-status-teams-drag/teams-연동-대표님-작업-가이드.md` STEP 1~5. `.env.local` 에 `MS_OAUTH_CLIENT_ID` / `MS_OAUTH_TENANT`. 미설정 시 설정 화면에서 Microsoft 항목이 숨겨질 뿐 앱은 정상 동작. |
+| **Google 재동의 (scope 확대: `calendar.calendarlist.readonly` 추가)** | ⚠️ **대표님 액션 필요 (2026-08-15)** — 새 빌드 첫 실행 시 동의 화면 1회. 캘린더 **목록 조회**에 필요한 권한이라 없으면 설정 화면에서 캘린더를 고를 수 없다. macOS 는 저장 토큰의 scope 가 부족하면 앱이 자동으로 재동의를 띄운다(토큰 파일에 scope 를 함께 저장하도록 변경됨). |
 | 갤럭시 S24 (SM S921N) release APK 설치 | ✅ (단 fast-tasks 변경분은 재빌드·재설치 필요) |
 | 로컬 DB 백업 | `~/solo_todo_db_backup/solo_todo_*.sqlite` (1회성, 이제 클라우드 동기화되므로 불필요시 삭제 가능) |
 
@@ -153,13 +252,54 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 ### ⚠️ 대표님 즉시 액션 (fast-tasks 활성화)
 
 1. **Supabase schema.sql 재실행** — `make sql` 로 클립보드 복사 → Supabase SQL Editor 붙여넣고 실행. todos 날짜컬럼 3개 + groups 테이블 + categories.group_id 추가, 끝에서 `notify pgrst` 캐시 갱신. (idempotent, 안전)
-2. **Google Cloud Console (Android 캘린더 권한, Task 3)**:
-   - 사용자 인증 정보 → OAuth 클라이언트 ID 만들기 → 유형 **Android**, 패키지명 `com.goldenplanet.solo_todo`, **SHA-1** 등록 (`keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android` 의 SHA1).
-   - OAuth **동의 화면 → 범위 추가**: `https://www.googleapis.com/auth/calendar.events`.
-   - 앱이 "테스트" 상태면 **테스트 사용자**에 `dlwlstjq410@gmail.com` 추가.
-   - 만든 Android client id 를 `.env.local` 의 `GOOGLE_OAUTH_CLIENT_ID_ANDROID` 에 기입.
+2. ~~**Google Cloud Console (Android 캘린더 권한, Task 3)**~~ — ✅ **완료 (2026-08-09, Claude 브라우저 자동화로 처리)**. 원인은 콘솔 SHA-1 이 keystore 재생성 전 옛 지문이었던 것. 현 지문으로 교체 저장 완료. 범위·client id 는 이미 정상이었음. §2 표 참조.
 3. **갤S24 재빌드·재설치** — fast-tasks 변경분 반영. `make build-apk` 후 `flutter install` (또는 `make run-android`).
-   - 첫 캘린더 등록 시 **계정 동의 팝업이 떠야 정상**. 팝업 없이 거부되면 위 2번 콘솔 설정 누락.
+   - 첫 캘린더 등록 시 **계정 동의 팝업이 떠야 정상**. "확인되지 않은 앱" 경고가 뜨면 고급 → 이동(안전하지 않음) 으로 진행 (개인용 미인증 앱의 정상 동작). SHA-1 변경 반영까지 최대 몇 시간 걸릴 수 있음.
+
+### Google Calendar 양방향 동기화 (2026-08-15 완료)
+
+문서: `docs/features/2026-08-15-google-calendar-sync/` (요구사항 / 기술설계 / 구현계획)
+
+**무엇이 바뀌었나** — 이전에는 "할 일 등록 시 1회 이벤트 생성" 만 동작했고,
+수정·삭제 코드는 작성돼 있었지만 **호출자가 없는 dead code** 였다. 편집 시트의
+"Google Calendar 에 등록" 토글도 편집 모드에서는 아무 효과가 없었다. 이제 양방향이다.
+
+**구조 (수정 시 알아야 할 것)**
+
+- `CalendarAwareTodoRepository` — 저장소 데코레이터. **모든** 할 일 저장이 여기를 지나며
+  캘린더에 영향 있는 변경만 큐에 넣는다. 편집 진입점이 7곳이라 호출부마다 붙이면 반드시
+  누락된다(그게 기존 결함이었다). 연동이 꺼져 있으면 조립 단계에서 아예 안 끼운다.
+- `decideCalendarOp` — 감시 필드 10종(제목·날짜 4종·완료·타입·카테고리id·반복 2종)만
+  이벤트를 건드린다. `sortOrder`/`parentId`/`description` 은 무시 — 정렬 한 번에 API 가
+  형제 수만큼 호출되는 것을 막는 핵심이다.
+- `calendar_ops` (Drift v10) — 캘린더 전용 큐. 기존 Supabase outbox 와 분리했다. 항목이
+  서로 독립이라 하나 실패해도 다음을 진행하고, rate limit 대응 지수 백오프가 있다.
+- `CalendarGateway` — API 호출 이음매. `FakeCalendarGateway` 로 모든 동기화 로직을
+  실제 인증 없이 테스트한다.
+- **echo 차단** — push 시 이벤트에 `haruRev`(그 시점 `updatedAt`)를 심고, 수신 때 서명이
+  같고 **내용도 같으면** 무시한다. 서명만 비교하면 사람이 캘린더에서 고친 게 영영 반영되지
+  않고, 시각만 비교하면 무한 루프가 된다. `calendar_roundtrip_test.dart` 가 이걸 지킨다.
+
+**⚠️ 함정 (건드릴 때 주의)**
+
+1. **동기화 서비스에 주입하는 저장소는 데코레이터를 벗긴 것이어야 한다**
+   (`calendarSyncRepositoryProvider`). 씌우면 수신 결과가 다시 큐에 쌓여 되쏜다 —
+   기존 `SupabaseRealtimeSync` 가 outbox 를 우회하는 것과 같은 이유다.
+2. **링크 필드만 바뀐 저장은 `none` 이어야 한다.** 큐가 생성 성공 후 `calendarEventId` 를
+   저장하는데, 여기서 update 가 나오면 큐가 영원히 비지 않는다.
+3. **메모 전환 시 `calendarEventId` 를 미리 지우면 안 된다.** 지우면 삭제 작업을 만들 수
+   없어 고아 이벤트가 남는다. 링크 해제는 이벤트를 실제로 지운 뒤 동기화 서비스가 한다.
+4. **반복 인스턴스에 링크를 남기면 안 된다** — 회차마다 이벤트가 생긴다. 마스터가 RRULE
+   이벤트 1개를 소유한다.
+5. 이벤트 생성 후 링크를 저장할 때 **`updatedAt` 을 갱신하지 않는다** — 서명과 어긋나
+   echo 판정이 깨진다.
+
+**동작 요약** — 자동 동기화는 앱 시작·포그라운드 복귀·5분 주기(설정에서 끌 수 있음).
+캘린더에서 지운 일정은 **출처에 따라** 갈린다: 앱에서 만든 할 일이면 일정 연결만 해제하고
+할 일은 남기고, 캘린더에서 유입된 할 일이면 함께 지운다. 완료는 이벤트 색(회색)으로만
+표시하고 제목은 건드리지 않는다. 초대받은 일정은 기본적으로 안 들어온다(설정에서 켤 수 있음).
+
+**설정 위치** — 설정 시트 → Google Calendar (OAuth 키가 없는 빌드면 항목 자체가 숨겨짐).
 
 ### 미해결 / v1.3 후보 (대표님 결정 필요)
 
@@ -233,6 +373,12 @@ Socratic 확정 1A/2A/3A/4B. 명세: `docs/features/2026-05-29-fast-tasks-date-a
 - **Todo.category 는 todos 테이블에 id 만 저장** — label/color/icon 은 categories 테이블에 있으므로 **TodosDao 가 categories 와 join** 해서 복원. `Category.fromId` 는 builtin 만 알아 사용자 카테고리에 throw → join + placeholder fallback 으로 해소. SupabaseTodosApi._fromRow 도 tryFromId+placeholder (로컬 저장은 id 만 쓰므로 안전).
 - **AddTodoSheet 는 ConsumerStatefulWidget** — categoriesProvider watch. 카테고리 선택 비교는 **id 기준** (freezed 전체 동등은 DB 인스턴스↔const 차이로 어긋남).
 - **모바일 FAB 는 endFloat** — endContained 는 NavigationBar 에 도킹돼 destination 을 덮음. endFloat 가 바 위로 띄운다.
+- **캘린더 provider 를 놓치면 조용히 엉뚱한 API 로 간다** — 큐(`calendar_ops.provider`)·
+  링크(`todos.calendar_provider`)·토큰(`CalendarSettings.viewFor`) 셋이 모두 서비스별로
+  갈려 있다. `null` 은 언제나 구글로 읽는다(`CalendarProvider.fromWire`) — 이 규칙을
+  바꾸면 대표님의 기존 구글 연동 데이터가 통째로 미아가 된다.
+- **할 일 이동 = parentId + 서브트리 category 동시 갱신** — 자식은 부모 카테고리를 상속하는 구조라, 본인만 옮기면 자손이 옛 카테고리 화면·집계에 남아 "절반만 옮겨간" 상태가 된다. `TodoActionsController.moveTo` / `update` 가 `MovePolicy.descendants` 로 자손 category 를 함께 맞춘다. 새 이동 경로를 만들 때 이 동기화를 빼먹지 말 것.
+- **이동 목적지는 자기 자신·자손 금지** — 자기 밑으로 들어간 노드는 어느 root 에서도 도달 불가라 화면에서 통째로 사라진다. `MovePolicy.canMove` 가 단일 출처(컨트롤러 + 시트 비활성 표시 양쪽이 같은 규칙을 쓴다).
 
 ---
 

@@ -196,6 +196,78 @@ void main() {
     expect(linked.createdAt, t.createdAt);
   });
 
+  group('Todo.status / withStatus — 3-상태 직접 지정', () {
+    Todo fresh() => Todo.create(
+      title: 'x',
+      category: Category.daily,
+      now: () => DateTime.utc(2026, 5, 1),
+      idGen: fixedId,
+      sortOrder: 42,
+    );
+
+    final at = DateTime.utc(2026, 8, 29, 10);
+
+    test('status 는 startedAt / doneAt 조합을 그대로 읽는다', () {
+      expect(fresh().status, TodoStatus.undone);
+      expect(
+        fresh().toggleInProgress(now: () => at).status,
+        TodoStatus.inProgress,
+      );
+      expect(fresh().toggleDone(now: () => at).status, TodoStatus.done);
+    });
+
+    test('미완료 → 진행중: startedAt 세팅 + doneAt null', () {
+      final t = fresh().withStatus(TodoStatus.inProgress, now: () => at);
+      expect(t.startedAt, at);
+      expect(t.doneAt, isNull);
+      expect(t.updatedAt, at);
+    });
+
+    test('진행중 → 완료: doneAt 세팅 + startedAt 제거 (불변식)', () {
+      final ip = fresh().toggleInProgress(now: () => DateTime.utc(2026, 8, 28));
+      final done = ip.withStatus(TodoStatus.done, now: () => at);
+      expect(done.doneAt, at);
+      expect(done.startedAt, isNull);
+    });
+
+    test('완료 → 미완료: 둘 다 비운다', () {
+      final done = fresh().toggleDone(now: () => DateTime.utc(2026, 8, 28));
+      final undone = done.withStatus(TodoStatus.undone, now: () => at);
+      expect(undone.doneAt, isNull);
+      expect(undone.startedAt, isNull);
+      expect(undone.status, TodoStatus.undone);
+    });
+
+    test('같은 상태로 지정하면 원본 그대로 (updatedAt 도 불변)', () {
+      final t = fresh();
+      expect(
+        identical(t.withStatus(TodoStatus.undone, now: () => at), t),
+        isTrue,
+      );
+    });
+
+    test('어떤 전이도 sortOrder 를 건드리지 않는다', () {
+      for (final next in TodoStatus.values) {
+        expect(fresh().withStatus(next, now: () => at).sortOrder, 42);
+      }
+    });
+
+    test('note 는 상태 개념이 없어 무시', () {
+      final note = Todo.create(
+        title: '메모',
+        category: Category.daily,
+        type: TodoType.note,
+        now: () => DateTime.utc(2026, 5, 1),
+        idGen: fixedId,
+      );
+      expect(note.status, TodoStatus.undone);
+      expect(
+        identical(note.withStatus(TodoStatus.done, now: () => at), note),
+        isTrue,
+      );
+    });
+  });
+
   group('JSON round-trip', () {
     test('완전 필드 (dueAt / doneAt / calendarEventId 모두 채움)', () {
       final original = Todo(
@@ -398,6 +470,70 @@ void main() {
         expect(restored.sortOrder, 0);
       },
     );
+  });
+
+  group('google-calendar-sync — calendarId / calendarOrigin', () {
+    test('Todo.create 기본값 — calendarId null, calendarOrigin app', () {
+      final t = Todo.create(
+        title: 'x',
+        category: Category.daily,
+        now: fixedNow,
+        idGen: fixedId,
+      );
+      expect(t.calendarId, isNull);
+      expect(t.calendarOrigin, 'app');
+    });
+
+    test('Todo.create — calendarId / calendarOrigin 전달 시 보존', () {
+      final t = Todo.create(
+        title: '구글에서 온 일정',
+        category: Category.work,
+        now: fixedNow,
+        idGen: fixedId,
+        calendarId: 'cal-xyz',
+        calendarOrigin: 'gcal',
+      );
+      expect(t.calendarId, 'cal-xyz');
+      expect(t.calendarOrigin, 'gcal');
+    });
+
+    test('JSON round-trip — calendarId / calendarOrigin 보존', () {
+      final original = Todo(
+        id: 'abc',
+        title: 'PR 리뷰',
+        category: Category.personalDev,
+        dueAt: null,
+        doneAt: null,
+        createdAt: DateTime.utc(2026, 5, 27, 9),
+        updatedAt: DateTime.utc(2026, 5, 27, 9),
+        calendarEventId: 'evt-xyz',
+        calendarId: 'cal-abc',
+        calendarOrigin: 'gcal',
+      );
+      final json = original.toJson();
+      expect(json['calendarId'], 'cal-abc');
+      expect(json['calendarOrigin'], 'gcal');
+
+      final restored = Todo.fromJson(json);
+      expect(restored, original);
+    });
+
+    test('JSON 역호환 — calendarId/calendarOrigin 누락 → null / app 으로 안전 복원', () {
+      // v1.x 시점 Supabase row 가 신규 컬럼 없이 client 에 내려오는 케이스.
+      final legacyJson = <String, dynamic>{
+        'id': 'legacy',
+        'title': '옛 todo',
+        'category': 'work',
+        'dueAt': null,
+        'doneAt': null,
+        'createdAt': '2026-05-01T09:00:00.000Z',
+        'updatedAt': '2026-05-01T09:00:00.000Z',
+        'calendarEventId': null,
+      };
+      final restored = Todo.fromJson(legacyJson);
+      expect(restored.calendarId, isNull);
+      expect(restored.calendarOrigin, 'app');
+    });
   });
 
   group('fast-tasks — endAt / isAllDay / timeAnchor', () {
