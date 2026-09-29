@@ -57,9 +57,24 @@ class TodoEntry extends CalendarEntry {
   TodoEntry(this.todo)
     : assert(todo.dueAt != null, 'dueAt 없는 Todo 는 캘린더 엔트리가 될 수 없다'),
       startDate = dateOnly(todo.dueAt!.toLocal()),
-      endDate = _resolveEndDate(todo);
+      endDate = _resolveEndDate(todo),
+      isPinnedToday = false;
+
+  /// 진행중 할 일을 **오늘 칸에 한 번 더** 그리는 복제본 (2026-09-29 대표님 요청 —
+  /// "지금 하고 있는 일은 날짜와 무관하게 오늘에 보여야 한다").
+  ///
+  /// 원래 날짜 칸의 [TodoEntry] 는 그대로 두고 이것을 더한다. 날짜 없는 진행중은
+  /// 이것만 생긴다. [Todo.dueAt] 는 건드리지 않는 순수 표시용이라, 드래그·체크·편집은
+  /// [todo] 원본을 대상으로 평소와 똑같이 동작한다.
+  TodoEntry.pinnedToday(this.todo, DateTime today)
+    : startDate = dateOnly(today),
+      endDate = dateOnly(today),
+      isPinnedToday = true;
 
   final Todo todo;
+
+  /// [TodoEntry.pinnedToday] 로 만든 오늘 칸 복제본인가.
+  final bool isPinnedToday;
 
   @override
   final DateTime startDate;
@@ -92,11 +107,13 @@ class TodoEntry extends CalendarEntry {
   @override
   bool get isGhost => false;
 
+  /// 오늘 칸 복제본은 종일로 취급한다 — 다른 날의 시각(예: 지난주 15:00)을 오늘 칸에
+  /// 찍으면 오늘 15:00 일정처럼 읽힌다. 종일 묶음이라 칸 위쪽에 모인다.
   @override
-  bool get isAllDay => todo.isAllDay;
+  bool get isAllDay => isPinnedToday || todo.isAllDay;
 
   @override
-  DateTime? get timeAnchorAt => todo.isAllDay ? null : todo.dueAt!.toLocal();
+  DateTime? get timeAnchorAt => isAllDay ? null : todo.dueAt!.toLocal();
 
   @override
   int get sortOrder => todo.sortOrder;
@@ -104,8 +121,10 @@ class TodoEntry extends CalendarEntry {
   @override
   DateTime get createdAt => todo.createdAt;
 
+  /// 복제본은 원본과 다른 key 를 쓴다 — 같은 달에 두 칩이 함께 보이므로.
   @override
-  String get entryKey => 'todo:${todo.id}';
+  String get entryKey =>
+      isPinnedToday ? 'inprogress:${todo.id}' : 'todo:${todo.id}';
 }
 
 /// 미래 반복 회차 — 아직 DB 에 row 가 없는 "예정".

@@ -55,15 +55,24 @@ List<CalendarEntry> buildCalendarEntries({
   required DateTime now,
 }) {
   final out = <CalendarEntry>[];
+  final today0 = dateOnly(now);
 
   for (final t in all) {
     // 반복 마스터는 숨김 템플릿이다. allTodosProvider 는 이걸 걸러주지 않으므로
     // (타임라인·전체보기도 안 거르는 기존 결함) 캘린더는 직접 막는다 —
     // 안 그러면 anchor 날짜에 유령 항목이 하나 더 뜬다.
     if (t.isSeriesMaster) continue;
-    if (t.dueAt == null) continue;
     if (archivedIds.contains(t.category.id)) continue;
-    out.add(TodoEntry(t));
+    final dated = t.dueAt == null ? null : TodoEntry(t);
+    if (dated != null) out.add(dated);
+    // 진행중은 날짜와 무관하게 오늘 칸에도 — 이미 오늘 칸에 보이면(오늘 날짜 / 오늘을
+    // 걸친 기간) 같은 칸에 두 번 그리지 않는다.
+    if (t.isInProgress &&
+        (dated == null ||
+            today0.isBefore(dated.startDate) ||
+            today0.isAfter(dated.endDate))) {
+      out.add(TodoEntry.pinnedToday(t, today0));
+    }
   }
 
   out.addAll(
@@ -282,6 +291,9 @@ List<GoogleEventEntry> hideLinkedGoogleEvents(
   final singleDates = <String, Set<DateTime>>{};
   for (final e in local) {
     switch (e) {
+      // 오늘 칸 복제본의 날짜는 일정 날짜가 아니다 — 여기 넣으면 오늘 회차를 잘못 숨긴다.
+      case TodoEntry(isPinnedToday: true):
+        continue;
       case TodoEntry(:final todo):
         final id = todo.calendarEventId;
         if (id == null) continue;

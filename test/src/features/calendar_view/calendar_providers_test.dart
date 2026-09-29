@@ -157,6 +157,92 @@ void main() {
     });
   });
 
+  group('buildCalendarEntries — 진행중은 오늘 칸에도', () {
+    final today = DateTime(2026, 8, 15);
+    Todo inProgress(String id, {DateTime? dueAt, DateTime? endAt}) => make(
+      id: id,
+      dueAt: dueAt,
+      endAt: endAt,
+    ).copyWith(startedAt: DateTime(2026, 8, 10));
+
+    List<CalendarEntry> build(
+      List<Todo> all, {
+      Set<String> archived = const {},
+    }) => buildCalendarEntries(
+      all: all,
+      archivedIds: archived,
+      range: august,
+      now: now,
+    );
+
+    test('지난 날짜의 진행중 — 원래 칸 + 오늘 칸 둘 다', () {
+      final entries = build([
+        inProgress('past', dueAt: DateTime(2026, 8, 3, 15)),
+      ]);
+      expect(entries.map((e) => e.entryKey), ['todo:past', 'inprogress:past']);
+      final pinned = entries.last as TodoEntry;
+      expect(pinned.isPinnedToday, isTrue);
+      expect(pinned.startDate, today);
+      expect(pinned.endDate, today);
+    });
+
+    test('미래 날짜의 진행중도 오늘 칸에 뜬다', () {
+      final entries = build([
+        inProgress('future', dueAt: DateTime(2026, 8, 20)),
+      ]);
+      expect(entries.map((e) => e.entryKey), [
+        'todo:future',
+        'inprogress:future',
+      ]);
+    });
+
+    test('날짜 없는 진행중은 오늘 칸에만', () {
+      final entries = build([inProgress('undated')]);
+      expect(entries.map((e) => e.entryKey), ['inprogress:undated']);
+      expect(entries.single.startDate, today);
+    });
+
+    test('이미 오늘 칸에 보이는 진행중(오늘 날짜·오늘을 걸친 기간)은 중복하지 않는다', () {
+      final entries = build([
+        inProgress('today', dueAt: DateTime(2026, 8, 15, 9)),
+        inProgress(
+          'range',
+          dueAt: DateTime(2026, 8, 14),
+          endAt: DateTime(2026, 8, 16),
+        ),
+      ]);
+      expect(entries.map((e) => e.entryKey), ['todo:today', 'todo:range']);
+    });
+
+    test('오늘 칸 복제본은 시각 없이 종일로 — 다른 날 시각이 오늘 시각처럼 보이면 안 된다', () {
+      final pinned = build([
+        inProgress('timed', dueAt: DateTime(2026, 8, 3, 15)),
+      ]).last;
+      expect(pinned.isAllDay, isTrue);
+      expect(pinned.timeAnchorAt, isNull);
+      expect(pinned.spansMultipleDays, isFalse);
+    });
+
+    test('미완료·완료·보관 카테고리의 진행중은 복제하지 않는다', () {
+      final entries = build(
+        [
+          make(id: 'undone', dueAt: DateTime(2026, 8, 3)),
+          make(
+            id: 'done',
+            dueAt: DateTime(2026, 8, 3),
+            doneAt: DateTime(2026, 8, 3, 20),
+          ),
+          inProgress(
+            'archived',
+            dueAt: DateTime(2026, 8, 3),
+          ).copyWith(category: Category.daily),
+        ],
+        archived: {Category.daily.id},
+      );
+      expect(entries.map((e) => e.entryKey), ['todo:undone', 'todo:done']);
+    });
+  });
+
   group('buildRecurringGhosts — 미래 회차만', () {
     test('오늘 이후 발생일만 고스트로 만든다', () {
       // anchor 8/1(토), 매주 토 → 8/1, 8/8, 8/15, 8/22, 8/29. 오늘은 8/15.
