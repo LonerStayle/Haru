@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/platform.dart';
 import '../../core/theme.dart';
+import '../../data/providers.dart';
 import '../../domain/category.dart';
 import '../../domain/group.dart';
 import '../../domain/todo.dart';
@@ -11,6 +12,10 @@ import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/todo_tile.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../ai/ai_providers.dart';
+import '../ai/ai_readiness.dart';
+import '../ai/ask/ai_ask.dart';
+import '../ai/ask/ai_ask_panel.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
@@ -28,6 +33,9 @@ import 'todo_search.dart';
 ///
 /// 데스크탑은 화면 위에 뜨는 **오버레이**(Spotlight 형 — 사이드바·목록을 덮지 않고
 /// ↑↓ 로 고르고 ↩ 로 그 위치를 연다), 폰은 전체 화면 페이지.
+///
+/// AI 가 준비됐으면 **물어보기 모드**(T5, 읽기 전용)가 있다 — 오버레이는 `?` 로
+/// 시작하면, 폰은 [검색 | 물어보기] 세그먼트(또는 `?`). Enter 를 눌러야만 보낸다.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({
     super.key,
@@ -81,6 +89,8 @@ class _CloseSearchIntent extends Intent {
 /// 카테고리 필터 "모든 카테고리" 센티널.
 const String _allCategories = '__all__';
 
+enum _SearchMode { search, ask }
+
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _fieldFocus = FocusNode();
@@ -95,17 +105,101 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   int _selected = 0;
   final Map<String, GlobalKey> _rowKeys = {};
 
+  /// 물어보기(T5) — 답 스트림을 든 상태. dispose 에서 구독을 취소한다.
+  final AiAskController _ask = AiAskController();
+
+  /// 물어보기 본문 자리 — 오버레이 안 스낵바 창구를 찾을 때 쓴다(이 State 의 context 는
+  /// 오버레이의 ScaffoldMessenger 바깥이다).
+  final GlobalKey _askPanelKey = GlobalKey();
+
+  /// 폰 세그먼트에서 [물어보기] 를 골랐는가.
+  bool _phoneAsk = false;
+
+  /// 이번 build 가 물어보기 모드인가 (build 안 하위 위젯용).
+  bool _asking = false;
+
   @override
   void dispose() {
+    _ask.dispose();
     _controller.dispose();
     _fieldFocus.dispose();
     super.dispose();
   }
 
-  void _setQuery(String value) => setState(() {
-    _query = value;
-    _selected = 0;
-  });
+  /// 물어보기 모드 판정 — AI 가 준비됐을 때만. 아니면 `?` 도 평범한 검색어.
+  bool _askMode(bool ready) =>
+      ready && (_query.startsWith('?') || (!widget.overlay && _phoneAsk));
+
+  bool _askModeNow() => _askMode(ref.read(aiReadinessProvider).isReady);
+
+  /// 보낼 질문 — 앞의 `?` 를 뗀다.
+  String get _question =>
+      (_query.startsWith('?') ? _query.substring(1) : _query).trim();
+
+  /// 물어보기 모드를 벗어났으면 흐르던 답을 멈춘다.
+  void _syncAskMode() {
+    if (!_askModeNow()) _ask.reset();
+  }
+
+  void _setQuery(String value) {
+    setState(() {
+      _query = value;
+      _selected = 0;
+    });
+    _ask.clearSelection();
+    _syncAskMode();
+  }
+
+  void _setPhoneMode(_SearchMode mode) {
+    setState(() => _phoneAsk = mode == _SearchMode.ask);
+    if (mode == _SearchMode.search && _query.startsWith('?')) {
+      _fillQuery(_query.substring(1));
+    } else {
+      _syncAskMode();
+      _fieldFocus.requestFocus();
+    }
+  }
+
+  /// Enter — 질문을 보낸다. 같은 질문에서 ↑↓ 로 칩을 골라 뒀으면 그 할 일을 연다.
+  Future<void> _submitAsk() async {
+    final question = _question;
+    if (question.isEmpty) return;
+    final picked = _ask.selectedCitation;
+    if (picked != null && question == _ask.asked) {
+      _openCited(picked.todoId);
+      return;
+    }
+    // '설명 보내기' 는 비동기 복원이다 — 복원 전 기본값(켬)으로 보내면 끈 설정이 무시된다.
+    await ref.read(aiSendDescriptionProvider.notifier).restored;
+    if (!mounted || !_askModeNow() || _question != question) return;
+    final gateway = ref.read(aiGatewayProvider);
+    final all = ref.read(allTodosProvider).value;
+    _ask.start(
+      question,
+      gateway == null || all == null
+          ? null
+          : ref
+                .read(aiAskServiceProvider)
+                .ask(
+                  gateway,
+                  question: question,
+                  all: all,
+                  archivedCategoryIds: ref.read(archivedCategoryIdsProvider),
+                  sendDescription: ref.read(aiSendDescriptionProvider),
+                  now: ref.read(nowProvider)(),
+                ),
+    );
+    // 폰은 키보드를 내려 답을 보이게 한다.
+    if (!widget.overlay) _fieldFocus.unfocus();
+  }
+
+  /// 인용 칩 열기 — 질문은 최근 검색에 남기지 않는다.
+  void _openCited(String todoId) => AiAskPanel.openCitation(
+    _askPanelKey.currentContext ?? context,
+    ref,
+    todoId,
+    (todo) => _open(todo, record: false),
+  );
 
   void _fillQuery(String value) {
     _controller.value = TextEditingValue(
@@ -150,8 +244,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   /// 결과 열기 — 폰은 상세 화면, 데스크탑 오버레이는 닫고 그 위치(카테고리 + 인스펙터).
-  Future<void> _open(Todo todo, {bool edit = false}) async {
-    ref.read(recentSearchesProvider.notifier).record(_query);
+  /// [record] false = 물어보기 인용 칩(질문은 최근 검색어가 아니다).
+  Future<void> _open(Todo todo, {bool edit = false, bool record = true}) async {
+    if (record) ref.read(recentSearchesProvider.notifier).record(_query);
     if (!widget.overlay) {
       if (edit) {
         await openTodoEdit(context, ref, todo);
@@ -194,6 +289,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   /// ↩ — 오버레이는 고른 결과를 연다. 폰 키보드의 "검색" 키는 검색어만 기록하고
   /// 키보드를 내린다(결과를 멋대로 열지 않는다).
   void _submit({bool edit = false}) {
+    if (_askModeNow()) {
+      _submitAsk();
+      return;
+    }
     final hits = _hits();
     if (hits.isNotEmpty) {
       ref.read(recentSearchesProvider.notifier).record(_query);
@@ -211,6 +310,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
+    if (_askModeNow()) return _onAskKey(event);
     if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
       _moveSelection(1);
       return KeyEventResult.handled;
@@ -232,20 +332,59 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return KeyEventResult.ignored;
   }
 
+  /// 물어보기 모드의 키 — ↑↓ 는 인용 칩 고르기, ⌘↩ 도 그냥 보내기.
+  KeyEventResult _onAskKey(KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _ask.moveSelection(1);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _ask.moveSelection(-1);
+      return KeyEventResult.handled;
+    }
+    if (widget.overlay &&
+        event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        HardwareKeyboard.instance.isMetaPressed) {
+      _submitAsk();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final readiness = ref.watch(aiReadinessProvider);
+    _asking = _askMode(readiness.isReady);
+    // 설명 보내기 설정을 미리 복원해 둔다(Enter 때 기다리지 않게).
+    if (readiness.isReady) ref.watch(aiSendDescriptionProvider);
+    if (!_asking && _ask.isActive) {
+      // 준비 상태가 바뀌어(로그아웃·한도) 모드에서 밀려났다 — 다음 프레임에 멈춘다
+      // (build 중 notify 금지).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncAskMode();
+      });
+    }
     final todosAsync = ref.watch(allTodosProvider);
     final all = todosAsync.asData?.value;
-    _lastHits = all == null ? const [] : _search(all);
-    final body = todosAsync.when(
-      loading: () => const TodoListSkeleton(),
-      error: (_, _) => const EmptyState(
-        icon: Icons.error_outline,
-        title: '검색할 수 없어요',
-        subtitle: '항목을 불러오지 못했습니다. 잠시 뒤 다시 시도해주세요.',
-      ),
-      data: (_) => _body(_lastHits),
-    );
+    // 물어보기 모드면 `?…` 로 검색하지 않는다.
+    _lastHits = _asking || all == null ? const [] : _search(all);
+    final body = _asking
+        ? AiAskPanel(
+            key: _askPanelKey,
+            controller: _ask,
+            onOpen: (todo) => _open(todo, record: false),
+          )
+        : todosAsync.when(
+            loading: () => const TodoListSkeleton(),
+            error: (_, _) => const EmptyState(
+              icon: Icons.error_outline,
+              title: '검색할 수 없어요',
+              subtitle: '항목을 불러오지 못했습니다. 잠시 뒤 다시 시도해주세요.',
+            ),
+            data: (_) => _body(_lastHits, aiReady: readiness.isReady),
+          );
 
     return Shortcuts(
       // Esc 로 닫기 — 다른 시트/오버레이와 같은 관례. 기본 DismissIntent 를 쓰면
@@ -286,16 +425,22 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         controller: _controller,
         focusNode: _fieldFocus,
         autofocus: true,
-        textInputAction: TextInputAction.search,
+        textInputAction: _asking
+            ? TextInputAction.send
+            : TextInputAction.search,
         style: overlay
             ? theme.textTheme.titleLarge
             : theme.textTheme.titleMedium,
         decoration: InputDecoration(
-          hintText: '제목·메모 내용 검색',
+          hintText: _asking ? '할 일에 대해 물어보기' : '제목·메모 내용 검색',
           border: InputBorder.none,
-          prefixIcon: overlay ? const Icon(Icons.search) : null,
+          prefixIcon: overlay
+              ? Icon(_asking ? Icons.auto_awesome : Icons.search)
+              : null,
         ),
         onChanged: _setQuery,
+        // 오버레이에서 질문을 보낸 뒤에도 입력칸에 포커스를 둔다(이어 묻기·↑↓·Esc).
+        onEditingComplete: _asking && overlay ? () {} : null,
         onSubmitted: (_) => _submit(),
       ),
     );
@@ -322,7 +467,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _filterBar(context),
+          if (ref.watch(aiReadinessProvider).isReady) _modeBar(),
+          ..._aiUnavailableLine(context),
+          if (!_asking) _filterBar(context),
           Expanded(child: body),
         ],
       ),
@@ -389,7 +536,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     ),
                   ),
                   const Divider(height: 1, thickness: AppTokens.hairline),
-                  _filterBar(context),
+                  ..._aiUnavailableLine(context),
+                  if (!_asking) _filterBar(context),
                   Flexible(child: body),
                   const Divider(height: 1, thickness: AppTokens.hairline),
                   Padding(
@@ -398,7 +546,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       vertical: AppTokens.space8,
                     ),
                     child: Text(
-                      '↑↓ 고르기 · Enter 열기 · ⌘Enter 편집 · Esc 닫기',
+                      _asking
+                          ? 'Enter 물어보기 · ↑↓ 인용 고르기 · Esc 닫기'
+                          : '↑↓ 고르기 · Enter 열기 · ⌘Enter 편집 · Esc 닫기',
                       key: const ValueKey('search-key-hints'),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: scheme.onSurface.withValues(alpha: 0.55),
@@ -412,6 +562,78 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
       ),
     );
+  }
+
+  /// 폰 [검색 | 물어보기] — AI 가 준비됐을 때만.
+  Widget _modeBar() {
+    final mobile = AppPlatform.isMobile;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space12,
+        AppTokens.space8,
+        AppTokens.space12,
+        0,
+      ),
+      child: SegmentedButton<_SearchMode>(
+        key: const ValueKey('search-mode'),
+        showSelectedIcon: false,
+        style: mobile
+            ? null
+            : const ButtonStyle(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+        segments: const [
+          ButtonSegment(
+            value: _SearchMode.search,
+            icon: Icon(Icons.search, size: 18),
+            label: Text('검색'),
+          ),
+          ButtonSegment(
+            value: _SearchMode.ask,
+            icon: Icon(Icons.auto_awesome, size: 18),
+            label: Text('물어보기'),
+          ),
+        ],
+        selected: {_asking ? _SearchMode.ask : _SearchMode.search},
+        onSelectionChanged: (s) => _setPhoneMode(s.first),
+      ),
+    );
+  }
+
+  /// AI 가 준비되지 않았는데 `?` 로 시작했다 — 평범한 검색으로 찾되 이유를 한 줄.
+  List<Widget> _aiUnavailableLine(BuildContext context) {
+    final readiness = ref.watch(aiReadinessProvider);
+    if (readiness.isReady || !_query.startsWith('?')) return const [];
+    final theme = Theme.of(context);
+    final faint = theme.colorScheme.onSurface.withValues(alpha: 0.6);
+    final text = switch (readiness.state) {
+      AiReadyState.off => 'AI 가 꺼져 있어 일반 검색으로 찾아요 · 설정 > AI 에서 켜면 물어볼 수 있어요',
+      AiReadyState.loading => 'AI 연결을 확인하는 중이라 일반 검색으로 찾아요',
+      _ => '${readiness.failureHint} · 지금은 일반 검색으로 찾아요',
+    };
+    return [
+      Padding(
+        key: const ValueKey('ai-ask-unavailable'),
+        padding: const EdgeInsets.fromLTRB(
+          AppTokens.space16,
+          AppTokens.space8,
+          AppTokens.space16,
+          0,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, size: 14, color: faint),
+            const SizedBox(width: AppTokens.space8),
+            Expanded(
+              child: Text(
+                text,
+                style: theme.textTheme.bodySmall?.copyWith(color: faint),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ];
   }
 
   Widget _filterBar(BuildContext context) {
@@ -536,17 +758,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     );
   }
 
-  Widget _body(List<TodoSearchHit> hits) {
+  Widget _body(List<TodoSearchHit> hits, {required bool aiReady}) {
     if (_query.trim().isEmpty) {
       final recent = ref.watch(recentSearchesProvider);
       if (recent.isEmpty) {
+        final base = widget.overlay
+            ? '할 일 제목과 메모 내용을 함께 검색합니다. ↑↓ 로 고르고 ↩ 로 엽니다.'
+            : '할 일 제목과 메모 내용을 함께 검색합니다.';
         return EmptyState(
           key: const ValueKey('search-idle'),
           icon: Icons.search,
           title: '무엇을 찾을까요?',
-          subtitle: widget.overlay
-              ? '할 일 제목과 메모 내용을 함께 검색합니다. ↑↓ 로 고르고 ↩ 로 엽니다.'
-              : '할 일 제목과 메모 내용을 함께 검색합니다.',
+          subtitle: aiReady ? '$base\n? 로 시작하면 AI 에게 물어봐요.' : base,
         );
       }
       return _RecentList(

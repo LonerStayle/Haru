@@ -177,6 +177,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('⌘⇧N'), findsOneWidget);
+      expect(find.text('⌘K 후 ?'), findsOneWidget);
     });
 
     testWidgets('데스크탑 설정 대화상자에서 보관함으로 들어간다', (tester) async {
