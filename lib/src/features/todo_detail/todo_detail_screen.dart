@@ -248,7 +248,9 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
     final groups =
         ref.watch(activeGroupsProvider).asData?.value ?? const <Group>[];
 
-    final allTodos = asyncAll.asData?.value ?? const <Todo>[];
+    // asData 가 아니라 value — 이전 값을 든 채 loading/error 를 거칠 때 asData 는 null 이라
+    // 목록이 빈 것으로 보여 "다른 곳에서 삭제" 로 오판했다 (hasValue 는 그대로 true).
+    final allTodos = asyncAll.value ?? const <Todo>[];
     final live = allTodos.firstWhere(
       (t) => t.id == parent.id,
       orElse: () => parent,

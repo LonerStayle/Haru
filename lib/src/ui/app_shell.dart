@@ -477,7 +477,9 @@ class _AppShellState extends ConsumerState<AppShell> {
       }
     });
     final categoriesAsync = ref.watch(activeCategoriesProvider);
-    final categories = categoriesAsync.asData?.value ?? Category.builtinSeeds;
+    // value — 이전 값을 든 채 loading/error 일 때도 실제 목록 유지 (asData 면 기본 목록으로
+    // 떨어져, 보고 있던 사용자 카테고리가 "사라졌다" 로 오판돼 화면이 튕긴다).
+    final categories = categoriesAsync.value ?? Category.builtinSeeds;
 
     // v1.3 — 활성 그룹 stream. 사이드바가 그룹 헤더 + 미분류 섹션으로 카테고리를 묶는다.
     final groups =

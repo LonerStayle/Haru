@@ -210,6 +210,19 @@ void main() {
     expect(find.textContaining('다른 곳에서 삭제돼 닫았어요'), findsOneWidget);
   });
 
+  // 목록 스트림이 이전 값을 든 채 error/loading 을 한 번 거치면 asData 가 null 이 돼
+  // "목록이 비었다 = 지워졌다" 로 오판했다 (메모 등록 중 상세가 닫히며 삭제 알림).
+  testWidgets('목록 스트림이 잠깐 에러여도 지워진 걸로 보지 않는다', (tester) async {
+    final p = make('p');
+    final stream = await mount(tester, p, [p]);
+
+    stream.addError(StateError('일시 오류'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TodoDetailScreen), findsOneWidget);
+    expect(find.textContaining('다른 곳에서 삭제돼 닫았어요'), findsNothing);
+  });
+
   testWidgets('하위가 없으면 빈 상태에 "하위 추가" 버튼', (tester) async {
     final p = make('p');
     await mount(tester, p, [p]);
