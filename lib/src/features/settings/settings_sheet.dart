@@ -16,13 +16,16 @@ import '../calendar/microsoft_auth_service.dart';
 import '../category/categories_controller.dart';
 import '../category/groups_controller.dart';
 import '../../domain/policies/todo_sort_policy.dart';
+import '../ai/ai_backend.dart';
+import '../ai/ai_providers.dart';
+import '../ai/ai_route.dart';
 import '../recurrence/recurrence_manage_screen.dart';
 import 'app_preferences.dart';
 import 'archive_screen.dart';
 import 'launch_at_login_service.dart';
 import 'sort_mode_controller.dart';
 
-/// 앱 설정 — 섹션: 계정 · 일반 · 캘린더 연동 · 데이터 · 정보.
+/// 앱 설정 — 섹션: 계정 · 일반 · 캘린더 연동 · AI · 데이터 · 정보.
 ///
 /// 데스크탑은 ⌘, 로 여는 가운데 대화상자(폭 600), 폰은 전체 화면 페이지. (예전엔
 /// 항목 몇 개가 섹션 없이 나열된 하단 시트였다.)
@@ -128,6 +131,11 @@ class _SettingsSheetState extends State<SettingsSheet> {
       const _CalendarSectionHeader(),
       _calendarTile(theme, scheme),
       _microsoftCalendarTile(theme, scheme),
+      const _SectionHeader('AI'),
+      const _AiRouteTile(),
+      const _AiAccountTile(),
+      const _AiCheckTile(),
+      const _AiPrivacyTile(),
       const _SectionHeader('데이터'),
       _archiveTile(theme, scheme),
       const _RecurrenceTile(),
@@ -861,6 +869,271 @@ class _ShortcutsTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 사용할 AI — 끔 / ChatGPT 플랜 / Claude 플랜. 하나만 켠다.
+class _AiRouteTile extends ConsumerWidget {
+  const _AiRouteTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final route = ref.watch(aiRouteProvider);
+    final compact = AppPlatform.isMobile;
+    return _SettingRow(
+      icon: Icons.auto_awesome_outlined,
+      title: '사용할 AI',
+      subtitle: '이미 쓰는 플랜으로 정리·제안을 받아요 · 고른 기기에서만',
+      below: SegmentedButton<AiRoute>(
+        key: const ValueKey('settings-ai-route'),
+        showSelectedIcon: false,
+        segments: [
+          for (final r in AiRoute.values)
+            ButtonSegment(
+              value: r,
+              label: Text(r.label(compact: compact)),
+            ),
+        ],
+        selected: {route},
+        onSelectionChanged: (s) =>
+            ref.read(aiRouteProvider.notifier).set(s.first),
+      ),
+    );
+  }
+}
+
+/// 플랜 계정 — 상태 · 로그인/로그아웃. 로그인 정보는 이 기기에만 저장된다.
+class _AiAccountTile extends ConsumerStatefulWidget {
+  const _AiAccountTile();
+
+  @override
+  ConsumerState<_AiAccountTile> createState() => _AiAccountTileState();
+}
+
+class _AiAccountTileState extends ConsumerState<_AiAccountTile>
+    implements AiSignInPrompter {
+  bool _busy = false;
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await action();
+    } on AiSignInException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('로그인하지 못했어요 · 잠시 후 다시 해 주세요'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Future<String?> askCode({required String message}) => showDialog<String>(
+    context: context,
+    builder: (context) => _AiCodeDialog(hint: message),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final route = ref.watch(aiRouteProvider);
+    if (route == AiRoute.off) return const SizedBox.shrink();
+    final backend = ref.watch(aiBackendProvider(route));
+    final status = ref.watch(aiAccountStatusProvider(route)).value;
+    final (subtitle, signedIn) = switch (status) {
+      null => ('확인 중…', false),
+      AiSignedOut() => ('로그인이 필요해요', false),
+      AiSignedIn(:final label, :final plan) => (
+        plan == null ? label : '$label · $plan',
+        true,
+      ),
+      AiPaused(:final label, :final until) => (
+        '$label · 한도 대기 · ${_hm(until)} 이후',
+        true,
+      ),
+    };
+    final Widget trailing = _busy
+        ? const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : signedIn
+        ? TextButton(
+            key: const ValueKey('settings-ai-signout'),
+            onPressed: () => _run(backend.signOut),
+            child: const Text('로그아웃'),
+          )
+        : FilledButton.tonal(
+            key: const ValueKey('settings-ai-signin'),
+            onPressed: () => _run(() => backend.signIn(this)),
+            child: const Text('로그인'),
+          );
+    return _SettingRow(
+      key: const ValueKey('settings-ai-account'),
+      icon: Icons.account_circle_outlined,
+      title: '${route.label(compact: false)} 계정',
+      subtitle: subtitle,
+      trailing: trailing,
+    );
+  }
+
+  static String _hm(DateTime t) {
+    final l = t.toLocal();
+    return '${l.hour.toString().padLeft(2, '0')}:'
+        '${l.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+/// 브라우저가 보여 준 코드를 붙여넣는 대화상자. 컨트롤러는 닫힘 애니메이션이 끝난 뒤
+/// 위젯과 함께 정리된다(닫자마자 dispose 하면 애니메이션 중에 쓰여 터진다).
+class _AiCodeDialog extends StatefulWidget {
+  const _AiCodeDialog({required this.hint});
+
+  final String hint;
+
+  @override
+  State<_AiCodeDialog> createState() => _AiCodeDialogState();
+}
+
+class _AiCodeDialogState extends State<_AiCodeDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const ValueKey('settings-ai-code-dialog'),
+      title: const Text('코드 붙여넣기'),
+      content: TextField(
+        key: const ValueKey('settings-ai-code-field'),
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(hintText: widget.hint),
+        onSubmitted: (v) => Navigator.of(context).pop(v),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('확인'),
+        ),
+      ],
+    );
+  }
+}
+
+/// 연결 확인 — 짧은 JSON 왕복 1회.
+class _AiCheckTile extends ConsumerStatefulWidget {
+  const _AiCheckTile();
+
+  @override
+  ConsumerState<_AiCheckTile> createState() => _AiCheckTileState();
+}
+
+class _AiCheckTileState extends ConsumerState<_AiCheckTile> {
+  bool _busy = false;
+
+  Future<void> _check() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final gateway = ref.read(aiGatewayProvider);
+    final hint = ref.read(aiReadinessProvider).failureHint;
+    void say(String text) => messenger.showSnackBar(
+      SnackBar(content: Text(text), behavior: SnackBarBehavior.floating),
+    );
+    if (gateway == null) return say(hint);
+    setState(() => _busy = true);
+    final watch = Stopwatch()..start();
+    Map<String, dynamic>? res;
+    try {
+      res = await gateway
+          .json(
+            instructions: '연결 확인이다. ok 를 true 로 돌려준다.',
+            input: 'ping',
+            schema: const {
+              'type': 'object',
+              'additionalProperties': false,
+              'required': ['ok'],
+              'properties': {
+                'ok': {'type': 'boolean'},
+              },
+            },
+          )
+          .timeout(const Duration(seconds: 60));
+    } catch (_) {
+      res = null;
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (res?['ok'] == true) {
+      final sec = (watch.elapsedMilliseconds / 1000).toStringAsFixed(1);
+      say('연결됐어요 ($sec초)');
+    } else {
+      say(ref.read(aiReadinessProvider).failureHint);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final route = ref.watch(aiRouteProvider);
+    if (route == AiRoute.off) return const SizedBox.shrink();
+    return _SettingRow(
+      icon: Icons.wifi_tethering,
+      title: '연결 확인',
+      subtitle: '짧은 질문 하나로 응답을 확인해요',
+      trailing: _busy
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : OutlinedButton(
+              key: const ValueKey('settings-ai-check'),
+              onPressed: _check,
+              child: const Text('확인'),
+            ),
+    );
+  }
+}
+
+/// 보내는 내용 — 제목 · 카테고리 이름 · (켜면) 설명 앞 300자.
+class _AiPrivacyTile extends ConsumerWidget {
+  const _AiPrivacyTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(aiRouteProvider) == AiRoute.off) {
+      return const SizedBox.shrink();
+    }
+    final send = ref.watch(aiSendDescriptionProvider);
+    return _SettingRow(
+      icon: Icons.privacy_tip_outlined,
+      title: '설명도 보내기',
+      subtitle:
+          '제목 · 카테고리 이름 · 설명 앞 300자를 보내요. '
+          '항목 하나를 골라 부르는 기능(목록으로 · 다음 한 걸음)은 그 항목 설명을 보내요',
+      trailing: Switch(
+        key: const ValueKey('settings-ai-send-description'),
+        value: send,
+        onChanged: (v) => ref.read(aiSendDescriptionProvider.notifier).set(v),
       ),
     );
   }
