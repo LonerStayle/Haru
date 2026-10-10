@@ -279,23 +279,23 @@ class _AppShellState extends ConsumerState<AppShell> {
   ///
   /// true 면 [PopScope.canPop] = false 로 두어 OS 에 "이 back 은 내가 처리한다" 를 알리고
   /// (predictive-back 제스처도 앱 종료 대신 우리 핸들러로 라우팅됨), [_handleMobileBack]
-  /// 이 계단식으로 소비한다. 오늘이 아니면 전부 가로챈다.
+  /// 이 계단식으로 소비한다. 홈([ShellLocation.home] = 카테고리 목록)이 아니면 전부 가로챈다.
   ///
   /// 데스크탑은 시스템 뒤로가기가 없으므로 항상 false (PopScope 무력화).
   bool _mobileHasBackTarget(ShellLocation location) =>
-      AppPlatform.isMobile && location.page != ShellPage.today;
+      AppPlatform.isMobile && location != ShellLocation.home;
 
   /// 모바일 시스템 뒤로가기 계단:
   ///   1) 카테고리 화면 → 들어온 곳(전체보기) 또는 카테고리 목록
-  ///   2) 그 밖의 비-오늘 화면 → 오늘
-  /// (오늘이면 canPop=true 라 여기 오지 않음 → 그때만 OS 가 앱을 종료.)
+  ///   2) 그 밖의 화면(오늘·전체보기·캘린더) → 홈(카테고리 목록)
+  /// (홈이면 canPop=true 라 여기 오지 않음 → 그때만 OS 가 앱을 종료.)
   void _handleMobileBack() {
     final location = ref.read(shellLocationProvider);
     if (location.page == ShellPage.category) {
       _go(_categoryParent);
       return;
     }
-    if (location.page != ShellPage.today) _go(ShellLocation.today);
+    if (location != ShellLocation.home) _go(ShellLocation.home);
   }
 
   /// 단축키 digit (0~9) → destination. 매칭 못 하면 no-op.

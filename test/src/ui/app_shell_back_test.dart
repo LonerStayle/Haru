@@ -115,24 +115,32 @@ void main() {
     );
   });
 
-  testWidgets('비-오늘 탭 → 시스템 back → 오늘 복귀 (앱 종료 X)', (tester) async {
+  testWidgets('모바일 첫 화면 = 카테고리 목록', (tester) async {
+    await pump(tester);
+    expect(find.byType(CategoryListScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsNothing);
+  });
+
+  testWidgets('캘린더 → 시스템 back → 카테고리 목록(홈) 복귀 (앱 종료 X)', (tester) async {
     final exits = spyAppExit(tester);
     await pump(tester);
-    expect(find.byType(HomeScreen), findsOneWidget, reason: '초기 진입은 오늘');
 
     // 캘린더 탭으로 이동.
     await tester.tap(find.text('캘린더'));
     await tester.pumpAndSettle();
     expect(find.byType(CalendarScreen), findsOneWidget);
-    expect(find.byType(HomeScreen), findsNothing);
 
     await systemBack(tester);
 
-    expect(find.byType(HomeScreen), findsOneWidget, reason: 'back → 오늘 탭 복귀');
+    expect(
+      find.byType(CategoryListScreen),
+      findsOneWidget,
+      reason: 'back → 홈(카테고리 목록) 복귀',
+    );
     expect(exits, isEmpty, reason: '탭 복귀가 back 을 소비 → 앱 종료 호출 없어야 함');
   });
 
-  testWidgets('카테고리 화면 → back → 카테고리 목록 → back → 오늘', (tester) async {
+  testWidgets('카테고리 화면 → back → 카테고리 목록 → back → 앱 종료', (tester) async {
     final exits = spyAppExit(tester);
     await pump(tester);
 
@@ -150,9 +158,10 @@ void main() {
     await systemBack(tester);
     expect(find.byType(CategoryListScreen), findsOneWidget, reason: '목록으로');
 
-    await systemBack(tester);
-    expect(find.byType(HomeScreen), findsOneWidget, reason: '오늘로');
     expect(exits, isEmpty);
+
+    await systemBack(tester);
+    expect(exits, isNotEmpty, reason: '목록이 홈 — 여기서 back 이면 종료');
   });
 
   testWidgets('전체보기 카테고리 머리 → 카테고리 → back → 전체보기로', (tester) async {
@@ -176,17 +185,35 @@ void main() {
     expect(find.byType(OutlineScreen), findsOneWidget, reason: '들어온 곳으로');
   });
 
-  testWidgets('오늘 탭(루트) → 시스템 back → 앱 종료 호출', (tester) async {
+  testWidgets('오늘 → 시스템 back → 카테고리 목록 (앱 종료 X)', (tester) async {
     final exits = spyAppExit(tester);
     await pump(tester);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('오늘'),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
+
+    await systemBack(tester);
+
+    expect(find.byType(CategoryListScreen), findsOneWidget);
+    expect(exits, isEmpty);
+  });
+
+  testWidgets('카테고리 목록(홈) → 시스템 back → 앱 종료 호출', (tester) async {
+    final exits = spyAppExit(tester);
+    await pump(tester);
+    expect(find.byType(CategoryListScreen), findsOneWidget);
 
     await systemBack(tester);
 
     expect(
       exits,
       isNotEmpty,
-      reason: '루트(오늘)에서는 가로챌 게 없어 앱 종료(SystemNavigator.pop) 로 이어져야 함',
+      reason: '홈에서는 가로챌 게 없어 앱 종료(SystemNavigator.pop) 로 이어져야 함',
     );
   });
 
@@ -195,6 +222,13 @@ void main() {
     // 다른 화면의 앱바는 그대로 — 이 화면만의 규칙이다.
     testWidgets('오늘 화면에는 앱바가 있고, 캘린더로 가면 사라진다', (tester) async {
       await pump(tester);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('오늘'),
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(find.byType(AppBar), findsOneWidget, reason: '오늘 화면은 앱바 유지');
 
       await tester.tap(find.text('캘린더'));

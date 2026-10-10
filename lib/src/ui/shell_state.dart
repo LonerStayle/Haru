@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/platform.dart';
 import 'destination.dart';
 
 /// 메인 영역에 떠 있는 화면 종류.
@@ -24,6 +25,10 @@ class ShellLocation {
   static const outline = ShellLocation._(ShellPage.outline);
   static const calendar = ShellLocation._(ShellPage.calendar);
   static const categories = ShellLocation._(ShellPage.categories);
+
+  /// 앱을 켜면 처음 뜨는 화면 = 모바일 뒤로가기 계단의 끝(여기서 back 이면 앱 종료).
+  /// 모바일은 카테고리 목록, 데스크탑은 오늘 (대표님 결정, 2026-10-10).
+  static ShellLocation get home => AppPlatform.isMobile ? categories : today;
 
   final ShellPage page;
   final String? categoryId;
@@ -60,7 +65,7 @@ class ShellLocationNotifier extends Notifier<ShellLocation> {
   ShellLocation? _returnTo;
 
   @override
-  ShellLocation build() => ShellLocation.today;
+  ShellLocation build() => ShellLocation.home;
 
   void go(ShellLocation location) {
     _returnTo = null;
