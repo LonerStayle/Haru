@@ -2988,11 +2988,20 @@ class AddTodoSubmission {
     this.parentId,
     this.recurrence,
     this.recurrenceEndAt,
+    this.children = const [],
+    this.fromAi = false,
   });
 
   final String title;
   final Category category;
   final DateTime? dueAt;
+
+  /// 이 항목 아래에 함께 만들 하위 (AI 붙여넣기 정리의 1단계 하위). 각 하위의
+  /// parentId·category 는 저장할 때 만든 부모 것으로 바뀐다.
+  final List<AddTodoSubmission> children;
+
+  /// AI 붙여넣기 정리에서 온 제출 — 저장 후 "한 번에 되돌리기" 스낵바를 띄운다.
+  final bool fromAi;
 
   /// date-repeat — 반복 규칙. null 이면 단발(비반복) 할 일. non-null 이면 이 submission
   /// 은 반복 마스터로 저장되고, 발생일마다 인스턴스가 자동 생성된다.

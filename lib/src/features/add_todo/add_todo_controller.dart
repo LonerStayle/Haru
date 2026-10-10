@@ -9,7 +9,9 @@ import '../../domain/category.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart';
+import '../../ui/widgets/undo_snackbar.dart';
 import '../calendar/calendar_service.dart';
+import '../todo_actions/todo_actions_controller.dart';
 import 'add_todo_default_category.dart';
 import 'add_todo_sheet.dart';
 
@@ -57,6 +59,24 @@ Future<void> savePendingSubmissions(
     );
   }
   final controller = ref.read(addTodoControllerProvider);
+  // AI 붙여넣기 정리 — 부모·하위를 한 번에 만들고, 한 번에 되돌린다.
+  if (pending.any((s) => s.fromAi)) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final created = await controller.addAll(pending);
+    if (messenger == null || !messenger.mounted || created.isEmpty) return;
+    final actions = ref.read(todoActionsProvider);
+    showUndoSnackbarOn(
+      messenger,
+      message: '${created.length}건 추가했어요.',
+      onUndo: () async {
+        // 하위 먼저 지운다 (만든 순서가 부모 → 그 하위).
+        for (final t in created.reversed) {
+          await actions.delete(t);
+        }
+      },
+    );
+    return;
+  }
   if (pending.length > 1) {
     await controller.addAll(pending);
     return;
@@ -185,51 +205,96 @@ class AddTodoController {
     return AddTodoResult(todo: todo, calendarWarning: warning);
   }
 
-  /// Task B — bulk paste 용. 입력 순서를 보존하며 전체를 맨 위로 올린다.
+  /// 일괄 추가 — 입력 순서를 보존하며 전체를 맨 위로 올린다. 만든 할 일을 부모 → 그
+  /// 하위 순서로 돌려준다.
   ///
-  /// 같은 형제 집합(첫 항목의 parentId+category 기준) min sortOrder 를 한 번만 조회한 뒤
-  /// 입력 순서를 그대로 보존하며 전체를 기존 형제들 위로 올린다 — 첫 줄이 맨 위(가장 작은
-  /// sortOrder), 마지막 줄이 `min-1`. 즉 i 번째 = `min - (N - i)` (N = 줄 수).
-  /// 작은 sortOrder = 위 불변식과 맞물려 화면에서 입력 순서대로 위→아래로 보인다.
-  /// Calendar 등록은 건당 [add] 와 동일하게 처리.
-  ///
-  /// 모든 submission 이 같은 category/parentId 라고 가정 (AddTodoSheet bulk 흐름이 보장).
-  Future<void> addAll(List<AddTodoSubmission> subs) async {
-    if (subs.isEmpty) return;
+  /// 형제 집합(category + parentId)마다 min sortOrder 를 한 번 조회한 뒤 그 집합 안의 입력
+  /// 순서를 그대로 보존한다 — 첫 줄이 맨 위(가장 작은 sortOrder), 마지막 줄이 `min-1`.
+  /// 즉 집합 안 i 번째 = `min - (N - i)`. AI 붙여넣기 정리처럼 카테고리가 섞여도 집합마다
+  /// 따로 맨 위로 간다(예전엔 첫 항목의 집합만 보고 계산했다).
+  /// [AddTodoSubmission.children] 은 만든 부모 아래에 같은 규칙으로 저장한다(1단계).
+  /// Calendar 등록은 건당 [add] 와 동일하게 저장소 데코레이터가 처리한다.
+  Future<List<Todo>> addAll(List<AddTodoSubmission> subs) async {
+    if (subs.isEmpty) return const [];
     // 반복 규칙이 있으면 건마다 마스터 + 인스턴스 생성이 필요하다 → [add] 에 맡긴다.
     // add 는 매번 맨 위(min-1)에 넣으므로 **역순**으로 넣어야 입력 순서가 위→아래로 보존된다.
     if (subs.any((s) => s.recurrence != null && s.dueAt != null)) {
+      final made = <Todo>[];
       for (final s in subs.reversed) {
-        await add(s);
+        made.add((await add(s)).todo);
       }
-      return;
+      return made.reversed.toList();
     }
-    final first = subs.first;
-    final minSibling = await repo.minSiblingSortOrder(
-      categoryId: first.category.id,
-      parentId: first.parentId,
-    );
-    final min = minSibling ?? 0;
-    final n = subs.length;
+    final created = <Todo>[];
+    // 입력 위치로 묶는다 — 같은 const 제출이 두 번 와도 각각 만든다.
+    final groups = <(String, String?), List<int>>{};
     for (var i = 0; i < subs.length; i++) {
       final s = subs[i];
-      var todo = Todo.create(
-        title: s.title,
-        category: s.category,
-        dueAt: s.dueAt,
-        now: now,
-        type: s.type,
-        description: s.description,
-        endAt: s.endAt,
-        isAllDay: s.isAllDay,
-        timeAnchor: s.timeAnchor,
-        parentId: s.parentId,
-        // 첫 줄 = min - N (맨 위), 마지막 줄 = min - 1.
-        sortOrder: min - (n - i),
-      );
-      // 캘린더 등록은 저장소 데코레이터가 처리한다 — 여기서 또 만들면 이벤트가 둘이 된다.
-      await repo.upsert(todo);
+      groups.putIfAbsent((s.category.id, s.parentId), () => []).add(i);
     }
+    final made = List<Todo?>.filled(subs.length, null);
+    for (final MapEntry(key: (categoryId, parentId), value: group)
+        in groups.entries) {
+      final minSibling = await repo.minSiblingSortOrder(
+        categoryId: categoryId,
+        parentId: parentId,
+      );
+      final min = minSibling ?? 0;
+      final n = group.length;
+      for (var j = 0; j < n; j++) {
+        // 첫 줄 = min - N (맨 위), 마지막 줄 = min - 1.
+        made[group[j]] = await _insert(
+          subs[group[j]],
+          sortOrder: min - (n - j),
+        );
+      }
+    }
+    for (var i = 0; i < subs.length; i++) {
+      final s = subs[i];
+      final parent = made[i]!;
+      created.add(parent);
+      final kids = s.children;
+      for (var i = 0; i < kids.length; i++) {
+        final k = kids[i];
+        created.add(
+          await _insert(
+            AddTodoSubmission(
+              title: k.title,
+              category: parent.category,
+              parentId: parent.id,
+              dueAt: k.dueAt,
+              isAllDay: k.isAllDay,
+              timeAnchor: k.timeAnchor,
+              addToCalendar: k.addToCalendar,
+              type: k.type,
+              description: k.description,
+            ),
+            // 새 부모라 기존 형제가 없다 — 입력 순서대로.
+            sortOrder: i - kids.length,
+          ),
+        );
+      }
+    }
+    return created;
+  }
+
+  Future<Todo> _insert(AddTodoSubmission s, {required int sortOrder}) async {
+    final todo = Todo.create(
+      title: s.title,
+      category: s.category,
+      dueAt: s.dueAt,
+      now: now,
+      type: s.type,
+      description: s.description,
+      endAt: s.endAt,
+      isAllDay: s.isAllDay,
+      timeAnchor: s.timeAnchor,
+      parentId: s.parentId,
+      sortOrder: sortOrder,
+    );
+    // 캘린더 등록은 저장소 데코레이터가 처리한다 — 여기서 또 만들면 이벤트가 둘이 된다.
+    await repo.upsert(todo);
+    return todo;
   }
 }
 

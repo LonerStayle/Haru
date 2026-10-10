@@ -153,6 +153,55 @@ void main() {
       expect(list.map((t) => t.title).toList(), ['첫', '둘', '셋', '기존']);
     });
 
+    test('addAll — 카테고리가 섞이면 집합마다 맨 위 + 입력 순서', () async {
+      await controller.add(sub('work-기존')); // work -1
+      await controller.add(sub('daily-기존', category: Category.daily)); // -1
+      final made = await controller.addAll([
+        sub('w1'),
+        sub('d1', category: Category.daily),
+        sub('w2'),
+      ]);
+      expect(made.map((t) => t.title), ['w1', 'd1', 'w2']);
+      final work = await repo.watchByCategory(Category.work).first;
+      expect(work.map((t) => t.title).toList(), ['w1', 'w2', 'work-기존']);
+      final daily = await repo.watchByCategory(Category.daily).first;
+      expect(daily.map((t) => t.title).toList(), ['d1', 'daily-기존']);
+    });
+
+    test('addAll — 하위(children)는 만든 부모 아래, 부모 카테고리로', () async {
+      final made = await controller.addAll([
+        AddTodoSubmission(
+          title: '부모',
+          category: Category.work,
+          dueAt: null,
+          addToCalendar: false,
+          children: [
+            sub('하위1', category: Category.daily),
+            sub('하위2', category: Category.daily),
+          ],
+        ),
+        sub('형제'),
+      ]);
+      expect(made.map((t) => t.title), ['부모', '하위1', '하위2', '형제']);
+      final parent = made.first;
+      final kids = made.sublist(1, 3);
+      expect(kids.every((k) => k.parentId == parent.id), isTrue);
+      expect(kids.every((k) => k.category == Category.work), isTrue);
+      expect(kids[0].sortOrder < kids[1].sortOrder, isTrue);
+    });
+
+    test('addAll — 같은 const 제출이 두 번 와도 두 건', () async {
+      const s = AddTodoSubmission(
+        title: '같음',
+        category: Category.work,
+        dueAt: null,
+        addToCalendar: false,
+      );
+      final made = await controller.addAll([s, s]);
+      expect(made, hasLength(2));
+      expect(made[0].id == made[1].id, isFalse);
+    });
+
     test('addAll — 반복 규칙이 있으면 건마다 반복 마스터로 저장 + 입력 순서 보존', () async {
       // UX 감사 B10 — 일괄 붙여넣기에서 반복 설정이 조용히 빠지던 문제.
       AddTodoSubmission rec(String title) => AddTodoSubmission(
