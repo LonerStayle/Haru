@@ -48,8 +48,12 @@ void main() {
   setUp(() => AppPlatform.debugFormFactorOverride = FormFactor.desktop);
   tearDown(() => AppPlatform.debugFormFactorOverride = null);
 
-  Future<void> pump(WidgetTester tester, {List<Todo>? today}) async {
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
+  Future<void> pump(
+    WidgetTester tester, {
+    List<Todo>? today,
+    Size size = const Size(1400, 900),
+  }) async {
+    await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final all = [parent, child];
     await tester.pumpWidget(
@@ -111,6 +115,29 @@ void main() {
       expect(find.byType(TodoDetailScreen), findsNothing, reason: 'push 아님');
       expect(find.byType(OutlineScreen), findsOneWidget);
       expect(find.byType(TodoDetailView), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('inspector-overlay')),
+        findsNothing,
+        reason: '넓은 창은 목록 옆에 나란히',
+      );
+    });
+
+    // 창 700 = 사이드바 220 + 패널 340 → 목록 140 으로 짓눌려 제목이 세로로 쪼개지고
+    // overflow 가 났다. 좁으면 패널이 목록 자리를 덮는다.
+    testWidgets('좁은 창 → 패널이 목록 자리를 덮고, × 로 닫으면 목록', (tester) async {
+      await pump(tester, size: const Size(700, 900));
+      await openOutline(tester);
+      await tester.tap(find.text('결제 리팩토링'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('inspector-overlay')), findsOneWidget);
+      expect(find.byKey(const ValueKey('inspector-panel')), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'overflow 없음');
+
+      await tester.tap(find.byKey(const ValueKey('inspector-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('inspector-overlay')), findsNothing);
+      expect(find.text('결제 리팩토링'), findsOneWidget);
     });
 
     testWidgets('패널 안에서 하위로 들어가고 ← 로 돌아온다', (tester) async {

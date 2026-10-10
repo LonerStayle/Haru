@@ -544,43 +544,74 @@ class _AppShellState extends ConsumerState<AppShell> {
       final onScopedPage =
           location.page == ShellPage.today ||
           location.page == ShellPage.outline;
-      body = Row(
-        children: [
-          _Sidebar(
-            destinations: _destinations,
-            groups: groups,
-            selectedIndex: index,
-            selectedGroupId: onScopedPage ? scopedGroupId : null,
-            onSelect: _select,
-            onSelectGroup: _openGroup,
-            onAddTodo: _openAddTodo,
-            onOpenSearch: _openSearch,
-            onOpenSettings: _openSettings,
-            onMoveCategoryInto: (dragged, gid, siblings, at) => ref
-                .read(categoriesControllerProvider)
-                .moveCategoryInto(dragged, gid, siblings, at),
-            onReorderGroups: (list, o, n) =>
-                ref.read(groupsControllerProvider).reorder(list, o, n),
-          ),
-          const VerticalDivider(width: AppTokens.hairline),
-          Expanded(
-            child: InspectorScope(
-              controller: _inspector,
-              // 넓은 창에서 목록이 한없이 늘어나 눈이 좌우로 멀리 오가지 않게 최대 폭.
-              // 캘린더는 폭이 곧 정보량이라 제외.
-              child: location.page == ShellPage.calendar
-                  ? mainContent
-                  : _ReadableWidth(child: mainContent),
-            ),
-          ),
-          if (_inspector.isOpen) ...[
-            const VerticalDivider(width: AppTokens.hairline),
-            SizedBox(
-              width: InspectorPanel.widthFor(MediaQuery.sizeOf(context).width),
-              child: InspectorPanel(controller: _inspector),
-            ),
-          ],
-        ],
+      body = LayoutBuilder(
+        builder: (context, constraints) {
+          final windowWidth = constraints.maxWidth;
+          // 사이드바 + 구분선을 뺀 메인 영역 폭.
+          final mainWidth = windowWidth - _Sidebar.width - AppTokens.hairline;
+          final besideInspector = InspectorPanel.fitsBeside(
+            windowWidth,
+            mainWidth,
+          );
+          // 항상 Stack — 좁은 창에서 패널이 덮을 때도 Row 의 트리 위치가 그대로라 목록
+          // 상태(스크롤 위치)가 살아 있고, × 로 닫으면 보던 자리로 돌아간다.
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              Row(
+                children: [
+                  _Sidebar(
+                    destinations: _destinations,
+                    groups: groups,
+                    selectedIndex: index,
+                    selectedGroupId: onScopedPage ? scopedGroupId : null,
+                    onSelect: _select,
+                    onSelectGroup: _openGroup,
+                    onAddTodo: _openAddTodo,
+                    onOpenSearch: _openSearch,
+                    onOpenSettings: _openSettings,
+                    onMoveCategoryInto: (dragged, gid, siblings, at) => ref
+                        .read(categoriesControllerProvider)
+                        .moveCategoryInto(dragged, gid, siblings, at),
+                    onReorderGroups: (list, o, n) =>
+                        ref.read(groupsControllerProvider).reorder(list, o, n),
+                  ),
+                  const VerticalDivider(width: AppTokens.hairline),
+                  Expanded(
+                    child: InspectorScope(
+                      controller: _inspector,
+                      // 넓은 창에서 목록이 한없이 늘어나 눈이 좌우로 멀리 오가지 않게 최대 폭.
+                      // 캘린더는 폭이 곧 정보량이라 제외.
+                      child: location.page == ShellPage.calendar
+                          ? mainContent
+                          : _ReadableWidth(child: mainContent),
+                    ),
+                  ),
+                  if (_inspector.isOpen && besideInspector) ...[
+                    const VerticalDivider(width: AppTokens.hairline),
+                    SizedBox(
+                      width: InspectorPanel.widthFor(windowWidth),
+                      child: InspectorPanel(controller: _inspector),
+                    ),
+                  ],
+                ],
+              ),
+              // 좁은 창 — 목록을 짓누르는 대신(창 700 이면 목록 140) 패널이 목록 자리를 덮는다.
+              if (_inspector.isOpen && !besideInspector)
+                Positioned(
+                  key: const ValueKey('inspector-overlay'),
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: mainWidth,
+                  child: Material(
+                    color: Theme.of(context).colorScheme.surface,
+                    child: InspectorPanel(controller: _inspector),
+                  ),
+                ),
+            ],
+          );
+        },
       );
     } else {
       body = SafeArea(child: mainContent);
@@ -960,6 +991,8 @@ bool isFocusInEditableText() {
 /// 메뉴·다이얼로그는 [CategoryActions] (모바일 카테고리 목록과 공용).
 /// 그룹 머리 탭 = 전체보기 + 그 그룹 필터, chevron = 펼치기/접기(여러 그룹 동시, 저장).
 class _Sidebar extends ConsumerStatefulWidget {
+  static const double width = 220;
+
   const _Sidebar({
     required this.destinations,
     required this.groups,
@@ -1340,7 +1373,7 @@ class _SidebarState extends ConsumerState<_Sidebar> {
     ];
 
     return SizedBox(
-      width: 220,
+      width: _Sidebar.width,
       child: ColoredBox(
         color: colorScheme.surfaceContainerHighest,
         child: SafeArea(

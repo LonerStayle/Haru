@@ -90,6 +90,15 @@ class InspectorPanel extends ConsumerWidget {
   static double widthFor(double windowWidth) =>
       (windowWidth * 0.35).clamp(minWidth, maxWidth);
 
+  /// 패널 옆에 남아야 할 목록 최소 폭. 이보다 좁아지면 제목이 한 글자씩 세로로 쪼개지고
+  /// overflow 가 났다(창 700 = 사이드바 220 + 패널 340 → 목록 140).
+  static const double minListWidth = 360;
+
+  /// [mainWidth](사이드바를 뺀 영역)에 목록과 패널을 나란히 둘 수 있는지.
+  /// false 면 패널이 목록 자리를 덮는다(× 로 닫으면 목록).
+  static bool fitsBeside(double windowWidth, double mainWidth) =>
+      mainWidth - widthFor(windowWidth) >= minListWidth;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final top = controller.current;
