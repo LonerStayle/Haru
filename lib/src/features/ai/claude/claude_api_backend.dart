@@ -97,15 +97,25 @@ class ClaudeApiBackend implements AiBackend {
     if (key == null) {
       throw const AiSignInException('Anthropic API 키(sk-ant-…)를 넣어 주세요');
     }
-    final int status;
+    final ({int status, String? type, String? message}) result;
     try {
-      status = await _client.verifyKey(key);
+      result = await _client.verifyKey(key);
     } catch (e) {
       // 종류만 남긴다(키·응답 본문 없음) — 실기기에서 어디서 막혔는지 보이게.
       debugPrint('[haru.ai] CLAUDE verify error=${e.runtimeType}');
       throw AiSignInException('확인하지 못했어요 · 잠시 후 다시 (${e.runtimeType})');
     }
-    debugPrint('[haru.ai] CLAUDE verify status=$status');
+    final status = result.status;
+    debugPrint(
+      '[haru.ai] CLAUDE verify status=$status type=${result.type ?? '-'}',
+    );
+    // 서버 문구(사용자 데이터 없음)를 짧게 붙여 원인을 바로 알 수 있게.
+    final detail = result.message == null
+        ? 'HTTP $status'
+        : 'HTTP $status · ${_short(result.message!)}';
+    final lowCredit = (result.message ?? '').toLowerCase().contains(
+      'credit balance',
+    );
     switch (status) {
       case 200:
         break;
@@ -115,10 +125,14 @@ class ClaudeApiBackend implements AiBackend {
         break;
       case 401:
         throw const AiSignInException('키가 맞지 않아요');
+      case _ when lowCredit || status == 402:
+        throw AiSignInException(
+          'API 크레딧이 부족해요 · Anthropic 콘솔 Billing 에서 충전해 주세요 ($detail)',
+        );
       case 403:
-        throw const AiSignInException('이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 (403)');
+        throw AiSignInException('이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 ($detail)');
       default:
-        throw AiSignInException('확인하지 못했어요 · 잠시 후 다시 (HTTP $status)');
+        throw AiSignInException('확인하지 못했어요 ($detail)');
     }
     try {
       await _store.write(key);
@@ -215,6 +229,11 @@ final claudeApiBackendProvider = Provider<ClaudeApiBackend>((ref) {
   ref.onDispose(backend.dispose);
   return backend;
 });
+
+String _short(String s) {
+  final one = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return one.length > 120 ? '${one.substring(0, 120)}…' : one;
+}
 
 /// 붙여넣은 글에서 API 키만 꺼낸다. 폰에서 복사하면 줄바꿈·보이지 않는 문자(zero-width
 /// space 등)가 섞이거나 `ANTHROPIC_API_KEY=` 같은 앞말이 붙어 와, 양끝 trim 만으로는

@@ -166,7 +166,11 @@ class ClaudeMessagesClient {
   }
 
   /// 키 확인 — `GET /v1/models` 의 상태 코드. 연결 실패는 예외.
-  Future<int> verifyKey(String apiKey) async {
+  /// 키 확인 — 상태 코드와, 실패면 서버의 오류 종류·문구. 이 요청엔 사용자 데이터가 없어
+  /// 문구를 그대로 화면에 보여도 된다(예: "credit balance is too low").
+  Future<({int status, String? type, String? message})> verifyKey(
+    String apiKey,
+  ) async {
     final res = await _client
         .get(
           Uri.parse(ClaudeConfig.modelsUrl),
@@ -177,7 +181,21 @@ class ClaudeMessagesClient {
           },
         )
         .timeout(ClaudeConfig.verifyTimeout);
-    return res.statusCode;
+    if (res.statusCode == 200) {
+      return (status: 200, type: null, message: null);
+    }
+    String? type, message;
+    try {
+      final body = jsonDecode(utf8.decode(res.bodyBytes, allowMalformed: true));
+      final error = body is Map ? body['error'] : null;
+      if (error is Map) {
+        type = error['type'] is String ? error['type'] as String : null;
+        message = error['message'] is String
+            ? error['message'] as String
+            : null;
+      }
+    } catch (_) {}
+    return (status: res.statusCode, type: type, message: message);
   }
 
   /// [attempt] 는 시도마다 새 중단 신호를 받는다 — 바깥 [abort] 가 오거나 그 시도가

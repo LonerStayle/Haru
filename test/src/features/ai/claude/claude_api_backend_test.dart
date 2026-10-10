@@ -326,9 +326,30 @@ void main() {
       (
         '403',
         (_) => jsonRes({}, 403),
-        '이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 (403)',
+        '이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 (HTTP 403)',
       ),
-      ('404', (_) => jsonRes({}, 404), '확인하지 못했어요 · 잠시 후 다시 (HTTP 404)'),
+      ('404', (_) => jsonRes({}, 404), '확인하지 못했어요 (HTTP 404)'),
+      (
+        '400 크레딧 부족',
+        (_) => jsonRes({
+          'type': 'error',
+          'error': {
+            'type': 'invalid_request_error',
+            'message':
+                'Your credit balance is too low to access the Anthropic API.',
+          },
+        }, 400),
+        'API 크레딧이 부족해요 · Anthropic 콘솔 Billing 에서 충전해 주세요 '
+            '(HTTP 400 · Your credit balance is too low to access the Anthropic API.)',
+      ),
+      (
+        '400 그 밖',
+        (_) => jsonRes({
+          'type': 'error',
+          'error': {'type': 'invalid_request_error', 'message': 'bad thing'},
+        }, 400),
+        '확인하지 못했어요 (HTTP 400 · bad thing)',
+      ),
       (
         '연결 오류',
         (_) => throw const SocketException('down'),
