@@ -7,7 +7,7 @@ import '../../core/ui_prefs.dart';
 ///
 /// 저장값은 시작 직후 비동기로 복원된다. 복원 전에 사용자가 바꿨으면 그 선택이 이긴다
 /// ([SortModeNotifier] 와 같은 규칙). 저장소 오류는 조용히 넘어간다 — 보기 설정일 뿐이다.
-abstract class _SinglePrefNotifier<T> extends Notifier<T> {
+abstract class SinglePrefNotifier<T> extends Notifier<T> {
   String get storageKey;
   T get fallback;
   T decode(String? raw);
@@ -57,7 +57,7 @@ abstract class _SinglePrefNotifier<T> extends Notifier<T> {
 }
 
 /// 화면 테마 — 시스템 따라가기 / 라이트 / 다크.
-class ThemeModeNotifier extends _SinglePrefNotifier<ThemeMode> {
+class ThemeModeNotifier extends SinglePrefNotifier<ThemeMode> {
   @override
   String get storageKey => 'app.themeMode';
 
@@ -76,7 +76,11 @@ class ThemeModeNotifier extends _SinglePrefNotifier<ThemeMode> {
 }
 
 /// main 이 미리 읽어 둘 키들 ([preloadUiLists]).
-const List<String> preloadedPrefKeys = ['app.themeMode', 'app.defaultCategory'];
+const List<String> preloadedPrefKeys = [
+  'app.themeMode',
+  'app.defaultCategory',
+  'ai.route',
+];
 
 final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
   ThemeModeNotifier.new,
@@ -85,7 +89,7 @@ final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
 /// 새 할 일의 기본 카테고리 — 오늘·전체보기·캘린더처럼 "지금 보는 카테고리" 가 없는
 /// 화면에서 쓴다. null = 자동(마지막에 쓴 카테고리 → 사이드바 첫 카테고리). 카테고리 화면에서는 그 카테고리가
 /// 우선이다.
-class DefaultCategoryNotifier extends _SinglePrefNotifier<String?> {
+class DefaultCategoryNotifier extends SinglePrefNotifier<String?> {
   @override
   String get storageKey => 'app.defaultCategory';
 
