@@ -15,6 +15,10 @@ import '../../domain/recurrence_materializer.dart';
 import '../../domain/todo.dart' show Todo, TodoDateMode, TodoStatus, TodoType;
 import '../../ui/widgets/in_progress_triangle.dart';
 import '../../ui/widgets/undone_square.dart';
+import '../ai/ai_json.dart';
+import '../ai/ai_providers.dart';
+import '../ai/paste/ai_paste_draft_panel.dart';
+import '../ai/paste/ai_paste_organizer.dart';
 import '../calendar/calendar_providers.dart';
 import '../calendar/calendar_settings.dart';
 import '../category/categories_controller.dart';
@@ -603,24 +607,35 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
       setState(() {});
       return;
     }
-    // 멀티라인 — 사용자 확인 후 일괄 추가.
-    final ok = await _confirmBulkAdd(lines.length);
+    // 멀티라인 — 사용자 확인 후 일괄 추가 (AI 가 켜져 있으면 "AI로 정리" 도).
+    final choice = await _confirmBulkAdd(lines.length);
     if (!mounted) return;
-    if (ok != true) {
-      // 취소 = 붙여넣기 취소 — 붙여넣기 직전 입력으로 되돌린다. (예전엔 줄들을 공백으로
-      // 이어 붙인 긴 제목 하나가 남아 사용자가 다시 지워야 했다 — UX 감사 B10.)
-      _titleCtrl.text = _titleBeforePaste;
-      _titleCtrl.selection = TextSelection.collapsed(
-        offset: _titleCtrl.text.length,
-      );
-      setState(() {});
-      return;
+    if (choice == _BulkChoice.ai) {
+      final outcome = await _organizeWithAi(value);
+      if (!mounted) return;
+      switch (outcome) {
+        case AiPasteDrafts(:final drafts):
+          return _submitDrafts(drafts);
+        case AiPastePlain():
+          return _submitBulk(lines);
+        case null:
+          break; // 취소 — 아래에서 붙여넣기 전으로 되돌린다.
+      }
+    } else if (choice == _BulkChoice.add) {
+      return _submitBulk(lines);
     }
-    _submitBulk(lines);
+    // 취소 = 붙여넣기 취소 — 붙여넣기 직전 입력으로 되돌린다. (예전엔 줄들을 공백으로
+    // 이어 붙인 긴 제목 하나가 남아 사용자가 다시 지워야 했다 — UX 감사 B10.)
+    _titleCtrl.text = _titleBeforePaste;
+    _titleCtrl.selection = TextSelection.collapsed(
+      offset: _titleCtrl.text.length,
+    );
+    setState(() {});
   }
 
-  Future<bool?> _confirmBulkAdd(int n) {
-    return showDialog<bool>(
+  Future<_BulkChoice?> _confirmBulkAdd(int n) {
+    final aiReady = ref.read(aiReadinessProvider).isReady;
+    return showDialog<_BulkChoice>(
       context: context,
       builder: (ctx) => AlertDialog(
         key: const ValueKey('bulk-paste-dialog'),
@@ -628,17 +643,108 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
         content: Text('$n개의 항목을 같은 카테고리·일정·반복으로 한 번에 추가할까요?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
+            onPressed: () => Navigator.of(ctx).pop(_BulkChoice.cancel),
             child: const Text('취소'),
           ),
+          if (aiReady)
+            TextButton.icon(
+              key: const ValueKey('bulk-paste-ai'),
+              onPressed: () => Navigator.of(ctx).pop(_BulkChoice.ai),
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: const Text('AI로 정리'),
+            ),
           FilledButton(
             key: const ValueKey('bulk-paste-confirm'),
-            onPressed: () => Navigator.of(ctx).pop(true),
+            onPressed: () => Navigator.of(ctx).pop(_BulkChoice.add),
             child: Text('$n건 추가'),
           ),
         ],
       ),
     );
+  }
+
+  /// T2 — 붙여넣은 글을 AI 초안 패널로. 반복은 붙이지 않는다(원격 동기화 밖).
+  Future<AiPasteOutcome?> _organizeWithAi(String raw) {
+    final categories =
+        ref.read(activeCategoriesProvider).asData?.value ?? const <Category>[];
+    final calendar = ref.read(calendarSettingsProvider);
+    return AiPasteDraftPanel.show(
+      context,
+      raw: raw,
+      categories: categories,
+      defaultCategory: _category,
+      childMode: widget.parentId != null,
+      calendarOn:
+          _type == TodoType.task && calendar.anyConnected && _addToCalendar,
+      today: (widget.now ?? DateTime.now)(),
+    );
+  }
+
+  /// AI 초안 → 제출. 시트에서 날짜를 골라 뒀으면 AI 날짜가 없는 항목에 그 날짜를 쓰고,
+  /// 메모 모드면 날짜를 전부 버린다.
+  void _submitDrafts(List<AiPasteDraft> drafts) {
+    if (_submitted || drafts.isEmpty) return;
+    _submitted = true;
+    final isNote = _type == TodoType.note;
+    final sheetDate = _serializeDate();
+    final categories =
+        ref.read(activeCategoriesProvider).asData?.value ?? const <Category>[];
+    AddTodoSubmission submission(
+      String title,
+      Category category,
+      AiDate? date,
+      String timeAnchor, {
+      List<AddTodoSubmission> children = const [],
+      bool child = false,
+    }) {
+      final DateTime? dueAt;
+      final bool allDay;
+      final String anchor;
+      // 하위는 날짜 없이 — 부모의 할 일 쪼개기라 일정은 부모가 가진다.
+      if (isNote || child) {
+        (dueAt, allDay, anchor) = (null, false, 'start');
+      } else if (date != null) {
+        (dueAt, allDay, anchor) = (date.at, date.allDay, timeAnchor);
+      } else {
+        (dueAt, allDay, anchor) = (
+          sheetDate.invalid ? null : sheetDate.dueAt,
+          sheetDate.isAllDay,
+          sheetDate.timeAnchor,
+        );
+      }
+      return AddTodoSubmission(
+        title: title,
+        category: category,
+        dueAt: dueAt,
+        isAllDay: allDay,
+        timeAnchor: anchor,
+        addToCalendar: !isNote && dueAt != null && _addToCalendar,
+        type: _type,
+        parentId: widget.parentId,
+        children: children,
+        fromAi: true,
+      );
+    }
+
+    for (final d in drafts) {
+      final category = widget.parentId != null
+          ? _category
+          : categories.where((c) => c.id == d.categoryId).firstOrNull ??
+                _category;
+      widget.onSubmit(
+        submission(
+          d.title,
+          category,
+          d.date,
+          d.timeAnchor,
+          children: [
+            for (final c in d.children)
+              submission(c.title, category, null, 'start', child: true),
+          ],
+        ),
+      );
+    }
+    if (mounted) Navigator.of(context).maybePop();
   }
 
   /// 상태 칩(□ 미완료 / △ 진행중 / ◯ 완료) 탭 — **즉시 저장**.
@@ -3031,3 +3137,6 @@ class AddTodoSubmission {
   /// fast-tasks — 단일·시간 모드에서 dueAt 이 '시작'('start')/'마감'('end')인지.
   final String timeAnchor;
 }
+
+/// 여러 줄 붙여넣기 확인 대화상자의 선택.
+enum _BulkChoice { cancel, add, ai }
