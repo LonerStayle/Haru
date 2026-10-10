@@ -39,7 +39,26 @@ Future<void> showMoveTodoSheetOn(
     builder: (_) => MoveTodoSheet(item: item),
   );
   if (destination == null || !context.mounted) return;
+  await moveTodoWithUndo(
+    context,
+    ref,
+    item: item,
+    parent: destination.parent,
+    category: destination.category,
+  );
+}
 
+/// 이동 + 되돌리기 — 목적지를 이미 아는 호출(이동 시트 확정, 정리 화면의 '장기 목표로'
+/// 칩)이 공유한다. [parent] 가 null 이면 [category] 의 최상위로.
+///
+/// 옮겼으면 true. 거부(사이클·제자리)되면 이유를 스낵바로 알리고 false.
+Future<bool> moveTodoWithUndo(
+  BuildContext context,
+  ProviderContainer ref, {
+  required Todo item,
+  Todo? parent,
+  required Category category,
+}) async {
   final all = ref.read(allTodosProvider).asData?.value ?? const <Todo>[];
   // 시트를 여는 사이 그 row 가 바뀌었을 수 있다 (편집 시트의 '위치 변경' 은 닫히면서
   // 자동 저장을 돌린다). 화면이 들고 있던 스냅샷으로 옮기면 그 저장이 통째로 되돌아가고,
@@ -51,13 +70,12 @@ Future<void> showMoveTodoSheetOn(
 
   final moved = await actions.moveTo(
     live,
-    newParent: destination.parent,
-    targetCategory: destination.category,
+    newParent: parent,
+    targetCategory: category,
     all: all,
   );
-  if (!context.mounted) return;
+  if (!context.mounted) return moved;
 
-  final parent = destination.parent;
   // 거부됐는데 아무 말도 안 하면 "눌렀는데 그대로" 로만 보인다 — 왜 안 옮겨졌는지 알린다.
   if (!moved) {
     final blocked = !MovePolicy.canMove(
@@ -73,22 +91,23 @@ Future<void> showMoveTodoSheetOn(
             blocked
                 ? '자기 자신이나 그 하위로는 옮길 수 없어요'
                 : (parent == null
-                      ? '이미 ${destination.category.label} 최상위에 있어요'
+                      ? '이미 ${category.label} 최상위에 있어요'
                       : '이미 "${parent.title}" 하위에 있어요'),
           ),
           behavior: SnackBarBehavior.floating,
         ),
       );
-    return;
+    return false;
   }
 
   showUndoSnackbar(
     context,
     message: parent == null
-        ? '"${live.title}" → ${destination.category.label} 최상위로 이동'
+        ? '"${live.title}" → ${category.label} 최상위로 이동'
         : '"${live.title}" → "${parent.title}" 하위로 이동',
     onUndo: () => actions.restoreAll(snapshot),
   );
+  return true;
 }
 
 /// [MoveTodoSheet] 가 돌려주는 목적지.
