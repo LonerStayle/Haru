@@ -80,6 +80,8 @@ const List<String> preloadedPrefKeys = [
   'app.themeMode',
   'app.defaultCategory',
   'ai.route',
+  // 복원 전에 AI 를 부르면 꺼 둔 설정이 기본값(켬)으로 읽혀 설명이 나간다.
+  'ai.sendDescription',
 ];
 
 final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(
