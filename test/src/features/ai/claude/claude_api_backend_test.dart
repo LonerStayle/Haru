@@ -315,13 +315,24 @@ void main() {
       expect(store.apiKey, isNull);
     });
 
+    test('서버가 잠시 바쁘면(529) 키는 저장하고 실제 호출에서 다시 확인', () async {
+      queue.add((_) => jsonRes({}, 529));
+      await backend.signIn(_Prompter('sk-ant-api03-busy-wxyz'));
+      expect(store.apiKey, 'sk-ant-api03-busy-wxyz');
+    });
+
     for (final (label, Handler reply, text) in [
       ('401', (_) => jsonRes({}, 401), '키가 맞지 않아요'),
-      ('500', (_) => jsonRes({}, 500), '확인하지 못했어요 · 잠시 후 다시'),
+      (
+        '403',
+        (_) => jsonRes({}, 403),
+        '이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 (403)',
+      ),
+      ('404', (_) => jsonRes({}, 404), '확인하지 못했어요 · 잠시 후 다시 (HTTP 404)'),
       (
         '연결 오류',
         (_) => throw const SocketException('down'),
-        '확인하지 못했어요 · 잠시 후 다시',
+        '확인하지 못했어요 · 잠시 후 다시 (SocketException)',
       ),
     ]) {
       test('확인 실패 $label → "$text", 저장 안 함', () async {

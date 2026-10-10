@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
@@ -98,12 +100,25 @@ class ClaudeApiBackend implements AiBackend {
     final int status;
     try {
       status = await _client.verifyKey(key);
-    } catch (_) {
-      throw const AiSignInException('확인하지 못했어요 · 잠시 후 다시');
+    } catch (e) {
+      // 종류만 남긴다(키·응답 본문 없음) — 실기기에서 어디서 막혔는지 보이게.
+      debugPrint('[haru.ai] CLAUDE verify error=${e.runtimeType}');
+      throw AiSignInException('확인하지 못했어요 · 잠시 후 다시 (${e.runtimeType})');
     }
-    if (status == 401) throw const AiSignInException('키가 맞지 않아요');
-    if (status != 200) {
-      throw const AiSignInException('확인하지 못했어요 · 잠시 후 다시');
+    debugPrint('[haru.ai] CLAUDE verify status=$status');
+    switch (status) {
+      case 200:
+        break;
+      // 서버가 잠시 바쁘거나 한도에 걸린 것 — 키 자체는 맞을 수 있으니 저장하고, 실제
+      // 호출에서 다시 확인한다([연결 확인]).
+      case 429 || 500 || 529:
+        break;
+      case 401:
+        throw const AiSignInException('키가 맞지 않아요');
+      case 403:
+        throw const AiSignInException('이 키로는 쓸 수 없어요 · 콘솔에서 권한을 확인해 주세요 (403)');
+      default:
+        throw AiSignInException('확인하지 못했어요 · 잠시 후 다시 (HTTP $status)');
     }
     try {
       await _store.write(key);
@@ -205,7 +220,10 @@ final claudeApiBackendProvider = Provider<ClaudeApiBackend>((ref) {
 /// space 등)가 섞이거나 `ANTHROPIC_API_KEY=` 같은 앞말이 붙어 와, 양끝 trim 만으로는
 /// `sk-ant-` 로 시작하지 않아 "키를 넣어 주세요" 로 거절됐다.
 String? extractClaudeApiKey(String raw) {
-  final cleaned = raw.replaceAll(RegExp(r'[\s​-‏  ⁠﻿]'), '');
+  final cleaned = raw.replaceAll(
+    RegExp('[\\s\\u200B-\\u200F\\u2028\\u2029\\u2060\\uFEFF]'),
+    '',
+  );
   return RegExp(
     '${RegExp.escape(ClaudeConfig.keyPrefix)}[A-Za-z0-9_-]+',
   ).firstMatch(cleaned)?.group(0);
