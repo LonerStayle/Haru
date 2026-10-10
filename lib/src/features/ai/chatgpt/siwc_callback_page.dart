@@ -1,5 +1,8 @@
 /// 로그인 콜백 결과 페이지 (사양서 A.6) — 브라우저에 보여 준다.
-enum SiwcCallbackPageKind { ok, denied, error }
+enum SiwcCallbackPageKind { ok, denied, error, returnToApp }
+
+/// 결과 페이지의 "하루로 돌아가기" — Android 앱 링크(매니페스트의 ai-return 필터).
+const siwcReturnToAppUrl = 'com.goldenplanet.solo_todo://ai-return';
 
 /// [code] 는 실패 원인 이름(예: `clientMismatch`) — 실기기에서 어느 단계가 막혔는지 화면만
 /// 보고 알 수 있게 작게 덧붙인다. 토큰·code 같은 비밀은 넣지 않는다.
@@ -16,6 +19,12 @@ String siwcCallbackPage(SiwcCallbackPageKind kind, {String? code}) {
       '연결 안 됨',
       'ChatGPT 플랜 사용이 허용되지 않았어요',
       '하루에서 다시 허용하면 ChatGPT 플랜으로 답할 수 있어요.',
+    ),
+    SiwcCallbackPageKind.returnToApp => (
+      'ok',
+      '승인 완료',
+      '하루로 돌아가 주세요',
+      '하루로 돌아가면 연결을 마쳐요. 결과는 하루 화면에 나와요.',
     ),
     SiwcCallbackPageKind.error => (
       'err',
@@ -50,6 +59,7 @@ String siwcCallbackPage(SiwcCallbackPageKind kind, {String? code}) {
       '<span class="badge">${htmlEscape(badge)}</span>'
       '<h1>${htmlEscape(title)}</h1>'
       '<p>${htmlEscape(body)}</p>'
+      '${kind == SiwcCallbackPageKind.returnToApp ? '<p><a href="$siwcReturnToAppUrl" style="display:inline-block;margin-top:12px;padding:12px 20px;border-radius:12px;background:$color;color:#fff;text-decoration:none;font-weight:600">하루로 돌아가기</a></p>' : ''}'
       '<p class="hint">${htmlEscape(hint)}</p>'
       '${code == null ? '' : '<p class="hint">원인: ${htmlEscape(code)}</p>'}'
       '</div></body></html>';

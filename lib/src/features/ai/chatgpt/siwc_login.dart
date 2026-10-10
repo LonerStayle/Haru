@@ -94,12 +94,19 @@ class SiwcLoginFlow {
     Random? random,
     this.preferredPort = SiwcConfig.preferredPort,
     this.timeout = SiwcConfig.loginTimeout,
-  }) : _credentials = credentials,
+    Future<void> Function()? untilForeground,
+  }) : _untilForeground = untilForeground,
+       _credentials = credentials,
        _endpoint = endpoint,
        _openUrl = openUrl,
        _nowMs = nowMs,
        _random = random;
 
+  /// 앱이 화면 앞으로 돌아올 때까지 기다린다 — Android 는 하루가 브라우저 뒤에 있는 동안
+  /// 네트워크를 막아(실기기 로그 `DNS … isBlocked=true`) 토큰 교환이 network 로 실패했다.
+  /// 값이 있으면 승인을 받은 즉시 브라우저에 "하루로 돌아가기" 페이지를 보내고, 앱이
+  /// 앞으로 오면 그때 교환한다. null(데스크탑)이면 바로 교환한다.
+  final Future<void> Function()? _untilForeground;
   final SiwcCredentials _credentials;
   final SiwcTokenEndpoint _endpoint;
   final OpenUrl _openUrl;
@@ -172,6 +179,24 @@ class SiwcLoginFlow {
         ]).timeout(timeout);
       } on TimeoutException {
         throw const SiwcLoginError(SiwcLoginFailure.timeout);
+      }
+
+      final untilForeground = _untilForeground;
+      if (untilForeground != null) {
+        await callback.respond(
+          siwcCallbackPage(SiwcCallbackPageKind.returnToApp),
+        );
+        debugPrint('[haru.ai] LOGIN waiting_foreground');
+        try {
+          await Future.any([
+            untilForeground(),
+            _cancel.future.then<void>(
+              (_) => throw const SiwcLoginError(SiwcLoginFailure.cancelled),
+            ),
+          ]).timeout(timeout);
+        } on TimeoutException {
+          throw const SiwcLoginError(SiwcLoginFailure.timeout);
+        }
       }
 
       try {

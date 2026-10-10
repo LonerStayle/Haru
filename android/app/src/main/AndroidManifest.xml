@@ -37,6 +37,15 @@
                     android:scheme="com.goldenplanet.solo_todo"
                     android:host="login-callback"/>
             </intent-filter>
+            <!-- ChatGPT 로그인 결과 페이지의 "하루로 돌아가기" — 앱을 앞으로 불러 토큰 교환을 마친다. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="com.goldenplanet.solo_todo"
+                    android:host="ai-return"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->

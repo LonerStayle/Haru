@@ -73,32 +73,36 @@ void main() {
     'required': ['title'],
   };
 
-  ChatGptPlanBackend make({OpenUrl? openUrl, String? model}) =>
-      ChatGptPlanBackend(
-        httpClient: MockClient((r) async {
-          final path = r.url.path;
-          if (path.endsWith('/v1/models')) return modelsReply(r);
-          if (path.endsWith('/v1/responses')) {
-            responses.add(r);
-            return responseQueue.removeAt(0)(r);
-          }
-          if (path.endsWith('/oauth/revoke')) {
-            revokeCalls.add(r);
-            return http.Response('', 200);
-          }
-          if (path.endsWith('/oauth/token')) {
-            tokenCalls.add(r);
-            return tokenReply(r);
-          }
-          return http.Response('', 404);
-        }),
-        store: store,
-        openUrl: openUrl ?? (_) async => false,
-        clock: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
-        sleep: (d) async => sleeps.add(d),
-        preferredPort: 0,
-        model: model,
-      );
+  ChatGptPlanBackend make({
+    OpenUrl? openUrl,
+    String? model,
+    Future<void> Function()? untilForeground,
+  }) => ChatGptPlanBackend(
+    untilForeground: untilForeground,
+    httpClient: MockClient((r) async {
+      final path = r.url.path;
+      if (path.endsWith('/v1/models')) return modelsReply(r);
+      if (path.endsWith('/v1/responses')) {
+        responses.add(r);
+        return responseQueue.removeAt(0)(r);
+      }
+      if (path.endsWith('/oauth/revoke')) {
+        revokeCalls.add(r);
+        return http.Response('', 200);
+      }
+      if (path.endsWith('/oauth/token')) {
+        tokenCalls.add(r);
+        return tokenReply(r);
+      }
+      return http.Response('', 404);
+    }),
+    store: store,
+    openUrl: openUrl ?? (_) async => false,
+    clock: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
+    sleep: (d) async => sleeps.add(d),
+    preferredPort: 0,
+    model: model,
+  );
 
   setUp(() {
     nowMs = t0;
@@ -709,6 +713,27 @@ void main() {
       expect(store.data.hostId, startsWith('urn:uuid:'));
       expect(await page.future, contains('연결됐어요'));
       expect(await backend.watchStatus().first, isA<AiSignedIn>());
+    });
+
+    test('Android — 승인 즉시 "하루로 돌아가기" 페이지, 앱이 앞으로 온 뒤에 교환', () async {
+      final foreground = Completer<void>();
+      backend.dispose();
+      backend = make(
+        openUrl: browser,
+        untilForeground: () => foreground.future,
+      );
+      final signIn = backend.signIn(_NoPrompt());
+
+      final html = await page.future;
+      expect(html, contains('하루로 돌아가 주세요'));
+      expect(html, contains('com.goldenplanet.solo_todo://ai-return'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(tokenCalls, isEmpty, reason: '뒤에 있는 동안엔 네트워크가 막혀 교환하지 않는다');
+
+      foreground.complete();
+      await signIn;
+      expect(tokenCalls, hasLength(1));
+      expect(store.data.account!.state, SiwcAccountState.signedIn);
     });
 
     test('콜백에 client_id 없음 → 등록 미완료', () async {

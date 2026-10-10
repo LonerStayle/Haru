@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
@@ -36,7 +37,10 @@ class ChatGptPlanBackend implements AiBackend {
     Random? random,
     this.preferredPort = SiwcConfig.preferredPort,
     this.model,
-  }) : _http = httpClient ?? http.Client(),
+    Future<void> Function()? untilForeground,
+  }) : _untilForeground =
+           untilForeground ?? (Platform.isAndroid ? waitUntilForeground : null),
+       _http = httpClient ?? http.Client(),
        _ownsHttp = httpClient == null,
        _openUrl = openUrl ?? openInBrowser,
        _clock = clock ?? DateTime.now,
@@ -62,6 +66,7 @@ class ChatGptPlanBackend implements AiBackend {
     _gateway = ChatGptGateway(client: _client, model: _modelChoice);
   }
 
+  final Future<void> Function()? _untilForeground;
   final http.Client _http;
   final bool _ownsHttp;
   final OpenUrl _openUrl;
@@ -128,6 +133,7 @@ class ChatGptPlanBackend implements AiBackend {
       nowMs: () => _clock().millisecondsSinceEpoch,
       random: _random,
       preferredPort: preferredPort,
+      untilForeground: _untilForeground,
     );
     _activeLogin = flow;
     final SiwcAccountRecord record;
@@ -308,3 +314,23 @@ final chatGptPlanBackendProvider = Provider<ChatGptPlanBackend>((ref) {
   ref.onDispose(backend.dispose);
   return backend;
 });
+
+/// 하루가 다시 화면 앞(resumed)에 올 때까지. 앞으로 온 직후엔 네트워크 차단이 풀리는 데
+/// 잠깐 걸려 조금 기다린다.
+Future<void> waitUntilForeground() async {
+  final binding = WidgetsBinding.instance;
+  if (binding.lifecycleState != AppLifecycleState.resumed) {
+    final resumed = Completer<void>();
+    final listener = AppLifecycleListener(
+      onResume: () {
+        if (!resumed.isCompleted) resumed.complete();
+      },
+    );
+    try {
+      await resumed.future;
+    } finally {
+      listener.dispose();
+    }
+  }
+  await Future<void>.delayed(const Duration(milliseconds: 500));
+}
