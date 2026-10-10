@@ -9,17 +9,29 @@ class AiReadiness {
     required this.state,
     this.accountLabel,
     this.pausedUntil,
+    this.keyRejected = false,
   });
 
   const AiReadiness.off() : this(route: AiRoute.off, state: AiReadyState.off);
 
-  const AiReadiness.ready(AiRoute route, {String? accountLabel})
-    : this(route: route, state: AiReadyState.ready, accountLabel: accountLabel);
+  const AiReadiness.ready(
+    AiRoute route, {
+    String? accountLabel,
+    bool keyRejected = false,
+  }) : this(
+         route: route,
+         state: AiReadyState.ready,
+         accountLabel: accountLabel,
+         keyRejected: keyRejected,
+       );
 
   final AiRoute route;
   final AiReadyState state;
   final String? accountLabel;
   final DateTime? pausedUntil;
+
+  /// 저장된 API 키가 마지막 호출에서 거부됨 (401) — 준비 상태는 유지하되 안내를 바꾼다.
+  final bool keyRejected;
 
   bool get isReady => state == AiReadyState.ready;
 
@@ -30,7 +42,10 @@ class AiReadiness {
   String get failureHint => switch (state) {
     AiReadyState.paused when pausedUntil != null =>
       '한도에 걸렸어요 · ${_hm(pausedUntil!)} 이후 다시',
+    AiReadyState.needsSignIn when route == AiRoute.claudeApi =>
+      'API 키가 필요해요 · 설정에서 입력',
     AiReadyState.needsSignIn => '로그인이 풀렸어요 · 설정에서 확인',
+    AiReadyState.ready when keyRejected => 'API 키가 거부됐어요 · 설정에서 확인',
     _ => 'AI 응답을 받지 못했어요 · 설정에서 확인',
   };
 

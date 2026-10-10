@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -875,7 +876,7 @@ class _ShortcutsTile extends StatelessWidget {
   }
 }
 
-/// 사용할 AI — 끔 / ChatGPT 플랜 / Claude 플랜. 하나만 켠다.
+/// 사용할 AI — 끔 / ChatGPT 플랜 / Claude API. 하나만 켠다.
 class _AiRouteTile extends ConsumerWidget {
   const _AiRouteTile();
 
@@ -886,7 +887,12 @@ class _AiRouteTile extends ConsumerWidget {
     return _SettingRow(
       icon: Icons.auto_awesome_outlined,
       title: '사용할 AI',
-      subtitle: '이미 쓰는 플랜으로 정리·제안을 받아요 · 고른 기기에서만',
+      // 경로마다 문구가 다르다 — Claude 는 구독 플랜이 아니라 사용량 과금 API 키.
+      subtitle: switch (route) {
+        AiRoute.off => '정리·제안을 받을 AI 를 골라요 · 고른 기기에서만',
+        AiRoute.chatgptPlan => 'ChatGPT 플랜으로 정리·제안을 받아요 · 고른 기기에서만',
+        AiRoute.claudeApi => 'Claude API 키로 정리·제안을 받아요 · 고른 기기에서만',
+      },
       below: SegmentedButton<AiRoute>(
         key: const ValueKey('settings-ai-route'),
         showSelectedIcon: false,
@@ -905,7 +911,8 @@ class _AiRouteTile extends ConsumerWidget {
   }
 }
 
-/// 플랜 계정 — 상태 · 로그인/로그아웃. 로그인 정보는 이 기기에만 저장된다.
+/// 플랜 계정(ChatGPT) 또는 API 키(Claude) — 상태 · 로그인/로그아웃(키 입력/지우기).
+/// 로그인 정보·키는 이 기기에만 저장된다.
 class _AiAccountTile extends ConsumerStatefulWidget {
   const _AiAccountTile();
 
@@ -917,7 +924,10 @@ class _AiAccountTileState extends ConsumerState<_AiAccountTile>
     implements AiSignInPrompter {
   bool _busy = false;
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    String failure = '로그인하지 못했어요 · 잠시 후 다시 해 주세요',
+  }) async {
     if (_busy) return;
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
@@ -929,10 +939,7 @@ class _AiAccountTileState extends ConsumerState<_AiAccountTile>
       );
     } catch (_) {
       messenger.showSnackBar(
-        const SnackBar(
-          content: Text('로그인하지 못했어요 · 잠시 후 다시 해 주세요'),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(failure), behavior: SnackBarBehavior.floating),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -946,14 +953,22 @@ class _AiAccountTileState extends ConsumerState<_AiAccountTile>
   );
 
   @override
+  Future<String?> askSecret({required String title, required String hint}) =>
+      showDialog<String>(
+        context: context,
+        builder: (context) => _AiSecretDialog(title: title, hint: hint),
+      );
+
+  @override
   Widget build(BuildContext context) {
     final route = ref.watch(aiRouteProvider);
     if (route == AiRoute.off) return const SizedBox.shrink();
     final backend = ref.watch(aiBackendProvider(route));
     final status = ref.watch(aiAccountStatusProvider(route)).value;
+    final apiKey = route == AiRoute.claudeApi;
     final (subtitle, signedIn) = switch (status) {
       null => ('확인 중…', false),
-      AiSignedOut() => ('로그인이 필요해요', false),
+      AiSignedOut() => (apiKey ? 'API 키가 필요해요' : '로그인이 필요해요', false),
       AiSignedIn(:final label, :final plan) => (
         plan == null ? label : '$label · $plan',
         true,
@@ -972,18 +987,26 @@ class _AiAccountTileState extends ConsumerState<_AiAccountTile>
         : signedIn
         ? TextButton(
             key: const ValueKey('settings-ai-signout'),
-            onPressed: () => _run(backend.signOut),
-            child: const Text('로그아웃'),
+            onPressed: () => _run(
+              backend.signOut,
+              failure: apiKey ? '키를 지우지 못했어요 · 잠시 후 다시 해 주세요' : '로그아웃하지 못했어요',
+            ),
+            child: Text(apiKey ? '키 지우기' : '로그아웃'),
           )
         : FilledButton.tonal(
             key: const ValueKey('settings-ai-signin'),
-            onPressed: () => _run(() => backend.signIn(this)),
-            child: const Text('로그인'),
+            onPressed: () => _run(
+              () => backend.signIn(this),
+              failure: apiKey
+                  ? '키를 확인하지 못했어요 · 잠시 후 다시 해 주세요'
+                  : '로그인하지 못했어요 · 잠시 후 다시 해 주세요',
+            ),
+            child: Text(apiKey ? '키 입력' : '로그인'),
           );
     return _SettingRow(
       key: const ValueKey('settings-ai-account'),
-      icon: Icons.account_circle_outlined,
-      title: '${route.label(compact: false)} 계정',
+      icon: apiKey ? Icons.key_outlined : Icons.account_circle_outlined,
+      title: apiKey ? 'Claude API 키' : '${route.label(compact: false)} 계정',
       subtitle: subtitle,
       trailing: trailing,
     );
@@ -1036,6 +1059,89 @@ class _AiCodeDialogState extends State<_AiCodeDialog> {
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_controller.text),
           child: const Text('확인'),
+        ),
+      ],
+    );
+  }
+}
+
+/// API 키 같은 비밀값 입력 — 가려서 보이고, 붙여넣기 버튼으로도 넣을 수 있다.
+/// 컨트롤러 정리는 [_AiCodeDialog] 와 같은 이유로 위젯 dispose 에서.
+class _AiSecretDialog extends StatefulWidget {
+  const _AiSecretDialog({required this.title, required this.hint});
+
+  final String title;
+  final String hint;
+
+  @override
+  State<_AiSecretDialog> createState() => _AiSecretDialogState();
+}
+
+class _AiSecretDialogState extends State<_AiSecretDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (!mounted || text == null || text.isEmpty) return;
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      key: const ValueKey('settings-ai-secret-dialog'),
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Anthropic 콘솔에서 만든 sk-ant- 로 시작하는 키를 붙여넣어 주세요.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const ValueKey('settings-ai-secret-field'),
+            controller: _controller,
+            autofocus: true,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            keyboardType: TextInputType.visiblePassword,
+            decoration: InputDecoration(
+              hintText: widget.hint,
+              helperText: '키는 이 기기에만 저장돼요',
+              suffixIcon: IconButton(
+                key: const ValueKey('settings-ai-secret-paste'),
+                tooltip: '붙여넣기',
+                icon: const Icon(Icons.content_paste),
+                onPressed: _paste,
+              ),
+            ),
+            onSubmitted: (v) => Navigator.of(context).pop(v),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          key: const ValueKey('settings-ai-secret-save'),
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text('저장'),
         ),
       ],
     );

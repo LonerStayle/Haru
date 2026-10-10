@@ -6,6 +6,7 @@ import 'ai_gateway.dart';
 import 'ai_readiness.dart';
 import 'ai_route.dart';
 import 'chatgpt/chatgpt_plan_backend.dart';
+import 'claude/claude_api_backend.dart';
 
 /// 설정 > AI > 사용할 AI. 기기별 설정.
 class AiRouteNotifier extends SinglePrefNotifier<AiRoute> {
@@ -49,11 +50,12 @@ final aiSendDescriptionProvider =
       AiSendDescriptionNotifier.new,
     );
 
-/// 경로별 백엔드. Claude 플랜은 아직 연결 전 — 구현이 생기면 이 자리에 끼운다.
+/// 경로별 백엔드.
 final aiBackendProvider = Provider.family<AiBackend, AiRoute>(
   (ref, route) => switch (route) {
     AiRoute.chatgptPlan => ref.watch(chatGptPlanBackendProvider),
-    _ => NotConnectedAiBackend(route),
+    AiRoute.claudeApi => ref.watch(claudeApiBackendProvider),
+    AiRoute.off => NotConnectedAiBackend(route),
   },
 );
 
@@ -69,7 +71,11 @@ final aiReadinessProvider = Provider<AiReadiness>((ref) {
   return switch (status) {
     null => AiReadiness(route: route, state: AiReadyState.loading),
     AiSignedOut() => AiReadiness(route: route, state: AiReadyState.needsSignIn),
-    AiSignedIn(:final label) => AiReadiness.ready(route, accountLabel: label),
+    AiSignedIn(:final label, :final rejected) => AiReadiness.ready(
+      route,
+      accountLabel: label,
+      keyRejected: rejected,
+    ),
     AiPaused(:final label, :final until) => AiReadiness(
       route: route,
       state: AiReadyState.paused,

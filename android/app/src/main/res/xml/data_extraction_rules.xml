@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ 클라우드 백업·기기 이전 — AI 플랜 로그인 토큰은 빼고 옮긴다. -->
+<!-- Android 12+ 클라우드 백업·기기 이전 — AI 플랜 로그인 토큰·Claude API 키는 빼고 옮긴다. -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="ai_chatgpt_accounts.json"/>
         <exclude domain="file" path="ai_chatgpt_accounts.json.tmp"/>
+        <exclude domain="file" path="ai_claude_api_key.json"/>
+        <exclude domain="file" path="ai_claude_api_key.json.tmp"/>
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="ai_chatgpt_accounts.json"/>
         <exclude domain="file" path="ai_chatgpt_accounts.json.tmp"/>
+        <exclude domain="file" path="ai_claude_api_key.json"/>
+        <exclude domain="file" path="ai_claude_api_key.json.tmp"/>
     </device-transfer>
 </data-extraction-rules>

@@ -11,13 +11,16 @@ class AiSignedOut extends AiAccountStatus {
 }
 
 class AiSignedIn extends AiAccountStatus {
-  const AiSignedIn({required this.label, this.plan});
+  const AiSignedIn({required this.label, this.plan, this.rejected = false});
 
   /// 계정 표시 (이메일 등).
   final String label;
 
   /// 플랜 이름 (Plus / Pro / Max …). 모르면 null.
   final String? plan;
+
+  /// 저장된 자격(API 키)이 마지막 호출에서 거부됨 (401). 키는 남아 있다.
+  final bool rejected;
 }
 
 /// 한도에 걸려 [until] 까지 쉬는 중.
@@ -28,9 +31,9 @@ class AiPaused extends AiAccountStatus {
   final DateTime until;
 }
 
-/// 플랜 하나 — 로그인·로그아웃·호출 창구.
+/// AI 경로 하나 — 로그인(키 입력)·로그아웃·호출 창구.
 ///
-/// 구현: ChatGPT 플랜(SIWC) / Claude 플랜. 로그인 정보는 기기별이다(동기화하지 않는다).
+/// 구현: ChatGPT 플랜(SIWC) / Claude API 키. 로그인 정보는 기기별이다(동기화하지 않는다).
 abstract interface class AiBackend {
   AiRoute get route;
 
@@ -45,10 +48,13 @@ abstract interface class AiBackend {
   AiGateway get gateway;
 }
 
-/// 로그인 중 사용자에게 받아야 하는 것 — Claude 는 브라우저가 보여 준 코드를 붙여넣는다.
+/// 로그인 중 사용자에게 받아야 하는 것.
 abstract interface class AiSignInPrompter {
-  /// 사용자가 붙여넣은 코드. 취소하면 null.
+  /// 브라우저가 보여 준 코드를 붙여넣는다. 취소하면 null.
   Future<String?> askCode({required String message});
+
+  /// API 키 같은 비밀값 — 가려서 입력받는다. 취소하면 null.
+  Future<String?> askSecret({required String title, required String hint});
 }
 
 class AiSignInException implements Exception {

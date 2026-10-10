@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 이하 자동 백업 — AI 플랜 로그인 토큰은 기기 밖으로 내보내지 않는다. -->
+<!-- Android 11 이하 자동 백업 — AI 플랜 로그인 토큰·Claude API 키는 기기 밖으로 내보내지 않는다. -->
 <full-backup-content>
     <exclude domain="file" path="ai_chatgpt_accounts.json"/>
     <exclude domain="file" path="ai_chatgpt_accounts.json.tmp"/>
+    <exclude domain="file" path="ai_claude_api_key.json"/>
+    <exclude domain="file" path="ai_claude_api_key.json.tmp"/>
 </full-backup-content>

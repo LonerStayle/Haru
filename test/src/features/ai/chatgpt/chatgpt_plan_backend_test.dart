@@ -896,4 +896,10 @@ Future<(List<String>, Object?)> collect(Stream<String> stream) async {
 class _NoPrompt implements AiSignInPrompter {
   @override
   Future<String?> askCode({required String message}) async => null;
+
+  @override
+  Future<String?> askSecret({
+    required String title,
+    required String hint,
+  }) async => null;
 }
