@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:solo_todo/src/core/platform.dart';
 import 'package:solo_todo/src/domain/category.dart';
 import 'package:solo_todo/src/domain/group.dart';
 import 'package:solo_todo/src/domain/todo.dart';
@@ -306,5 +307,32 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(result.updates.single.type, TodoType.task);
+  });
+
+  // 모바일 편집 시트를 열 때 키보드가 자동으로 올라오던 문제 회귀 방지.
+  group('제목 autofocus', () {
+    tearDown(() => AppPlatform.debugFormFactorOverride = null);
+
+    bool titleFocused(WidgetTester tester) {
+      final field = tester.widget<EditableText>(
+        find.descendant(
+          of: find.byKey(const ValueKey('add-todo-title')),
+          matching: find.byType(EditableText),
+        ),
+      );
+      return field.focusNode.hasFocus;
+    }
+
+    testWidgets('모바일 편집 — 제목에 포커스 안 줌 (키보드 X)', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.mobile;
+      await mount(tester, initialTodo: makeInitial());
+      expect(titleFocused(tester), isFalse);
+    });
+
+    testWidgets('데스크탑 편집 — 제목 autofocus 유지', (tester) async {
+      AppPlatform.debugFormFactorOverride = FormFactor.desktop;
+      await mount(tester, initialTodo: makeInitial());
+      expect(titleFocused(tester), isTrue);
+    });
   });
 }

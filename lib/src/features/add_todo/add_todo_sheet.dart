@@ -1247,7 +1247,9 @@ class _AddTodoSheetState extends ConsumerState<AddTodoSheet> {
                     TextField(
                       key: const ValueKey('add-todo-title'),
                       controller: _titleCtrl,
-                      autofocus: true,
+                      // 모바일 편집은 보기 겸용이라 키보드를 띄우지 않는다 — 제목을 탭하면 그때 입력.
+                      // 신규 추가·데스크탑은 바로 타이핑하도록 autofocus 유지.
+                      autofocus: !(_isEditMode && AppPlatform.isMobile),
                       textInputAction: TextInputAction.done,
                       // multi-line 허용 — 메모장 → 앱 멀티라인 paste 가 \n 그대로 들어와
                       // [_onTitleChanged] 가 bulk paste 로 감지. 평소 1줄 입력 시각은 minLines.
