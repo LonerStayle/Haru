@@ -1,7 +1,9 @@
 /// 로그인 콜백 결과 페이지 (사양서 A.6) — 브라우저에 보여 준다.
 enum SiwcCallbackPageKind { ok, denied, error }
 
-String siwcCallbackPage(SiwcCallbackPageKind kind) {
+/// [code] 는 실패 원인 이름(예: `clientMismatch`) — 실기기에서 어느 단계가 막혔는지 화면만
+/// 보고 알 수 있게 작게 덧붙인다. 토큰·code 같은 비밀은 넣지 않는다.
+String siwcCallbackPage(SiwcCallbackPageKind kind, {String? code}) {
   final (tone, badge, title, body) = switch (kind) {
     SiwcCallbackPageKind.ok => (
       'ok',
@@ -49,6 +51,7 @@ String siwcCallbackPage(SiwcCallbackPageKind kind) {
       '<h1>${htmlEscape(title)}</h1>'
       '<p>${htmlEscape(body)}</p>'
       '<p class="hint">${htmlEscape(hint)}</p>'
+      '${code == null ? '' : '<p class="hint">원인: ${htmlEscape(code)}</p>'}'
       '</div></body></html>';
 }
 

@@ -129,7 +129,8 @@ class SiwcLoginFlow {
     final secrets = generateLoginSecrets(_random);
     final server = LoopbackCallbackServer(
       expectedState: secrets.state,
-      fallbackPage: () => siwcCallbackPage(SiwcCallbackPageKind.error),
+      fallbackPage: () =>
+          siwcCallbackPage(SiwcCallbackPageKind.error, code: 'noResponse'),
       preferredPort: preferredPort,
     );
     debugPrint('[haru.ai] LOGIN start mode=${mode.logName}');
@@ -199,13 +200,26 @@ class SiwcLoginFlow {
             e.failure == SiwcLoginFailure.denied
                 ? SiwcCallbackPageKind.denied
                 : SiwcCallbackPageKind.error,
+            code: e.failure.name,
           ),
         );
         rethrow;
+      } catch (e) {
+        // 예상 밖 예외 — 종류만 남긴다(내용엔 응답 본문이 섞일 수 있다).
+        debugPrint('[haru.ai] LOGIN internal error=${e.runtimeType}');
+        await callback.respond(
+          siwcCallbackPage(
+            SiwcCallbackPageKind.error,
+            code: 'internal ${e.runtimeType}',
+          ),
+        );
+        throw const SiwcLoginError(SiwcLoginFailure.internal);
       }
     } on SiwcLoginError {
       rethrow;
-    } catch (_) {
+    } catch (e) {
+      // 예상 밖 예외 — 종류만 남긴다(내용엔 응답 본문이 섞일 수 있다).
+      debugPrint('[haru.ai] LOGIN internal error=${e.runtimeType}');
       throw const SiwcLoginError(SiwcLoginFailure.internal);
     } finally {
       await server.close();

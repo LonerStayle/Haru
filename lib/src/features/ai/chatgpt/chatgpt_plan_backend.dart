@@ -134,7 +134,8 @@ class ChatGptPlanBackend implements AiBackend {
     try {
       record = await flow.run();
     } on SiwcLoginError catch (e) {
-      throw AiSignInException(e.failure.userMessage);
+      // 원인 코드를 붙인다 — 실기기에서 어느 단계가 실패했는지 화면만 보고 알 수 있게.
+      throw AiSignInException('${e.failure.userMessage} (${e.failure.name})');
     } finally {
       if (identical(_activeLogin, flow)) _activeLogin = null;
     }

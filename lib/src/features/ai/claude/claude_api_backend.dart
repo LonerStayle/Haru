@@ -91,8 +91,8 @@ class ClaudeApiBackend implements AiBackend {
       hint: '${ClaudeConfig.keyPrefix}…',
     );
     if (raw == null) return;
-    final key = raw.trim();
-    if (!key.startsWith(ClaudeConfig.keyPrefix)) {
+    final key = extractClaudeApiKey(raw);
+    if (key == null) {
       throw const AiSignInException('Anthropic API 키(sk-ant-…)를 넣어 주세요');
     }
     final int status;
@@ -200,3 +200,13 @@ final claudeApiBackendProvider = Provider<ClaudeApiBackend>((ref) {
   ref.onDispose(backend.dispose);
   return backend;
 });
+
+/// 붙여넣은 글에서 API 키만 꺼낸다. 폰에서 복사하면 줄바꿈·보이지 않는 문자(zero-width
+/// space 등)가 섞이거나 `ANTHROPIC_API_KEY=` 같은 앞말이 붙어 와, 양끝 trim 만으로는
+/// `sk-ant-` 로 시작하지 않아 "키를 넣어 주세요" 로 거절됐다.
+String? extractClaudeApiKey(String raw) {
+  final cleaned = raw.replaceAll(RegExp(r'[\s​-‏  ⁠﻿]'), '');
+  return RegExp(
+    '${RegExp.escape(ClaudeConfig.keyPrefix)}[A-Za-z0-9_-]+',
+  ).firstMatch(cleaned)?.group(0);
+}
