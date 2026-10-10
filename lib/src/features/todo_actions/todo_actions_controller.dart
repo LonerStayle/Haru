@@ -399,6 +399,16 @@ class TodoActionsController {
     );
   }
 
+  /// 설명 되돌리기 — [before] 의 설명만 **지금 저장된 행**에 되돌려 쓴다 (AI 목록 정리 등).
+  /// 그사이 고친 제목·상태는 살린다. 순서는 [updatePreservingOrder] 가 보존.
+  Future<void> restoreDescription(Todo before) async {
+    final current = await _repo.getById(before.id);
+    if (current == null) return;
+    await updatePreservingOrder(
+      current.copyWith(description: before.description),
+    );
+  }
+
   /// 날짜 되돌리기 — [before] 의 날짜 필드만 **지금 저장된 행**에 되돌려 쓴다.
   ///
   /// 스냅샷을 통째로 upsert 하면 예전 updatedAt 이 써져 다른 기기의 LWW 에서 무시되고,

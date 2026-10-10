@@ -8,6 +8,7 @@ import '../../domain/group.dart';
 import '../../domain/policies/description_checklist.dart';
 import '../../domain/recurrence.dart';
 import '../../domain/todo.dart';
+import '../../data/providers.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/skeleton.dart';
 import '../../ui/widgets/sort_mode_button.dart';
@@ -17,6 +18,9 @@ import '../../ui/widgets/todo_status_check.dart';
 import '../../ui/widgets/todo_status_filter.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../ai/ai_providers.dart';
+import '../ai/checklist/ai_checklist.dart';
+import '../ai/widgets/ai_inline_error.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
@@ -183,6 +187,9 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
     if (oldWidget.parent.id != widget.parent.id) {
       _goneHandled = false;
       _filter = TodoStatusFilter.all;
+      // 앞 항목의 AI 결과가 새 항목에 적용되지 않게.
+      _aiChecklistBusy = false;
+      _aiChecklistFailed = false;
     }
   }
 
@@ -235,6 +242,56 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
       messenger,
       message: '설명 목록 ${result.created.length}개를 하위 항목으로 옮겼어요.',
       onUndo: () => actions.undoChecklist(result.created, result.parentBefore),
+    );
+  }
+
+  bool _aiChecklistBusy = false;
+  bool _aiChecklistFailed = false;
+
+  /// T1 — 문장 설명을 `- [ ]` 목록으로. 설명만 바꾸고 순서는 그대로, 되돌리기 지원.
+  Future<void> _aiChecklist(Todo live) async {
+    if (_aiChecklistBusy) return;
+    final gateway = ref.read(aiGatewayProvider);
+    if (gateway == null) {
+      setState(() => _aiChecklistFailed = true);
+      return;
+    }
+    final id = live.id;
+    final sent = live.description;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() {
+      _aiChecklistBusy = true;
+      _aiChecklistFailed = false;
+    });
+    final next = await ref
+        .read(aiChecklistServiceProvider)
+        .toChecklist(gateway, live);
+    if (!mounted || widget.parent.id != id) return;
+    setState(() {
+      _aiChecklistBusy = false;
+      _aiChecklistFailed = next == null;
+    });
+    if (next == null) return;
+    // 응답을 기다리는 사이 설명을 고쳤으면 덮어쓰지 않는다.
+    final current = await ref.read(todoRepositoryProvider).getById(id);
+    if (current == null) return;
+    if (current.description != sent) {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text('설명이 바뀌어 적용하지 않았어요.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final actions = ref.read(todoActionsProvider);
+    await actions.updatePreservingOrder(current.copyWith(description: next));
+    if (messenger == null || !messenger.mounted) return;
+    final count = DescriptionChecklist.parse(next).items.length;
+    showUndoSnackbarOn(
+      messenger,
+      message: '설명을 목록 $count개로 바꿨어요.',
+      onUndo: () => actions.restoreDescription(current),
     );
   }
 
@@ -292,6 +349,16 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
           onMove: gone
               ? null
               : () => showMoveTodoSheet(context, ref, item: live),
+          descriptionAction:
+              !gone &&
+                  ref.watch(aiReadinessProvider).isReady &&
+                  AiChecklistService.applies(live)
+              ? _AiChecklistAction(
+                  busy: _aiChecklistBusy,
+                  failed: _aiChecklistFailed,
+                  onPressed: () => _aiChecklist(live),
+                )
+              : null,
         ),
       ),
     );
@@ -453,6 +520,7 @@ class _ParentCard extends StatelessWidget {
     required this.onDescribe,
     required this.onEdit,
     required this.onMove,
+    this.descriptionAction,
   });
 
   final Todo todo;
@@ -464,6 +532,9 @@ class _ParentCard extends StatelessWidget {
   final ValueChanged<String>? onDescribe;
   final VoidCallback? onEdit;
   final VoidCallback? onMove;
+
+  /// 설명 바로 아래 조작 (AI "목록으로" 칩).
+  final Widget? descriptionAction;
 
   @override
   Widget build(BuildContext context) {
@@ -571,6 +642,11 @@ class _ParentCard extends StatelessWidget {
                 onSave: onDescribe,
               ),
             ),
+            if (descriptionAction != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 48, top: AppTokens.space4),
+                child: descriptionAction,
+              ),
             const SizedBox(height: AppTokens.space8),
             Padding(
               padding: const EdgeInsets.only(left: 44),
@@ -1001,6 +1077,42 @@ class _SubtreeProgressBar extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 설명 아래 AI 칩 — "목록으로". 기다리는 동안 진행 표시, 실패하면 안내 한 줄.
+class _AiChecklistAction extends StatelessWidget {
+  const _AiChecklistAction({
+    required this.busy,
+    required this.failed,
+    required this.onPressed,
+  });
+
+  final bool busy;
+  final bool failed;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ActionChip(
+          key: const ValueKey('detail-ai-checklist'),
+          avatar: busy
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.auto_awesome, size: 16),
+          label: Text(busy ? '목록으로 정리 중…' : '목록으로'),
+          tooltip: 'AI 가 설명을 체크 목록으로 나눠요',
+          onPressed: busy ? null : onPressed,
+        ),
+        if (failed && !busy) const AiInlineError(),
+      ],
     );
   }
 }
