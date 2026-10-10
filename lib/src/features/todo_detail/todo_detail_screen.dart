@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/date_format.dart';
+import '../../core/platform.dart';
 import '../../core/theme.dart';
 import '../../domain/group.dart';
 import '../../domain/policies/description_checklist.dart';
@@ -18,9 +19,12 @@ import '../../ui/widgets/todo_status_check.dart';
 import '../../ui/widgets/todo_status_filter.dart';
 import '../../ui/widgets/undo_snackbar.dart';
 import '../add_todo/add_todo_controller.dart';
+import '../add_todo/add_todo_sheet.dart';
 import '../ai/ai_providers.dart';
 import '../ai/checklist/ai_checklist.dart';
+import '../ai/next_step/ai_next_step.dart';
 import '../ai/widgets/ai_inline_error.dart';
+import '../calendar/calendar_providers.dart';
 import '../category/groups_controller.dart';
 import '../move_todo/move_todo_sheet.dart';
 import '../outline/tree_providers.dart';
@@ -190,6 +194,7 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
       // 앞 항목의 AI 결과가 새 항목에 적용되지 않게.
       _aiChecklistBusy = false;
       _aiChecklistFailed = false;
+      _resetNextSteps();
     }
   }
 
@@ -292,6 +297,96 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
       messenger,
       message: '설명을 목록 $count개로 바꿨어요.',
       onUndo: () => actions.restoreDescription(current),
+    );
+  }
+
+  /// T4 — 받은 제안. 비어 있지 않은 목록만 둔다(있는 동안 카드를 유지하는 래치).
+  List<AiNextStep>? _nextSteps;
+  bool _nextStepLoading = false;
+  bool _nextStepFailed = false;
+
+  /// 응답은 왔지만 쓸 만한 제안이 0개.
+  bool _nextStepEmpty = false;
+
+  /// 하위로 추가한 제안의 번호 — "추가됨" 으로 바뀐다.
+  final Set<int> _addedStepIndexes = {};
+
+  void _resetNextSteps() {
+    _nextSteps = null;
+    _nextStepLoading = false;
+    _nextStepFailed = false;
+    _nextStepEmpty = false;
+    _addedStepIndexes.clear();
+  }
+
+  /// T4 — 장기 목표·아이디어에서 오늘 시작할 첫 행동 제안 받기.
+  Future<void> _suggestNextSteps(Todo live, List<Todo> all) async {
+    if (_nextStepLoading) return;
+    final gateway = ref.read(aiGatewayProvider);
+    if (gateway == null) {
+      setState(() => _nextStepFailed = true);
+      return;
+    }
+    final id = live.id;
+    setState(() {
+      _nextStepLoading = true;
+      _nextStepFailed = false;
+      _nextStepEmpty = false;
+    });
+    final steps = await ref
+        .read(aiNextStepServiceProvider)
+        .suggest(gateway, live, path: _ancestorTitles(live, all));
+    // 기다리는 사이 인스펙터가 다른 항목으로 바뀌었으면 버린다.
+    if (!mounted || widget.parent.id != id) return;
+    setState(() {
+      _nextStepLoading = false;
+      _nextStepFailed = steps == null;
+      _nextStepEmpty = steps != null && steps.isEmpty;
+      _nextSteps = (steps == null || steps.isEmpty) ? null : steps;
+      _addedStepIndexes.clear();
+    });
+  }
+
+  /// 제안 [index] 를 하위 항목으로 — 기존 하위 추가 경로(형제 맨 위), 되돌리기 = 삭제.
+  ///
+  /// [today] 면 오늘(로컬 자정, 종일)로 잡는다 — '오늘' 화면은 날짜 있는 항목만 보인다.
+  Future<void> _addNextStep(Todo live, int index, {required bool today}) async {
+    final steps = _nextSteps;
+    if (steps == null || index >= steps.length) return;
+    if (_addedStepIndexes.contains(index)) return;
+    final step = steps[index];
+    final id = live.id;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final actions = ref.read(todoActionsProvider);
+    setState(() => _addedStepIndexes.add(index));
+    final n = ref.read(nowProvider)().toLocal();
+    // AI 가 만든 짧은 행동은 Google Calendar 에 올리지 않는다(정리 화면 _schedule 과
+    // 같은 판단). 올리고 싶으면 편집 시트 토글로. 바로 다음 upsert 1회에만 먹는다.
+    ref.read(calendarIntentProvider)(false);
+    final result = await ref
+        .read(addTodoControllerProvider)
+        .add(
+          AddTodoSubmission(
+            title: step.title,
+            category: live.category,
+            parentId: live.id,
+            dueAt: today ? DateTime(n.year, n.month, n.day) : null,
+            isAllDay: today,
+            addToCalendar: false,
+          ),
+        );
+    if (messenger == null || !messenger.mounted) return;
+    showUndoSnackbarOn(
+      messenger,
+      message: today
+          ? '"${step.title}" 하위로 추가하고 오늘로 잡았어요.'
+          : '"${step.title}" 하위로 추가했어요.',
+      onUndo: () async {
+        await actions.delete(result.todo);
+        if (mounted && widget.parent.id == id && identical(_nextSteps, steps)) {
+          setState(() => _addedStepIndexes.remove(index));
+        }
+      },
     );
   }
 
@@ -425,6 +520,33 @@ class _TodoDetailViewState extends ConsumerState<TodoDetailView> {
                     count: checklist.items.length,
                     accent: accent,
                     onConvert: () => _checklistToChildren(live, checklist),
+                  ),
+                ),
+              ),
+            // 첫 행동을 하위로 넣으면 하위가 생겨도 남은 제안까지 사라지지 않게 —
+            // 결과가 있는 동안은 계속 보인다.
+            if (!gone &&
+                ref.watch(aiReadinessProvider).isReady &&
+                AiNextStepService.applies(live) &&
+                (children.isEmpty || _nextSteps != null || _nextStepLoading))
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTokens.space16,
+                  AppTokens.space8,
+                  AppTokens.space16,
+                  0,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: _NextStepCard(
+                    accent: accent,
+                    steps: _nextSteps,
+                    loading: _nextStepLoading,
+                    failed: _nextStepFailed,
+                    empty: _nextStepEmpty,
+                    added: _addedStepIndexes,
+                    onSuggest: () => _suggestNextSteps(live, allTodos),
+                    onAdd: (i, {required today}) =>
+                        _addNextStep(live, i, today: today),
                   ),
                 ),
               ),
@@ -1113,6 +1235,233 @@ class _AiChecklistAction extends StatelessWidget {
         ),
         if (failed && !busy) const AiInlineError(),
       ],
+    );
+  }
+}
+
+/// [todo] 의 조상 제목 — 바깥 → 안쪽. 끊긴 부모·사이클은 거기서 멈춘다.
+List<String> _ancestorTitles(Todo todo, List<Todo> all) {
+  final byId = {for (final t in all) t.id: t};
+  final path = <String>[];
+  final seen = <String>{todo.id};
+  var pid = todo.parentId;
+  while (pid != null && seen.add(pid)) {
+    final p = byId[pid];
+    if (p == null) break;
+    path.insert(0, p.title);
+    pid = p.parentId;
+  }
+  return path;
+}
+
+/// T4 "다음 한 걸음" 카드 — 장기 목표·아이디어 상세에서 오늘 시작할 첫 행동 제안.
+///
+/// 누르기 전엔 아무것도 바꾸지 않는다. 행마다 [하위로 추가] · [하위 + 오늘].
+class _NextStepCard extends StatelessWidget {
+  const _NextStepCard({
+    required this.accent,
+    required this.steps,
+    required this.loading,
+    required this.failed,
+    required this.empty,
+    required this.added,
+    required this.onSuggest,
+    required this.onAdd,
+  });
+
+  final Color accent;
+  final List<AiNextStep>? steps;
+  final bool loading;
+  final bool failed;
+  final bool empty;
+  final Set<int> added;
+  final VoidCallback onSuggest;
+  final void Function(int index, {required bool today}) onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final steps = this.steps;
+    return Container(
+      key: const ValueKey('detail-next-step-card'),
+      padding: const EdgeInsets.fromLTRB(
+        AppTokens.space12,
+        AppTokens.space4,
+        AppTokens.space4,
+        AppTokens.space8,
+      ),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppTokens.radiusM),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 18, color: accent),
+              const SizedBox(width: AppTokens.space8),
+              Expanded(
+                child: Text(
+                  '다음 한 걸음',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (steps == null)
+                TextButton.icon(
+                  key: const ValueKey('detail-ai-next-step'),
+                  onPressed: loading ? null : onSuggest,
+                  icon: loading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.lightbulb_outline, size: 18),
+                  label: Text(loading ? '제안 만드는 중…' : '제안 받기'),
+                ),
+            ],
+          ),
+          if (steps == null && !loading && !failed && !empty)
+            Padding(
+              padding: const EdgeInsets.only(right: AppTokens.space8),
+              child: Text(
+                '오늘 30분 안에 시작할 첫 행동을 AI 가 골라 줘요.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          if (failed && !loading) const AiInlineError(),
+          if (empty && !loading) const AiInlineError(message: '제안을 만들지 못했어요.'),
+          if (steps != null)
+            for (var i = 0; i < steps.length; i++)
+              _NextStepRow(
+                index: i,
+                step: steps[i],
+                accent: accent,
+                added: added.contains(i),
+                onAdd: () => onAdd(i, today: false),
+                onAddToday: () => onAdd(i, today: true),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 제안 한 줄 — 제목 · "약 N분 · 이유" · [하위로 추가] [하위 + 오늘].
+///
+/// 폰은 좁아 버튼을 짧은 라벨로 메타 줄 옆에, 데스크탑은 온전한 라벨을 아래 줄에.
+class _NextStepRow extends StatelessWidget {
+  const _NextStepRow({
+    required this.index,
+    required this.step,
+    required this.accent,
+    required this.added,
+    required this.onAdd,
+    required this.onAddToday,
+  });
+
+  final int index;
+  final AiNextStep step;
+  final Color accent;
+  final bool added;
+  final VoidCallback onAdd;
+  final VoidCallback onAddToday;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final mobile = AppPlatform.isMobile;
+    final why = step.why;
+    final meta = Text(
+      why == null ? '약 ${step.minutes}분' : '약 ${step.minutes}분 · $why',
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    );
+    final buttonStyle = mobile
+        ? TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: AppTokens.space8),
+          )
+        : null;
+    final Widget trailing = added
+        ? Padding(
+            key: ValueKey('next-step-added-$index'),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppTokens.space8,
+              vertical: AppTokens.space8,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_rounded, size: 16, color: accent),
+                const SizedBox(width: AppTokens.space4),
+                Text(
+                  '추가됨',
+                  style: theme.textTheme.labelMedium?.copyWith(color: accent),
+                ),
+              ],
+            ),
+          )
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextButton.icon(
+                key: ValueKey('next-step-add-$index'),
+                style: buttonStyle,
+                onPressed: onAdd,
+                icon: const Icon(Icons.subdirectory_arrow_right, size: 16),
+                label: Text(mobile ? '하위' : '하위로 추가'),
+              ),
+              TextButton.icon(
+                key: ValueKey('next-step-today-$index'),
+                style: buttonStyle,
+                onPressed: onAddToday,
+                icon: const Icon(Icons.today_outlined, size: 16),
+                label: Text(mobile ? '오늘' : '하위 + 오늘'),
+              ),
+            ],
+          );
+    return Padding(
+      key: ValueKey('next-step-row-$index'),
+      padding: const EdgeInsets.only(top: AppTokens.space8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: AppTokens.space8),
+            child: Text(
+              step.title,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (mobile)
+            Row(
+              children: [
+                Expanded(child: meta),
+                trailing,
+              ],
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.only(right: AppTokens.space8),
+              child: meta,
+            ),
+            Align(alignment: Alignment.centerRight, child: trailing),
+          ],
+        ],
+      ),
     );
   }
 }
