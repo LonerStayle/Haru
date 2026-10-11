@@ -43,7 +43,7 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
-                    android:scheme="com.goldenplanet.solo_todo"
+                    android:scheme="haru-ai"
                     android:host="ai-return"/>
             </intent-filter>
         </activity>

@@ -1,8 +1,11 @@
 /// 로그인 콜백 결과 페이지 (사양서 A.6) — 브라우저에 보여 준다.
 enum SiwcCallbackPageKind { ok, denied, error, returnToApp }
 
-/// 결과 페이지의 "하루로 돌아가기" — Android 앱 링크(매니페스트의 ai-return 필터).
-const siwcReturnToAppUrl = 'com.goldenplanet.solo_todo://ai-return';
+/// 결과 페이지의 "하루로 돌아가기" — Android 앱 링크(매니페스트의 haru-ai://ai-return 필터).
+/// 패키지 이름(`solo_todo`)은 `_` 때문에 URI scheme 이 될 수 없어(브라우저가 상대 경로로
+/// 읽고 404), 별도 scheme 을 intent: 링크로 감싼다 — Chrome·삼성 인터넷 모두 이 형식을 연다.
+const siwcReturnToAppUrl =
+    'intent://ai-return#Intent;scheme=haru-ai;package=com.goldenplanet.solo_todo;end';
 
 /// [code] 는 실패 원인 이름(예: `clientMismatch`) — 실기기에서 어느 단계가 막혔는지 화면만
 /// 보고 알 수 있게 작게 덧붙인다. 토큰·code 같은 비밀은 넣지 않는다.

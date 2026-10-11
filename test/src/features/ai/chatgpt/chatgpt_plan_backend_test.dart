@@ -726,7 +726,13 @@ void main() {
 
       final html = await page.future;
       expect(html, contains('하루로 돌아가 주세요'));
-      expect(html, contains('com.goldenplanet.solo_todo://ai-return'));
+      expect(
+        html,
+        contains(
+          'intent://ai-return#Intent;scheme=haru-ai;'
+          'package=com.goldenplanet.solo_todo;end',
+        ),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(tokenCalls, isEmpty, reason: '뒤에 있는 동안엔 네트워크가 막혀 교환하지 않는다');
 
